@@ -13,6 +13,7 @@ concurrency:
 
 env:
   PYTHON_VERSION: "3.12"
+  PYTHONPATH: "src"
 
 jobs:
   lint:
@@ -30,7 +31,7 @@ jobs:
         run: uv python install ${{ env.PYTHON_VERSION }}
 
       - name: Install dependencies
-        run: uv sync --only-dev
+        run: uv sync --only-group dev
 
       - name: Run ruff linter
         run: uv run ruff check src/
@@ -53,7 +54,7 @@ jobs:
         run: uv python install ${{ env.PYTHON_VERSION }}
 
       - name: Install dependencies
-        run: uv sync --only-dev
+        run: uv sync --only-group dev
 
       - name: Run ty type checker
         run: uv run ty check src/
@@ -73,7 +74,7 @@ jobs:
         run: uv python install ${{ env.PYTHON_VERSION }}
 
       - name: Install dependencies
-        run: uv sync --only-dev
+        run: uv sync --only-group dev
 
       - name: Run bandit security scanner
         run: uv run bandit -c pyproject.toml -r src/
@@ -93,7 +94,7 @@ jobs:
         run: uv python install ${{ env.PYTHON_VERSION }}
 
       - name: Install dependencies
-        run: uv sync --only-dev
+        run: uv sync --only-group dev
 
       - name: Run tests with coverage
         run: uv run pytest tests/ -v --cov=src/app --cov-report=xml --cov-report=term-missing

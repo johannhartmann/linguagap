@@ -36,8 +36,8 @@ Homepage = "https://github.com/johannhartmann/linguagap"
 Repository = "https://github.com/johannhartmann/linguagap"
 Issues = "https://github.com/johannhartmann/linguagap/issues"
 
-[tool.uv]
-dev-dependencies = [
+[dependency-groups]
+dev = [
     "ruff>=0.8.0",
     "ty>=0.0.1a3",
     "bandit>=1.7.0",
