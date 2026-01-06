@@ -9,7 +9,7 @@ async def main():
     uri = "ws://localhost:8000/ws"
     sample_rate = 16000
     frame_duration_ms = 100
-    total_duration_sec = 10
+    total_duration_sec = 60
 
     samples_per_frame = int(sample_rate * frame_duration_ms / 1000)
     total_frames = int(total_duration_sec * 1000 / frame_duration_ms)

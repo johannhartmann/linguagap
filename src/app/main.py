@@ -1,17 +1,44 @@
 import os
 import tempfile
+from contextlib import asynccontextmanager
 from pathlib import Path
 
+import numpy as np
 from fastapi import FastAPI, File, Form, UploadFile, WebSocket
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.asr import transcribe_wav_path
-from app.mt import translate_texts
+from app.asr import get_model, transcribe_wav_path
+from app.mt import get_tokenizer, get_translator, translate_texts
 from app.scripts.asr_smoke import generate_silence_wav
-from app.streaming import handle_websocket
+from app.streaming import get_metrics, handle_websocket
 
-app = FastAPI(title="LinguaGap", description="Real-time speech transcription and translation")
+
+def warmup_models():
+    print("Warming up ASR model...")
+    asr_model = get_model()
+    silence = np.zeros(16000, dtype=np.float32)
+    list(asr_model.transcribe(silence))
+    print("ASR model ready")
+
+    print("Warming up MT model...")
+    get_translator()
+    get_tokenizer()
+    translate_texts(["Hello"], src_lang="en", tgt_lang="de")
+    print("MT model ready")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    warmup_models()
+    yield
+
+
+app = FastAPI(
+    title="LinguaGap",
+    description="Real-time speech transcription and translation",
+    lifespan=lifespan,
+)
 
 STATIC_DIR = Path(__file__).parent.parent.parent / "static"
 if STATIC_DIR.exists():
@@ -26,6 +53,11 @@ async def root():
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.get("/metrics")
+async def metrics():
+    return get_metrics()
 
 
 @app.get("/asr_smoke")
