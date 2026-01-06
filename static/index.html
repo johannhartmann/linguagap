@@ -81,6 +81,8 @@
             border-radius: 12px;
             padding: 20px;
             min-height: 400px;
+            max-height: 70vh;
+            overflow-y: auto;
         }
         .pane h2 {
             font-size: 1.2rem;
@@ -203,6 +205,18 @@
                 deDiv.dataset.id = seg.id;
                 germanTranscript.appendChild(deDiv);
             });
+
+            // Auto-scroll to bottom
+            sourceTranscript.scrollTop = sourceTranscript.scrollHeight;
+            germanTranscript.scrollTop = germanTranscript.scrollHeight;
+        }
+
+        function updateTranslation(segmentId, translation) {
+            // Find the translation element by segment ID and update it
+            const deDiv = germanTranscript.querySelector(`[data-id="${segmentId}"]`);
+            if (deDiv) {
+                deDiv.textContent = translation || '...';
+            }
         }
 
         function downsampleBuffer(buffer, inputSampleRate, outputSampleRate) {
@@ -232,6 +246,19 @@
         }
 
         async function startRecording() {
+            // Check for secure context (HTTPS or localhost)
+            if (!window.isSecureContext) {
+                setStatus('Error: Microphone requires HTTPS or localhost access', 'error');
+                alert('Microphone access requires a secure context.\n\nOptions:\n1. Access via http://localhost:8000\n2. Use SSH tunnel: ssh -L 8000:localhost:8000 user@server\n3. Launch Chrome with: --unsafely-treat-insecure-origin-as-secure=http://' + window.location.host);
+                return;
+            }
+
+            // Check if getUserMedia is available
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                setStatus('Error: Browser does not support microphone access', 'error');
+                return;
+            }
+
             try {
                 setStatus('Requesting microphone access...', '');
 
@@ -276,6 +303,9 @@
                             if (data.src_lang && data.src_lang !== 'unknown') {
                                 setStatus(`Recording... (detected: ${data.src_lang})`, 'connected');
                             }
+                        } else if (data.type === 'translation') {
+                            // Update translation for specific segment
+                            updateTranslation(data.segment_id, data.de);
                         }
                     } catch (e) {
                         console.error('Parse error:', e);

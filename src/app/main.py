@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.asr import get_model, transcribe_wav_path
-from app.mt import get_tokenizer, get_translator, translate_texts
+from app.mt import get_llm, translate_texts
 from app.scripts.asr_smoke import generate_silence_wav
 from app.streaming import get_metrics, handle_websocket
 
@@ -22,8 +22,7 @@ def warmup_models():
     print("ASR model ready")
 
     print("Warming up MT model...")
-    get_translator()
-    get_tokenizer()
+    get_llm()
     translate_texts(["Hello"], src_lang="en", tgt_lang="de")
     print("MT model ready")
 

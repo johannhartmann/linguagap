@@ -10,7 +10,6 @@ class Segment:
     abs_start: float
     abs_end: float
     src: str
-    de: str
     final: bool
 
 
@@ -25,12 +24,18 @@ class SegmentTracker:
         hyp_segments: list[dict],
         window_start: float,
         now_sec: float,
-        translate_fn,
-        src_lang: str,
-    ) -> list[Segment]:
+    ) -> tuple[list[Segment], list[Segment]]:
+        """
+        Process hypothesis segments and return (all_segments, newly_finalized).
+
+        Returns:
+            all_segments: Complete list of finalized + live segments
+            newly_finalized: Segments that just became final (need translation)
+        """
         stability_threshold = now_sec - STABILITY_SEC
 
         live_segments = []
+        newly_finalized = []
 
         for seg in hyp_segments:
             abs_start = window_start + seg["start"]
@@ -44,35 +49,26 @@ class SegmentTracker:
 
             if is_final:
                 if src_text:
-                    de_text = translate_fn([src_text], src_lang=src_lang, tgt_lang="de")[0]
-                else:
-                    de_text = ""
-
-                segment = Segment(
-                    id=self.next_id,
-                    abs_start=abs_start,
-                    abs_end=abs_end,
-                    src=src_text,
-                    de=de_text,
-                    final=True,
-                )
-                self.finalized_segments.append(segment)
-                self.finalized_end_time = abs_end
-                self.next_id += 1
+                    segment = Segment(
+                        id=self.next_id,
+                        abs_start=abs_start,
+                        abs_end=abs_end,
+                        src=src_text,
+                        final=True,
+                    )
+                    self.finalized_segments.append(segment)
+                    newly_finalized.append(segment)
+                    self.finalized_end_time = abs_end
+                    self.next_id += 1
             else:
                 if src_text:
-                    de_text = translate_fn([src_text], src_lang=src_lang, tgt_lang="de")[0]
-                else:
-                    de_text = ""
+                    segment = Segment(
+                        id=self.next_id + len(live_segments),
+                        abs_start=abs_start,
+                        abs_end=abs_end,
+                        src=src_text,
+                        final=False,
+                    )
+                    live_segments.append(segment)
 
-                segment = Segment(
-                    id=self.next_id + len(live_segments),
-                    abs_start=abs_start,
-                    abs_end=abs_end,
-                    src=src_text,
-                    de=de_text,
-                    final=False,
-                )
-                live_segments.append(segment)
-
-        return self.finalized_segments + live_segments
+        return self.finalized_segments + live_segments, newly_finalized

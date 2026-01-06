@@ -11,7 +11,7 @@ from fastapi import WebSocket
 
 from app.asr import get_model
 from app.mt import translate_texts
-from app.streaming_policy import SegmentTracker
+from app.streaming_policy import Segment, SegmentTracker
 
 WINDOW_SEC = float(os.getenv("WINDOW_SEC", "8.0"))
 TICK_SEC = float(os.getenv("TICK_SEC", "0.5"))
@@ -49,6 +49,7 @@ class StreamingSession:
         self.detected_lang: str | None = None
         self.segment_tracker = SegmentTracker()
         self.dropped_frames = 0
+        self.translations: dict[int, str] = {}  # segment_id -> translation
 
     def add_audio(self, pcm16_bytes: bytes):
         self.audio_buffer.append(pcm16_bytes)
@@ -91,23 +92,25 @@ class StreamingSession:
         return len(all_bytes) / 2 / self.sample_rate
 
 
-def transcribe_with_segments(session: StreamingSession) -> dict:
+def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
+    """Run ASR and return (all_segments, newly_finalized)."""
     tick_start = time.time()
 
     audio, window_start = session.get_window_audio()
     now_sec = session.get_current_time()
 
     if len(audio) < 1600:
-        return {
-            "type": "segments",
-            "t": now_sec,
-            "src_lang": session.detected_lang or "unknown",
-            "segments": [asdict(s) for s in session.segment_tracker.finalized_segments],
-        }
+        return list(session.segment_tracker.finalized_segments), []
 
     asr_start = time.time()
     model = get_model()
-    asr_segments, info = model.transcribe(audio)
+    asr_segments, info = model.transcribe(
+        audio,
+        vad_filter=True,
+        vad_parameters={"min_silence_duration_ms": 300},
+        no_speech_threshold=0.6,
+        condition_on_previous_text=False,
+    )
     asr_time = time.time() - asr_start
     _metrics["asr_times"].append(asr_time)
 
@@ -118,53 +121,123 @@ def transcribe_with_segments(session: StreamingSession) -> dict:
 
     hyp_segments = []
     for seg in asr_segments:
+        text = seg.text.strip()
+        if len(text) < 2:
+            continue
+        words = text.split()
+        if len(words) > 1 and len(set(words)) == 1:
+            continue
         hyp_segments.append({
             "start": seg.start,
             "end": seg.end,
-            "text": seg.text,
+            "text": text,
         })
 
-    mt_start = time.time()
-    segments = session.segment_tracker.update_from_hypothesis(
+    all_segments, newly_finalized = session.segment_tracker.update_from_hypothesis(
         hyp_segments=hyp_segments,
         window_start=window_start,
         now_sec=now_sec,
-        translate_fn=translate_texts,
-        src_lang=session.detected_lang or "en",
     )
-    mt_time = time.time() - mt_start
-    _metrics["mt_times"].append(mt_time)
 
     tick_time = time.time() - tick_start
     _metrics["tick_times"].append(tick_time)
 
-    return {
-        "type": "segments",
-        "t": now_sec,
-        "src_lang": session.detected_lang or "unknown",
-        "segments": [asdict(s) for s in segments],
-    }
+    return all_segments, newly_finalized
+
+
+def run_translation(text: str, src_lang: str) -> str:
+    """Translate a single text."""
+    mt_start = time.time()
+    result = translate_texts([text], src_lang=src_lang, tgt_lang="de")[0]
+    mt_time = time.time() - mt_start
+    _metrics["mt_times"].append(mt_time)
+    return result
 
 
 async def handle_websocket(websocket: WebSocket):
     await websocket.accept()
 
     session: StreamingSession | None = None
-    tick_task: asyncio.Task | None = None
+    asr_task: asyncio.Task | None = None
+    mt_task: asyncio.Task | None = None
     running = True
+    translation_queue: asyncio.Queue[Segment] = asyncio.Queue()
 
-    async def tick_loop():
+    async def asr_loop():
+        """ASR loop - runs independently, sends segments immediately."""
         nonlocal running
         while running:
             await asyncio.sleep(TICK_SEC)
             if session is not None and running:
                 loop = asyncio.get_event_loop()
                 try:
-                    result = await loop.run_in_executor(_executor, transcribe_with_segments, session)
+                    all_segments, newly_finalized = await loop.run_in_executor(
+                        _executor, run_asr, session
+                    )
+
                     if running:
-                        await websocket.send_text(json.dumps(result))
-                except Exception:
-                    pass
+                        # Build segments with translations where available
+                        segments_data = []
+                        for seg in all_segments:
+                            seg_dict = asdict(seg)
+                            seg_dict["de"] = session.translations.get(seg.id, "...")
+                            segments_data.append(seg_dict)
+
+                        # Send ASR results immediately
+                        await websocket.send_text(json.dumps({
+                            "type": "segments",
+                            "t": session.get_current_time(),
+                            "src_lang": session.detected_lang or "unknown",
+                            "segments": segments_data,
+                        }))
+
+                        # Queue newly finalized segments for translation
+                        for seg in newly_finalized:
+                            await translation_queue.put(seg)
+
+                except Exception as e:
+                    print(f"ASR tick error: {e}")
+
+    async def mt_loop():
+        """Translation loop - processes queue, sends updates when ready."""
+        nonlocal running
+        while running:
+            try:
+                # Wait for a segment to translate (with timeout to check running)
+                try:
+                    segment = await asyncio.wait_for(
+                        translation_queue.get(), timeout=0.5
+                    )
+                except asyncio.TimeoutError:
+                    continue
+
+                if not running or session is None:
+                    break
+
+                # Run translation in executor
+                loop = asyncio.get_event_loop()
+                src_lang = session.detected_lang or "en"
+
+                try:
+                    translation = await loop.run_in_executor(
+                        _executor, run_translation, segment.src, src_lang
+                    )
+
+                    # Store translation
+                    session.translations[segment.id] = translation
+
+                    if running:
+                        # Send translation update
+                        await websocket.send_text(json.dumps({
+                            "type": "translation",
+                            "segment_id": segment.id,
+                            "de": translation,
+                        }))
+                except Exception as e:
+                    print(f"Translation error for segment {segment.id}: {e}")
+
+            except Exception as e:
+                print(f"MT loop error: {e}")
 
     try:
         while True:
@@ -179,19 +252,27 @@ async def handle_websocket(websocket: WebSocket):
                     sample_rate = data.get("sample_rate", 16000)
                     src_lang = data.get("src_lang", "auto")
                     session = StreamingSession(sample_rate=sample_rate, src_lang=src_lang)
-                    tick_task = asyncio.create_task(tick_loop())
+                    asr_task = asyncio.create_task(asr_loop())
+                    mt_task = asyncio.create_task(mt_loop())
+                    print(f"Session started: sample_rate={sample_rate}, src_lang={src_lang}")
 
             elif "bytes" in message:
                 if session is not None:
                     session.add_audio(message["bytes"])
 
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"WebSocket error: {e}")
     finally:
         running = False
-        if tick_task:
-            tick_task.cancel()
+        if asr_task:
+            asr_task.cancel()
             try:
-                await tick_task
+                await asr_task
+            except asyncio.CancelledError:
+                pass
+        if mt_task:
+            mt_task.cancel()
+            try:
+                await mt_task
             except asyncio.CancelledError:
                 pass
