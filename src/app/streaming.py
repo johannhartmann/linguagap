@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import json
 import os
 import time
@@ -127,11 +128,13 @@ def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
         words = text.split()
         if len(words) > 1 and len(set(words)) == 1:
             continue
-        hyp_segments.append({
-            "start": seg.start,
-            "end": seg.end,
-            "text": text,
-        })
+        hyp_segments.append(
+            {
+                "start": seg.start,
+                "end": seg.end,
+                "text": text,
+            }
+        )
 
     all_segments, newly_finalized = session.segment_tracker.update_from_hypothesis(
         hyp_segments=hyp_segments,
@@ -184,12 +187,16 @@ async def handle_websocket(websocket: WebSocket):
                             segments_data.append(seg_dict)
 
                         # Send ASR results immediately
-                        await websocket.send_text(json.dumps({
-                            "type": "segments",
-                            "t": session.get_current_time(),
-                            "src_lang": session.detected_lang or "unknown",
-                            "segments": segments_data,
-                        }))
+                        await websocket.send_text(
+                            json.dumps(
+                                {
+                                    "type": "segments",
+                                    "t": session.get_current_time(),
+                                    "src_lang": session.detected_lang or "unknown",
+                                    "segments": segments_data,
+                                }
+                            )
+                        )
 
                         # Queue newly finalized segments for translation
                         for seg in newly_finalized:
@@ -205,10 +212,8 @@ async def handle_websocket(websocket: WebSocket):
             try:
                 # Wait for a segment to translate (with timeout to check running)
                 try:
-                    segment = await asyncio.wait_for(
-                        translation_queue.get(), timeout=0.5
-                    )
-                except asyncio.TimeoutError:
+                    segment = await asyncio.wait_for(translation_queue.get(), timeout=0.5)
+                except TimeoutError:
                     continue
 
                 if not running or session is None:
@@ -228,11 +233,15 @@ async def handle_websocket(websocket: WebSocket):
 
                     if running:
                         # Send translation update
-                        await websocket.send_text(json.dumps({
-                            "type": "translation",
-                            "segment_id": segment.id,
-                            "de": translation,
-                        }))
+                        await websocket.send_text(
+                            json.dumps(
+                                {
+                                    "type": "translation",
+                                    "segment_id": segment.id,
+                                    "de": translation,
+                                }
+                            )
+                        )
                 except Exception as e:
                     print(f"Translation error for segment {segment.id}: {e}")
 
@@ -266,13 +275,9 @@ async def handle_websocket(websocket: WebSocket):
         running = False
         if asr_task:
             asr_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await asr_task
-            except asyncio.CancelledError:
-                pass
         if mt_task:
             mt_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await mt_task
-            except asyncio.CancelledError:
-                pass

@@ -1,5 +1,4 @@
 import json
-import struct
 import tempfile
 import wave
 

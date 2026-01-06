@@ -67,12 +67,9 @@ def translate_texts(texts: list[str], src_lang: str, tgt_lang: str = "de") -> li
         messages = [
             {
                 "role": "system",
-                "content": f"You are a translator. Translate the user's {src_name} text to {tgt_name}. Output only the translation, nothing else. Do not explain, do not add notes."
+                "content": f"You are a translator. Translate the user's {src_name} text to {tgt_name}. Output only the translation, nothing else. Do not explain, do not add notes.",
             },
-            {
-                "role": "user",
-                "content": text
-            }
+            {"role": "user", "content": text},
         ]
 
         output = llm.create_chat_completion(

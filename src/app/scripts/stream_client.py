@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import json
 
 import numpy as np
@@ -40,7 +41,9 @@ async def main():
 
                     if data.get("type") == "segments":
                         segments = data.get("segments", [])
-                        print(f"t={data['t']:.2f}s, lang={data['src_lang']}, {len(segments)} segment(s):")
+                        print(
+                            f"t={data['t']:.2f}s, lang={data['src_lang']}, {len(segments)} segment(s):"
+                        )
                         for seg in segments:
                             seg_id = seg["id"]
                             final = seg["final"]
@@ -71,10 +74,8 @@ async def main():
         await asyncio.sleep(10)
 
         receiver.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await receiver
-        except asyncio.CancelledError:
-            pass
 
     print(f"\nTotal messages received: {len(messages_received)}")
     print(f"Unique segment IDs seen: {sorted(seen_segment_ids)}")

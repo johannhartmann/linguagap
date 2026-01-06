@@ -28,7 +28,7 @@ def warmup_models():
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(_app: FastAPI):
     warmup_models()
     yield
 
@@ -101,13 +101,15 @@ async def transcribe_translate(
         else:
             de_text = ""
 
-        segments.append({
-            "id": i,
-            "start": seg["start"],
-            "end": seg["end"],
-            "src": src_text,
-            "de": de_text,
-        })
+        segments.append(
+            {
+                "id": i,
+                "start": seg["start"],
+                "end": seg["end"],
+                "src": src_text,
+                "de": de_text,
+            }
+        )
 
     os.unlink(audio_path)
 

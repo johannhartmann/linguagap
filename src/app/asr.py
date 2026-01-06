@@ -27,11 +27,13 @@ def transcribe_wav_path(path: str) -> dict[str, Any]:
 
     result_segments = []
     for seg in segments:
-        result_segments.append({
-            "start": seg.start,
-            "end": seg.end,
-            "text": seg.text,
-        })
+        result_segments.append(
+            {
+                "start": seg.start,
+                "end": seg.end,
+                "text": seg.text,
+            }
+        )
 
     return {
         "language": info.language,
