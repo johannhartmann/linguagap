@@ -3,6 +3,7 @@ import tempfile
 from fastapi import FastAPI
 
 from app.asr import transcribe_wav_path
+from app.mt import translate_texts
 from app.scripts.asr_smoke import generate_silence_wav
 
 app = FastAPI(title="LinguaGap", description="Real-time speech transcription and translation")
@@ -21,3 +22,10 @@ async def asr_smoke():
     generate_silence_wav(wav_path, duration_sec=2.0)
     result = transcribe_wav_path(wav_path)
     return result
+
+
+@app.get("/mt_smoke")
+async def mt_smoke():
+    texts = ["Hello world!"]
+    result = translate_texts(texts, src_lang="en", tgt_lang="de")
+    return {"input": texts, "output": result}
