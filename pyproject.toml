@@ -45,6 +45,7 @@ dev = [
     "pytest>=8.0.0",
     "pytest-cov>=6.0.0",
     "pytest-asyncio>=0.24.0",
+    "httpx>=0.27.0",
 ]
 
 [tool.pytest.ini_options]
@@ -104,5 +105,5 @@ python-version = "3.12"
 [tool.ty.rules]
 unresolved-import = "ignore"
 invalid-argument-type = "ignore"  # llama-cpp-python complex types
-not-subscriptable = "ignore"  # llama-cpp-python return types
+non-subscriptable = "ignore"  # llama-cpp-python return types
 possibly-missing-attribute = "ignore"  # llama-cpp-python nullable fields
