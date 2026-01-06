@@ -1,11 +1,12 @@
 import os
 import tempfile
 
-from fastapi import FastAPI, File, Form, UploadFile
+from fastapi import FastAPI, File, Form, UploadFile, WebSocket
 
 from app.asr import transcribe_wav_path
 from app.mt import translate_texts
 from app.scripts.asr_smoke import generate_silence_wav
+from app.streaming import handle_websocket
 
 app = FastAPI(title="LinguaGap", description="Real-time speech transcription and translation")
 
@@ -71,3 +72,8 @@ async def transcribe_translate(
         "src_lang_detected": detected_lang,
         "segments": segments,
     }
+
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await handle_websocket(websocket)
