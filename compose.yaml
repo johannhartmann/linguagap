@@ -14,8 +14,12 @@ services:
     build: .
     ports:
       - "8000:8000"
+    volumes:
+      - hf-cache:/data/hf
     environment:
       - PYTHONUNBUFFERED=1
+      - HF_HOME=/data/hf
+      - HF_HUB_DISABLE_TELEMETRY=1
     deploy:
       resources:
         reservations:
@@ -23,3 +27,6 @@ services:
             - driver: nvidia
               capabilities: [gpu]
               count: 1
+
+volumes:
+  hf-cache:
