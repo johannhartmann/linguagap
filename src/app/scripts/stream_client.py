@@ -20,6 +20,7 @@ async def main():
     print()
 
     messages_received = []
+    seen_segment_ids = set()
 
     async with websockets.connect(uri) as ws:
         config = {
@@ -36,14 +37,21 @@ async def main():
                 async for message in ws:
                     data = json.loads(message)
                     messages_received.append(data)
-                    asr_text = data.get("asr_text", "")
-                    de_text = data.get("de_text", "")
-                    if len(asr_text) > 50:
-                        asr_text = asr_text[:50] + "..."
-                    if len(de_text) > 50:
-                        de_text = de_text[:50] + "..."
-                    print(f"Received: t={data['t']:.2f}s, lang={data['src_lang']}, "
-                          f"asr='{asr_text}', de='{de_text}'")
+
+                    if data.get("type") == "segments":
+                        segments = data.get("segments", [])
+                        print(f"t={data['t']:.2f}s, lang={data['src_lang']}, {len(segments)} segment(s):")
+                        for seg in segments:
+                            seg_id = seg["id"]
+                            final = seg["final"]
+                            src = seg["src"][:30] + "..." if len(seg["src"]) > 30 else seg["src"]
+                            de = seg["de"][:30] + "..." if len(seg["de"]) > 30 else seg["de"]
+                            status = "FINAL" if final else "LIVE"
+                            print(f"  [{seg_id}] {status}: '{src}' -> '{de}'")
+                            seen_segment_ids.add(seg_id)
+                    else:
+                        print(f"Received: {data}")
+
             except websockets.exceptions.ConnectionClosed:
                 pass
             except Exception as e:
@@ -57,7 +65,7 @@ async def main():
             await asyncio.sleep(frame_duration_ms / 1000)
 
             if (i + 1) % 10 == 0:
-                print(f"Sent {(i + 1) * frame_duration_ms / 1000:.1f}s of audio")
+                print(f"--- Sent {(i + 1) * frame_duration_ms / 1000:.1f}s of audio ---")
 
         print("\nFinished streaming, waiting for final responses...")
         await asyncio.sleep(10)
@@ -69,6 +77,7 @@ async def main():
             pass
 
     print(f"\nTotal messages received: {len(messages_received)}")
+    print(f"Unique segment IDs seen: {sorted(seen_segment_ids)}")
     print("Stream client test completed!")
 
 
