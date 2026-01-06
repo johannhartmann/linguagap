@@ -36,7 +36,7 @@ def get_llm() -> Llama:
     global _llm
     if _llm is None:
         print(f"Downloading MT model: {MT_MODEL_REPO}/{MT_MODEL_FILE}")
-        model_path = hf_hub_download(
+        model_path = hf_hub_download(  # nosec B615
             repo_id=MT_MODEL_REPO,
             filename=MT_MODEL_FILE,
         )

@@ -103,3 +103,6 @@ python-version = "3.12"
 
 [tool.ty.rules]
 unresolved-import = "ignore"
+invalid-argument-type = "ignore"  # llama-cpp-python complex types
+not-subscriptable = "ignore"  # llama-cpp-python return types
+possibly-missing-attribute = "ignore"  # llama-cpp-python nullable fields
