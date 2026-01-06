@@ -1,7 +1,10 @@
 import os
 import tempfile
+from pathlib import Path
 
 from fastapi import FastAPI, File, Form, UploadFile, WebSocket
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.asr import transcribe_wav_path
 from app.mt import translate_texts
@@ -9,6 +12,15 @@ from app.scripts.asr_smoke import generate_silence_wav
 from app.streaming import handle_websocket
 
 app = FastAPI(title="LinguaGap", description="Real-time speech transcription and translation")
+
+STATIC_DIR = Path(__file__).parent.parent.parent / "static"
+if STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+
+@app.get("/")
+async def root():
+    return FileResponse(STATIC_DIR / "index.html")
 
 
 @app.get("/health")

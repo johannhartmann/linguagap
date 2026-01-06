@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LinguaGap - Real-time Speech Translation</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        h1 {
+            font-size: 2rem;
+            margin-bottom: 10px;
+        }
+        .controls {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+        }
+        select, button {
+            padding: 12px 24px;
+            font-size: 1rem;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+        select {
+            background: #16213e;
+            color: #eee;
+            min-width: 150px;
+        }
+        button {
+            background: #0f3460;
+            color: #eee;
+            transition: background 0.2s;
+        }
+        button:hover {
+            background: #1a5f7a;
+        }
+        button.recording {
+            background: #e94560;
+        }
+        button.recording:hover {
+            background: #ff6b6b;
+        }
+        button:disabled {
+            background: #333;
+            cursor: not-allowed;
+        }
+        .panes {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        @media (max-width: 768px) {
+            .panes {
+                grid-template-columns: 1fr;
+            }
+        }
+        .pane {
+            background: #16213e;
+            border-radius: 12px;
+            padding: 20px;
+            min-height: 400px;
+        }
+        .pane h2 {
+            font-size: 1.2rem;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #0f3460;
+        }
+        .transcript {
+            line-height: 1.8;
+        }
+        .segment {
+            margin-bottom: 8px;
+            padding: 8px 12px;
+            background: #0f3460;
+            border-radius: 6px;
+        }
+        .segment.live {
+            opacity: 0.7;
+            font-style: italic;
+            border-left: 3px solid #e94560;
+        }
+        .segment.final {
+            border-left: 3px solid #4ecca3;
+        }
+        .status {
+            text-align: center;
+            padding: 10px;
+            font-size: 0.9rem;
+            color: #888;
+        }
+        .status.connected {
+            color: #4ecca3;
+        }
+        .status.error {
+            color: #e94560;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>LinguaGap</h1>
+            <p>Real-time Speech Transcription & Translation</p>
+        </header>
+
+        <div class="controls">
+            <select id="languageSelect">
+                <option value="auto">Auto-detect</option>
+                <option value="en">English</option>
+                <option value="de">German</option>
+                <option value="fr">French</option>
+                <option value="es">Spanish</option>
+                <option value="it">Italian</option>
+                <option value="pl">Polish</option>
+                <option value="ro">Romanian</option>
+                <option value="hr">Croatian</option>
+                <option value="bg">Bulgarian</option>
+                <option value="sq">Albanian</option>
+                <option value="tr">Turkish</option>
+                <option value="ru">Russian</option>
+                <option value="uk">Ukrainian</option>
+                <option value="hu">Hungarian</option>
+                <option value="ar">Arabic</option>
+                <option value="fa">Persian</option>
+                <option value="sr">Serbian</option>
+            </select>
+            <button id="startBtn">Start Recording</button>
+            <button id="clearBtn">Clear</button>
+        </div>
+
+        <div class="status" id="status">Click "Start Recording" to begin</div>
+
+        <div class="panes">
+            <div class="pane">
+                <h2>Source Transcript</h2>
+                <div class="transcript" id="sourceTranscript"></div>
+            </div>
+            <div class="pane">
+                <h2>German Translation</h2>
+                <div class="transcript" id="germanTranscript"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const startBtn = document.getElementById('startBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const languageSelect = document.getElementById('languageSelect');
+        const statusEl = document.getElementById('status');
+        const sourceTranscript = document.getElementById('sourceTranscript');
+        const germanTranscript = document.getElementById('germanTranscript');
+
+        let isRecording = false;
+        let ws = null;
+        let audioContext = null;
+        let mediaStream = null;
+        let processor = null;
+
+        const SAMPLE_RATE = 16000;
+
+        function setStatus(msg, type = '') {
+            statusEl.textContent = msg;
+            statusEl.className = 'status ' + type;
+        }
+
+        function renderSegments(segments) {
+            sourceTranscript.innerHTML = '';
+            germanTranscript.innerHTML = '';
+
+            segments.forEach(seg => {
+                const srcDiv = document.createElement('div');
+                srcDiv.className = 'segment ' + (seg.final ? 'final' : 'live');
+                srcDiv.textContent = seg.src || '...';
+                srcDiv.dataset.id = seg.id;
+                sourceTranscript.appendChild(srcDiv);
+
+                const deDiv = document.createElement('div');
+                deDiv.className = 'segment ' + (seg.final ? 'final' : 'live');
+                deDiv.textContent = seg.de || '...';
+                deDiv.dataset.id = seg.id;
+                germanTranscript.appendChild(deDiv);
+            });
+        }
+
+        function downsampleBuffer(buffer, inputSampleRate, outputSampleRate) {
+            if (inputSampleRate === outputSampleRate) {
+                return buffer;
+            }
+            const ratio = inputSampleRate / outputSampleRate;
+            const newLength = Math.round(buffer.length / ratio);
+            const result = new Float32Array(newLength);
+            for (let i = 0; i < newLength; i++) {
+                const srcIndex = i * ratio;
+                const srcIndexFloor = Math.floor(srcIndex);
+                const srcIndexCeil = Math.min(srcIndexFloor + 1, buffer.length - 1);
+                const t = srcIndex - srcIndexFloor;
+                result[i] = buffer[srcIndexFloor] * (1 - t) + buffer[srcIndexCeil] * t;
+            }
+            return result;
+        }
+
+        function floatTo16BitPCM(float32Array) {
+            const int16Array = new Int16Array(float32Array.length);
+            for (let i = 0; i < float32Array.length; i++) {
+                const s = Math.max(-1, Math.min(1, float32Array[i]));
+                int16Array[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+            }
+            return int16Array.buffer;
+        }
+
+        async function startRecording() {
+            try {
+                setStatus('Requesting microphone access...', '');
+
+                mediaStream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        channelCount: 1,
+                        sampleRate: { ideal: 48000 },
+                        echoCancellation: true,
+                        noiseSuppression: true
+                    }
+                });
+
+                audioContext = new AudioContext({ sampleRate: 48000 });
+                const source = audioContext.createMediaStreamSource(mediaStream);
+
+                processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+                const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const wsUrl = `${wsProtocol}//${window.location.host}/ws`;
+
+                setStatus('Connecting to server...', '');
+                ws = new WebSocket(wsUrl);
+
+                ws.onopen = () => {
+                    setStatus('Connected - Recording...', 'connected');
+                    const config = {
+                        type: 'config',
+                        sample_rate: SAMPLE_RATE,
+                        src_lang: languageSelect.value
+                    };
+                    ws.send(JSON.stringify(config));
+
+                    source.connect(processor);
+                    processor.connect(audioContext.destination);
+                };
+
+                ws.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        if (data.type === 'segments' && data.segments) {
+                            renderSegments(data.segments);
+                            if (data.src_lang && data.src_lang !== 'unknown') {
+                                setStatus(`Recording... (detected: ${data.src_lang})`, 'connected');
+                            }
+                        }
+                    } catch (e) {
+                        console.error('Parse error:', e);
+                    }
+                };
+
+                ws.onerror = (error) => {
+                    console.error('WebSocket error:', error);
+                    setStatus('Connection error', 'error');
+                };
+
+                ws.onclose = () => {
+                    if (isRecording) {
+                        setStatus('Connection closed', 'error');
+                    }
+                };
+
+                processor.onaudioprocess = (e) => {
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        const inputData = e.inputBuffer.getChannelData(0);
+                        const downsampled = downsampleBuffer(inputData, audioContext.sampleRate, SAMPLE_RATE);
+                        const pcm16 = floatTo16BitPCM(downsampled);
+                        ws.send(pcm16);
+                    }
+                };
+
+                isRecording = true;
+                startBtn.textContent = 'Stop Recording';
+                startBtn.classList.add('recording');
+                languageSelect.disabled = true;
+
+            } catch (error) {
+                console.error('Error starting recording:', error);
+                setStatus('Microphone access denied', 'error');
+            }
+        }
+
+        function stopRecording() {
+            isRecording = false;
+
+            if (processor) {
+                processor.disconnect();
+                processor = null;
+            }
+
+            if (audioContext) {
+                audioContext.close();
+                audioContext = null;
+            }
+
+            if (mediaStream) {
+                mediaStream.getTracks().forEach(track => track.stop());
+                mediaStream = null;
+            }
+
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+
+            startBtn.textContent = 'Start Recording';
+            startBtn.classList.remove('recording');
+            languageSelect.disabled = false;
+            setStatus('Recording stopped', '');
+        }
+
+        startBtn.addEventListener('click', () => {
+            if (isRecording) {
+                stopRecording();
+            } else {
+                startRecording();
+            }
+        });
+
+        clearBtn.addEventListener('click', () => {
+            sourceTranscript.innerHTML = '';
+            germanTranscript.innerHTML = '';
+        });
+    </script>
+</body>
+</html>

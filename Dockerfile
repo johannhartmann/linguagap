@@ -26,6 +26,9 @@ RUN uv sync --frozen
 # Copy application code
 COPY src/ ./src/
 
+# Copy static files
+COPY static/ ./static/
+
 # Set PYTHONPATH to include src directory
 ENV PYTHONPATH=/app/src
 
