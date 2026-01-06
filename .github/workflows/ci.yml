@@ -111,8 +111,16 @@ jobs:
   docker:
     name: Docker Build
     runs-on: ubuntu-latest
+    continue-on-error: true  # CUDA build may exceed disk space
     steps:
       - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/boost
+          df -h
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
