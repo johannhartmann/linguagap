@@ -216,7 +216,13 @@ async def handle_websocket(websocket: WebSocket):
 
                         # Queue newly finalized segments for translation
                         for seg in newly_finalized:
+                            print(f"Queuing segment {seg.id} for translation: {seg.src[:50]}")
                             await translation_queue.put(seg)
+
+                        if all_segments:
+                            final_count = sum(1 for s in all_segments if s.final)
+                            live_count = len(all_segments) - final_count
+                            print(f"Segments: {final_count} final, {live_count} live")
 
                 except Exception as e:
                     print(f"ASR tick error: {e}")
@@ -240,9 +246,11 @@ async def handle_websocket(websocket: WebSocket):
                 src_lang = session.detected_lang or "en"
 
                 try:
+                    print(f"Translating segment {segment.id}: {segment.src[:50]}")
                     translation = await loop.run_in_executor(
                         _executor, run_translation, segment.src, src_lang
                     )
+                    print(f"Translation done {segment.id}: {translation[:50]}")
 
                     # Store translation
                     session.translations[segment.id] = translation
