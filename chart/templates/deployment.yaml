@@ -14,6 +14,7 @@ spec:
       labels:
         {{- include "linguagap.selectorLabels" . | nindent 8 }}
     spec:
+      runtimeClassName: nvidia
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
