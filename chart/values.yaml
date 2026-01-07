@@ -17,8 +17,7 @@ ingress:
   className: traefik
   host: linguagap.data.mayflower.tech
   annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-prod
-    traefik.ingress.kubernetes.io/router.middlewares: ""
+    cert-manager.io/cluster-issuer: letsencrypt
   tls:
     enabled: true
     secretName: linguagap-tls

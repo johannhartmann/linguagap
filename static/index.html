@@ -196,7 +196,8 @@
         async function enumerateDevices() {
             try {
                 // Request permission first to get device labels
-                await navigator.mediaDevices.getUserMedia({ audio: true });
+                const tempStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                tempStream.getTracks().forEach(track => track.stop());
 
                 const devices = await navigator.mediaDevices.enumerateDevices();
 
@@ -216,10 +217,6 @@
                     }
                 });
 
-                // Stop the temporary stream
-                const tracks = (await navigator.mediaDevices.getUserMedia({ audio: true })).getTracks();
-                tracks.forEach(track => track.stop());
-
             } catch (error) {
                 console.error('Error enumerating devices:', error);
             }
@@ -227,8 +224,6 @@
 
         // Enumerate devices on page load
         enumerateDevices();
-
-        // Re-enumerate when devices change
         navigator.mediaDevices.addEventListener('devicechange', enumerateDevices);
 
         function setStatus(msg, type = '') {
