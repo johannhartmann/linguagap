@@ -169,9 +169,13 @@ async def handle_websocket(websocket: WebSocket):
     async def asr_loop():
         """ASR loop - runs independently, sends segments immediately."""
         nonlocal running
+        tick_count = 0
         while running:
             await asyncio.sleep(TICK_SEC)
             if session is not None and running:
+                tick_count += 1
+                if tick_count <= 3 or tick_count % 20 == 0:
+                    print(f"ASR tick #{tick_count}: {session.get_buffered_seconds():.1f}s buffered")
                 loop = asyncio.get_event_loop()
                 try:
                     all_segments, newly_finalized = await loop.run_in_executor(
@@ -249,10 +253,14 @@ async def handle_websocket(websocket: WebSocket):
                 print(f"MT loop error: {e}")
 
     try:
+        msg_count = 0
+        bytes_received = 0
         while True:
             message = await websocket.receive()
+            msg_count += 1
 
             if message["type"] == "websocket.disconnect":
+                print(f"WebSocket disconnect after {msg_count} msgs, {bytes_received} bytes")
                 break
 
             if "text" in message:
@@ -267,7 +275,13 @@ async def handle_websocket(websocket: WebSocket):
 
             elif "bytes" in message:
                 if session is not None:
-                    session.add_audio(message["bytes"])
+                    audio_bytes = message["bytes"]
+                    bytes_received += len(audio_bytes)
+                    session.add_audio(audio_bytes)
+                    if msg_count % 50 == 0:
+                        print(
+                            f"Audio: {bytes_received} bytes, {session.get_buffered_seconds():.1f}s buffered"
+                        )
 
     except Exception as e:
         print(f"WebSocket error: {e}")
