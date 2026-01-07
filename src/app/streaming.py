@@ -122,8 +122,13 @@ def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
         session.detected_lang = session.src_lang
 
     # Debug: log raw ASR output
+    audio_rms = float(np.sqrt(np.mean(audio**2)))
+    audio_max = float(np.max(np.abs(audio)))
+    print(
+        f"ASR: {len(asr_segments)} segs, lang={info.language}, "
+        f"audio_len={len(audio)}, rms={audio_rms:.4f}, max={audio_max:.4f}"
+    )
     if asr_segments:
-        print(f"ASR raw: {len(asr_segments)} segments, lang={info.language}")
         for seg in asr_segments[:2]:  # Log first 2
             print(f"  - [{seg.start:.1f}-{seg.end:.1f}] {seg.text[:50]}")
 
