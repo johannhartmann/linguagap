@@ -112,6 +112,7 @@ def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
         no_speech_threshold=0.6,
         condition_on_previous_text=False,
     )
+    asr_segments = list(asr_segments)  # Consume generator
     asr_time = time.time() - asr_start
     _metrics["asr_times"].append(asr_time)
 
@@ -119,6 +120,12 @@ def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
         session.detected_lang = info.language
     else:
         session.detected_lang = session.src_lang
+
+    # Debug: log raw ASR output
+    if asr_segments:
+        print(f"ASR raw: {len(asr_segments)} segments, lang={info.language}")
+        for seg in asr_segments[:2]:  # Log first 2
+            print(f"  - [{seg.start:.1f}-{seg.end:.1f}] {seg.text[:50]}")
 
     hyp_segments = []
     for seg in asr_segments:
