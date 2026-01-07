@@ -374,9 +374,19 @@
                     }
                 };
 
+                let frameCount = 0;
                 processor.onaudioprocess = (e) => {
                     if (ws && ws.readyState === WebSocket.OPEN) {
                         const inputData = e.inputBuffer.getChannelData(0);
+
+                        // Debug: log audio levels every 50 frames
+                        frameCount++;
+                        if (frameCount % 50 === 1) {
+                            const rms = Math.sqrt(inputData.reduce((sum, x) => sum + x * x, 0) / inputData.length);
+                            const max = Math.max(...inputData.map(Math.abs));
+                            console.log(`Audio frame ${frameCount}: rms=${rms.toFixed(4)}, max=${max.toFixed(4)}, len=${inputData.length}`);
+                        }
+
                         const downsampled = downsampleBuffer(inputData, audioContext.sampleRate, SAMPLE_RATE);
                         const pcm16 = floatTo16BitPCM(downsampled);
                         ws.send(pcm16);
