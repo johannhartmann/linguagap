@@ -1,0 +1,15 @@
+apiVersion: v2
+name: linguagap
+description: Real-time speech transcription and translation system
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - asr
+  - speech-to-text
+  - translation
+  - gpu
+  - whisper
+maintainers:
+  - name: Johann Hartmann
+    url: https://github.com/johannhartmann

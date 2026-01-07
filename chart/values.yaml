@@ -1,0 +1,82 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/johannhartmann/linguagap
+  tag: latest
+  pullPolicy: Always
+
+nameOverride: ""
+fullnameOverride: ""
+
+service:
+  type: ClusterIP
+  port: 8000
+
+ingress:
+  enabled: true
+  className: traefik
+  host: linguagap.data.mayflower.tech
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    traefik.ingress.kubernetes.io/router.middlewares: ""
+  tls:
+    enabled: true
+    secretName: linguagap-tls
+
+persistence:
+  enabled: true
+  size: 20Gi
+  storageClassName: longhorn
+  accessMode: ReadWriteOnce
+
+resources:
+  requests:
+    memory: "8Gi"
+    cpu: "2"
+    nvidia.com/gpu: "1"
+  limits:
+    memory: "16Gi"
+    cpu: "8"
+    nvidia.com/gpu: "1"
+
+# Probes - long initial delay for model warmup
+livenessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 120
+  periodSeconds: 30
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 120
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+# Environment variables
+env:
+  ASR_MODEL: deepdml/faster-whisper-large-v3-turbo-ct2
+  ASR_DEVICE: cuda
+  ASR_COMPUTE_TYPE: int8_float16
+  MT_MODEL_REPO: Qwen/Qwen3-4B-GGUF
+  MT_MODEL_FILE: Qwen3-4B-Q4_K_M.gguf
+  MT_N_GPU_LAYERS: "-1"
+  MT_N_CTX: "2048"
+  WINDOW_SEC: "8.0"
+  TICK_SEC: "0.5"
+  STABILITY_SEC: "1.25"
+  MAX_BUFFER_SEC: "30.0"
+  HF_HOME: /data/hf
+  HF_HUB_DISABLE_TELEMETRY: "1"
+  PYTHONUNBUFFERED: "1"
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
