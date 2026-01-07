@@ -62,7 +62,7 @@ readinessProbe:
 env:
   ASR_MODEL: deepdml/faster-whisper-large-v3-turbo-ct2
   ASR_DEVICE: cuda
-  ASR_COMPUTE_TYPE: int8_float16
+  ASR_COMPUTE_TYPE: float16
   MT_MODEL_REPO: Qwen/Qwen3-4B-GGUF
   MT_MODEL_FILE: Qwen3-4B-Q4_K_M.gguf
   MT_N_GPU_LAYERS: "-1"
