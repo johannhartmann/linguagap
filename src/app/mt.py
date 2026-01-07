@@ -53,9 +53,8 @@ def get_llm() -> Llama:
 
 def translate_texts(texts: list[str], src_lang: str, tgt_lang: str = "de") -> list[str]:
     llm = get_llm()
-
-    src_name = LANG_NAMES.get(src_lang, src_lang)
     tgt_name = LANG_NAMES.get(tgt_lang, tgt_lang)
+    src_name = LANG_NAMES.get(src_lang, src_lang)
 
     results = []
     for text in texts:
@@ -63,27 +62,31 @@ def translate_texts(texts: list[str], src_lang: str, tgt_lang: str = "de") -> li
             results.append("")
             continue
 
-        # Use chat completion with system prompt for better results
+        # Use chat completion with /no_think to disable thinking mode
+        # /no_think must be at the END of the user message
         messages = [
             {
                 "role": "system",
-                "content": f"You are a translator. Translate the user's {src_name} text to {tgt_name}. Output only the translation, nothing else. Do not explain, do not add notes.",
+                "content": f"You are a translator. Translate {src_name} to {tgt_name}. Output only the translation.",
             },
-            {"role": "user", "content": text},
+            {
+                "role": "user",
+                "content": f"{text} /no_think",
+            },
         ]
 
         output = llm.create_chat_completion(
             messages=messages,
-            max_tokens=512,
+            max_tokens=256,
             temperature=0.3,
             top_p=0.9,
         )
 
         response = output["choices"][0]["message"]["content"].strip()
 
-        # Remove thinking tags if present
-        if "</think>" in response:
-            response = response.split("</think>")[-1].strip()
+        # Clean up any residual thinking tags
+        if "<think>" in response:
+            response = response.split("</think>")[-1].strip() if "</think>" in response else ""
 
         results.append(response)
 
