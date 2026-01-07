@@ -18,6 +18,7 @@ ingress:
   host: linguagap.data.mayflower.tech
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt
+    traefik.ingress.kubernetes.io/router.middlewares: linguagap-linguagap-websocket@kubernetescrd
   tls:
     enabled: true
     secretName: linguagap-tls
