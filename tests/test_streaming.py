@@ -310,14 +310,14 @@ class TestWebSocketHandler:
             with TestClient(app) as client:
                 yield client
 
-    def test_websocket_config_message(self, client, _mock_models):
+    def test_websocket_config_message(self, client, mock_models):  # noqa: ARG002
         """Test WebSocket accepts config message."""
         with client.websocket_connect("/ws") as websocket:
             config = {"type": "config", "sample_rate": 16000, "src_lang": "en"}
             websocket.send_text(json.dumps(config))
             # Just verify no exception is raised
 
-    def test_websocket_binary_audio(self, client, _mock_models):
+    def test_websocket_binary_audio(self, client, mock_models):  # noqa: ARG002
         """Test WebSocket accepts binary audio data."""
         with client.websocket_connect("/ws") as websocket:
             config = {"type": "config", "sample_rate": 16000, "src_lang": "en"}

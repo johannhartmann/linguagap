@@ -155,7 +155,12 @@ class TestTranscribeTranslateEndpoint:
         assert data["src_lang_detected"] == "fr"
 
     @patch("app.main.transcribe_wav_path")
-    def test_transcribe_translate_empty_segment(self, mock_transcribe, client, _mock_models):
+    def test_transcribe_translate_empty_segment(
+        self,
+        mock_transcribe,
+        client,
+        mock_models,  # noqa: ARG002
+    ):
         """Test transcribe_translate with empty segment text."""
         mock_transcribe.return_value = {
             "language": "en",
