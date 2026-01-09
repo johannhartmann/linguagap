@@ -203,9 +203,6 @@
             <select id="audioInputSelect" title="Microphone">
                 <option value="">Default Microphone</option>
             </select>
-            <select id="audioOutputSelect" title="Speaker">
-                <option value="">Default Speaker</option>
-            </select>
             <select id="languageSelect">
                 <option value="auto">Auto-detect</option>
                 <option value="en">English</option>
@@ -262,7 +259,6 @@
         const clearBtn = document.getElementById('clearBtn');
         const languageSelect = document.getElementById('languageSelect');
         const audioInputSelect = document.getElementById('audioInputSelect');
-        const audioOutputSelect = document.getElementById('audioOutputSelect');
         const statusEl = document.getElementById('status');
         const leftTranscript = document.getElementById('leftTranscript');
         const rightTranscript = document.getElementById('rightTranscript');
@@ -368,17 +364,13 @@
 
                 // Clear existing options (except default)
                 audioInputSelect.innerHTML = '<option value="">Default Microphone</option>';
-                audioOutputSelect.innerHTML = '<option value="">Default Speaker</option>';
 
                 devices.forEach(device => {
-                    const option = document.createElement('option');
-                    option.value = device.deviceId;
-                    option.textContent = device.label || `${device.kind} (${device.deviceId.slice(0, 8)}...)`;
-
                     if (device.kind === 'audioinput') {
+                        const option = document.createElement('option');
+                        option.value = device.deviceId;
+                        option.textContent = device.label || `Microphone (${device.deviceId.slice(0, 8)}...)`;
                         audioInputSelect.appendChild(option);
-                    } else if (device.kind === 'audiooutput') {
-                        audioOutputSelect.appendChild(option);
                     }
                 });
 
@@ -628,7 +620,6 @@
                 startBtn.classList.add('recording');
                 languageSelect.disabled = true;
                 audioInputSelect.disabled = true;
-                audioOutputSelect.disabled = true;
 
             } catch (error) {
                 console.error('Error starting recording:', error);
@@ -690,7 +681,6 @@
             startBtn.disabled = false;
             languageSelect.disabled = false;
             audioInputSelect.disabled = false;
-            audioOutputSelect.disabled = false;
 
             if (!leftSummarySection.classList.contains('visible')) {
                 setStatus('Recording stopped', '');
