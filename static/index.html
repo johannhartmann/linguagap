@@ -93,21 +93,37 @@
             border-bottom: 1px solid #ddd;
         }
         .transcript {
-            line-height: 1.8;
+            line-height: 1.6;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
         }
-        .segment {
-            margin-bottom: 8px;
-            padding: 8px 12px;
-            background: #f0f0f0;
-            border-radius: 6px;
+        .bubble {
+            max-width: 85%;
+            padding: 10px 14px;
+            border-radius: 18px;
+            word-wrap: break-word;
         }
-        .segment.live {
+        .bubble.speaker-left {
+            align-self: flex-start;
+            background: #e8e8e8;
+            border-bottom-left-radius: 4px;
+        }
+        .bubble.speaker-right {
+            align-self: flex-end;
+            background: #4a90d9;
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+        .bubble.live {
             opacity: 0.7;
             font-style: italic;
+        }
+        .bubble.live.speaker-left {
             border-left: 3px solid #d9534f;
         }
-        .segment.final {
-            border-left: 3px solid #5cb85c;
+        .bubble.live.speaker-right {
+            border-right: 3px solid #d9534f;
         }
         .status {
             text-align: center;
@@ -256,30 +272,36 @@
             segments.forEach(seg => {
                 const segLang = seg.src_lang;
                 const translations = seg.translations || {};
+                const isGermanSpeaker = (segLang === 'de');
+                const liveClass = seg.final ? '' : ' live';
 
                 // Determine what goes on left (foreign) and right (German)
                 let leftText, rightText;
-                if (segLang === 'de') {
-                    // German segment: source on right, translation on left
+                if (isGermanSpeaker) {
+                    // German speaker: source on right pane, translation on left pane
                     rightText = seg.src;
                     leftText = translations[foreignLang] || '...';
                 } else {
-                    // Foreign segment: source on left, translation on right
+                    // Foreign speaker: source on left pane, translation on right pane
                     leftText = seg.src;
                     rightText = translations['de'] || '...';
                 }
 
-                // Left pane (foreign language)
+                // Left pane (foreign language view)
+                // Foreign speaker = left bubble (owner), German speaker = right bubble (other)
                 const leftDiv = document.createElement('div');
-                leftDiv.className = 'segment ' + (seg.final ? 'final' : 'live');
+                const leftSpeakerClass = isGermanSpeaker ? 'speaker-right' : 'speaker-left';
+                leftDiv.className = 'bubble ' + leftSpeakerClass + liveClass;
                 leftDiv.textContent = leftText;
                 leftDiv.dataset.id = seg.id;
                 leftDiv.dataset.srcLang = segLang;
                 leftTranscript.appendChild(leftDiv);
 
-                // Right pane (German)
+                // Right pane (German view)
+                // German speaker = right bubble (owner), Foreign speaker = left bubble (other)
                 const rightDiv = document.createElement('div');
-                rightDiv.className = 'segment ' + (seg.final ? 'final' : 'live');
+                const rightSpeakerClass = isGermanSpeaker ? 'speaker-right' : 'speaker-left';
+                rightDiv.className = 'bubble ' + rightSpeakerClass + liveClass;
                 rightDiv.textContent = rightText;
                 rightDiv.dataset.id = seg.id;
                 rightDiv.dataset.srcLang = segLang;
@@ -292,22 +314,22 @@
         }
 
         function updateTranslation(segmentId, tgtLang, text) {
-            // Find the segment elements by ID
+            // Find the bubble elements by ID
             const leftDiv = leftTranscript.querySelector(`[data-id="${segmentId}"]`);
             const rightDiv = rightTranscript.querySelector(`[data-id="${segmentId}"]`);
 
             if (!leftDiv || !rightDiv) return;
 
             // Determine which pane needs the translation update
-            const segSrcLang = leftDiv.dataset.srcLang;
+            const isGermanSpeaker = (leftDiv.dataset.srcLang === 'de');
 
-            if (segSrcLang === 'de') {
-                // German source: translation goes to left (foreign) pane
+            if (isGermanSpeaker) {
+                // German speaker: translation goes to left (foreign) pane
                 if (tgtLang !== 'de') {
                     leftDiv.textContent = text || '...';
                 }
             } else {
-                // Foreign source: translation goes to right (German) pane
+                // Foreign speaker: translation goes to right (German) pane
                 if (tgtLang === 'de') {
                     rightDiv.textContent = text || '...';
                 }
