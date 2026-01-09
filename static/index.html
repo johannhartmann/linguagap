@@ -137,6 +137,59 @@
         .status.error {
             color: #d9534f;
         }
+        /* Summary styles */
+        .summary-section {
+            margin-top: 20px;
+            display: none;
+        }
+        .summary-section.visible {
+            display: block;
+        }
+        .summary-card {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border-radius: 12px;
+            padding: 16px;
+            border-left: 4px solid #4a90d9;
+        }
+        .summary-card h3 {
+            font-size: 0.9rem;
+            color: #666;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .summary-card p {
+            font-size: 1rem;
+            line-height: 1.6;
+            color: #333;
+        }
+        .summary-card.loading {
+            opacity: 0.7;
+        }
+        .summary-card.loading p {
+            font-style: italic;
+            color: #666;
+        }
+        .alignment-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            margin-top: 8px;
+        }
+        .alignment-badge.aligned {
+            background: #d4edda;
+            color: #155724;
+        }
+        .alignment-badge.regenerated {
+            background: #fff3cd;
+            color: #856404;
+        }
+        .alignment-badge.misaligned {
+            background: #f8d7da;
+            color: #721c24;
+        }
     </style>
 </head>
 <body>
@@ -183,10 +236,23 @@
             <div class="pane">
                 <h2 id="leftLangLabel">Foreign Language</h2>
                 <div class="transcript" id="leftTranscript"></div>
+                <div class="summary-section" id="leftSummarySection">
+                    <div class="summary-card" id="leftSummaryCard">
+                        <h3>Summary</h3>
+                        <p id="leftSummaryText"></p>
+                    </div>
+                </div>
             </div>
             <div class="pane">
                 <h2 id="rightLangLabel">German</h2>
                 <div class="transcript" id="rightTranscript"></div>
+                <div class="summary-section" id="rightSummarySection">
+                    <div class="summary-card" id="rightSummaryCard">
+                        <h3>Summary</h3>
+                        <p id="rightSummaryText"></p>
+                        <span class="alignment-badge" id="alignmentBadge"></span>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -202,6 +268,13 @@
         const rightTranscript = document.getElementById('rightTranscript');
         const leftLangLabel = document.getElementById('leftLangLabel');
         const rightLangLabel = document.getElementById('rightLangLabel');
+        const leftSummarySection = document.getElementById('leftSummarySection');
+        const rightSummarySection = document.getElementById('rightSummarySection');
+        const leftSummaryCard = document.getElementById('leftSummaryCard');
+        const rightSummaryCard = document.getElementById('rightSummaryCard');
+        const leftSummaryText = document.getElementById('leftSummaryText');
+        const rightSummaryText = document.getElementById('rightSummaryText');
+        const alignmentBadge = document.getElementById('alignmentBadge');
 
         // Language display names
         const LANG_NAMES = {
@@ -218,8 +291,72 @@
         let audioContext = null;
         let mediaStream = null;
         let processor = null;
+        let awaitingSummary = false;  // Track if we're waiting for summary before closing
 
         const SAMPLE_RATE = 16000;
+
+        function showSummaryLoading() {
+            leftSummarySection.classList.add('visible');
+            rightSummarySection.classList.add('visible');
+            leftSummaryCard.classList.add('loading');
+            rightSummaryCard.classList.add('loading');
+            leftSummaryText.textContent = 'Generating summary...';
+            rightSummaryText.textContent = 'Generating summary...';
+            alignmentBadge.textContent = '';
+            alignmentBadge.className = 'alignment-badge';
+        }
+
+        function updateSummaryProgress(step) {
+            const messages = {
+                'summarize_foreign': 'Summarizing conversation...',
+                'summarize_german': 'Generating German summary...',
+                'validate': 'Validating alignment...',
+                'regenerate': 'Refining summary...'
+            };
+            const msg = messages[step] || 'Processing...';
+            leftSummaryText.textContent = msg;
+            rightSummaryText.textContent = msg;
+        }
+
+        function displaySummary(data) {
+            leftSummaryCard.classList.remove('loading');
+            rightSummaryCard.classList.remove('loading');
+
+            leftSummaryText.textContent = data.foreign_summary || 'No summary available';
+            rightSummaryText.textContent = data.german_summary || 'No summary available';
+
+            // Show alignment status
+            if (data.regenerated) {
+                alignmentBadge.textContent = 'Refined';
+                alignmentBadge.className = 'alignment-badge regenerated';
+            } else if (data.aligned) {
+                alignmentBadge.textContent = 'Verified';
+                alignmentBadge.className = 'alignment-badge aligned';
+            } else {
+                alignmentBadge.textContent = 'Needs review';
+                alignmentBadge.className = 'alignment-badge misaligned';
+            }
+        }
+
+        function displaySummaryError(error) {
+            leftSummaryCard.classList.remove('loading');
+            rightSummaryCard.classList.remove('loading');
+            leftSummaryText.textContent = 'Summary unavailable';
+            rightSummaryText.textContent = error || 'Error generating summary';
+            alignmentBadge.textContent = '';
+            alignmentBadge.className = 'alignment-badge';
+        }
+
+        function hideSummaries() {
+            leftSummarySection.classList.remove('visible');
+            rightSummarySection.classList.remove('visible');
+            leftSummaryCard.classList.remove('loading');
+            rightSummaryCard.classList.remove('loading');
+            leftSummaryText.textContent = '';
+            rightSummaryText.textContent = '';
+            alignmentBadge.textContent = '';
+            alignmentBadge.className = 'alignment-badge';
+        }
 
         async function enumerateDevices() {
             try {
@@ -440,6 +577,16 @@
                         } else if (data.type === 'translation') {
                             // Update translation for specific segment
                             updateTranslation(data.segment_id, data.tgt_lang, data.text);
+                        } else if (data.type === 'summary_progress') {
+                            updateSummaryProgress(data.step);
+                        } else if (data.type === 'summary') {
+                            displaySummary(data);
+                            setStatus('Summary generated', '');
+                            finishStopRecording();
+                        } else if (data.type === 'summary_error') {
+                            displaySummaryError(data.error);
+                            setStatus('Summary generation failed', 'error');
+                            finishStopRecording();
                         }
                     } catch (e) {
                         console.error('Parse error:', e);
@@ -492,6 +639,7 @@
         function stopRecording() {
             isRecording = false;
 
+            // Stop audio capture
             if (processor) {
                 processor.disconnect();
                 processor = null;
@@ -507,6 +655,31 @@
                 mediaStream = null;
             }
 
+            // Request summary before closing WebSocket if we have content
+            if (ws && ws.readyState === WebSocket.OPEN && foreignLang) {
+                awaitingSummary = true;
+                showSummaryLoading();
+                setStatus('Generating summary...', '');
+                startBtn.disabled = true;
+
+                // Request summary from server
+                ws.send(JSON.stringify({ type: 'request_summary' }));
+
+                // Set a timeout in case summary takes too long
+                setTimeout(() => {
+                    if (awaitingSummary) {
+                        displaySummaryError('Summary timed out');
+                        finishStopRecording();
+                    }
+                }, 60000);  // 60 second timeout
+            } else {
+                finishStopRecording();
+            }
+        }
+
+        function finishStopRecording() {
+            awaitingSummary = false;
+
             if (ws) {
                 ws.close();
                 ws = null;
@@ -514,10 +687,14 @@
 
             startBtn.textContent = 'Start Recording';
             startBtn.classList.remove('recording');
+            startBtn.disabled = false;
             languageSelect.disabled = false;
             audioInputSelect.disabled = false;
             audioOutputSelect.disabled = false;
-            setStatus('Recording stopped', '');
+
+            if (!leftSummarySection.classList.contains('visible')) {
+                setStatus('Recording stopped', '');
+            }
         }
 
         startBtn.addEventListener('click', () => {
@@ -533,6 +710,7 @@
             rightTranscript.innerHTML = '';
             foreignLang = null;
             leftLangLabel.textContent = 'Foreign Language';
+            hideSummaries();
         });
     </script>
 </body>

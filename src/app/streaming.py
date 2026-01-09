@@ -11,7 +11,12 @@ import numpy as np
 from fastapi import WebSocket
 
 from app.asr import get_model
-from app.mt import translate_texts
+from app.mt import (
+    regenerate_summary_with_feedback,
+    summarize_conversation,
+    translate_texts,
+    validate_summary_alignment,
+)
 from app.streaming_policy import Segment, SegmentTracker
 
 WINDOW_SEC = float(os.getenv("WINDOW_SEC", "8.0"))
@@ -176,6 +181,90 @@ def run_translation(text: str, src_lang: str, tgt_lang: str) -> str:
     return result
 
 
+def run_summarization_pipeline(
+    segments_data: list[dict],
+    foreign_lang: str,
+) -> dict:
+    """
+    Run the 3-step summarization pipeline:
+    1. Summarize in foreign language
+    2. Translate to German
+    3. Validate alignment with original German segments
+
+    If misaligned, regenerate with feedback.
+    """
+    print(
+        f"Starting summarization pipeline: {len(segments_data)} segments, foreign_lang={foreign_lang}"
+    )
+
+    # Step 1: Summarize in foreign language
+    print("Step 1: Summarizing in foreign language...")
+    foreign_summary = summarize_conversation(
+        segments=segments_data,
+        _foreign_lang=foreign_lang,
+        target_lang=foreign_lang,
+    )
+    print(f"Foreign summary: {foreign_summary[:100]}...")
+
+    # Step 2: Translate foreign summary to German
+    print("Step 2: Translating summary to German...")
+    german_summary = summarize_conversation(
+        segments=segments_data,
+        _foreign_lang=foreign_lang,
+        target_lang="de",
+    )
+    print(f"German summary: {german_summary[:100]}...")
+
+    # Step 3: Validate alignment with original German segments
+    print("Step 3: Validating alignment...")
+    original_german_segments = [seg["src"] for seg in segments_data if seg["src_lang"] == "de"]
+
+    validation = {"aligned": True, "issues": None, "feedback": None}
+    regenerated = False
+
+    if original_german_segments:
+        validation = validate_summary_alignment(
+            german_summary=german_summary,
+            original_german_segments=original_german_segments,
+        )
+        print(
+            f"Validation result: aligned={validation['aligned']}, issues={validation.get('issues')}"
+        )
+
+        # If misaligned, regenerate with feedback
+        if not validation["aligned"] and (validation.get("issues") or validation.get("feedback")):
+            print("Regenerating summaries with feedback...")
+            regenerated = True
+
+            # Regenerate foreign summary
+            foreign_summary = regenerate_summary_with_feedback(
+                segments=segments_data,
+                _foreign_lang=foreign_lang,
+                target_lang=foreign_lang,
+                previous_issues=validation.get("issues", ""),
+                previous_feedback=validation.get("feedback", ""),
+            )
+            print(f"Regenerated foreign summary: {foreign_summary[:100]}...")
+
+            # Regenerate German summary
+            german_summary = regenerate_summary_with_feedback(
+                segments=segments_data,
+                _foreign_lang=foreign_lang,
+                target_lang="de",
+                previous_issues=validation.get("issues", ""),
+                previous_feedback=validation.get("feedback", ""),
+            )
+            print(f"Regenerated German summary: {german_summary[:100]}...")
+
+    return {
+        "foreign_summary": foreign_summary,
+        "german_summary": german_summary,
+        "foreign_lang": foreign_lang,
+        "validation": validation,
+        "regenerated": regenerated,
+    }
+
+
 async def handle_websocket(websocket: WebSocket):
     await websocket.accept()
 
@@ -320,6 +409,75 @@ async def handle_websocket(websocket: WebSocket):
                     asr_task = asyncio.create_task(asr_loop())
                     mt_task = asyncio.create_task(mt_loop())
                     print(f"Session started: sample_rate={sample_rate}, src_lang={src_lang}")
+
+                elif data.get("type") == "request_summary":
+                    # Handle summary request
+                    if session is not None:
+                        finalized = session.segment_tracker.finalized_segments
+                        if finalized:
+                            # Build segments data with translations
+                            segments_data = []
+                            for seg in finalized:
+                                seg_dict = asdict(seg)
+                                seg_dict["translations"] = session.translations.get(seg.id, {})
+                                segments_data.append(seg_dict)
+
+                            foreign_lang = session.foreign_lang or "en"
+
+                            # Send progress update
+                            await websocket.send_text(
+                                json.dumps(
+                                    {
+                                        "type": "summary_progress",
+                                        "stage": "summarizing",
+                                        "message": "Generating summaries...",
+                                    }
+                                )
+                            )
+
+                            # Run summarization in executor
+                            loop = asyncio.get_event_loop()
+                            try:
+                                result = await loop.run_in_executor(
+                                    _executor,
+                                    run_summarization_pipeline,
+                                    segments_data,
+                                    foreign_lang,
+                                )
+
+                                # Send final summary
+                                await websocket.send_text(
+                                    json.dumps(
+                                        {
+                                            "type": "summary",
+                                            "foreign_summary": result["foreign_summary"],
+                                            "german_summary": result["german_summary"],
+                                            "foreign_lang": result["foreign_lang"],
+                                            "aligned": result["validation"]["aligned"],
+                                            "issues": result["validation"].get("issues"),
+                                            "regenerated": result["regenerated"],
+                                        }
+                                    )
+                                )
+                            except Exception as e:
+                                print(f"Summarization error: {e}")
+                                await websocket.send_text(
+                                    json.dumps(
+                                        {
+                                            "type": "summary_error",
+                                            "error": str(e),
+                                        }
+                                    )
+                                )
+                        else:
+                            await websocket.send_text(
+                                json.dumps(
+                                    {
+                                        "type": "summary_error",
+                                        "error": "No conversation segments to summarize",
+                                    }
+                                )
+                            )
 
             elif "bytes" in message:
                 if session is not None:
