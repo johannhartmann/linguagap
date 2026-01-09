@@ -437,9 +437,9 @@
                 rightTranscript.appendChild(rightDiv);
             });
 
-            // Auto-scroll to bottom
-            leftTranscript.scrollTop = leftTranscript.scrollHeight;
-            rightTranscript.scrollTop = rightTranscript.scrollHeight;
+            // Auto-scroll panes to bottom (pane is the scroll container)
+            leftTranscript.parentElement.scrollTop = leftTranscript.parentElement.scrollHeight;
+            rightTranscript.parentElement.scrollTop = rightTranscript.parentElement.scrollHeight;
         }
 
         function updateTranslation(segmentId, tgtLang, text) {

@@ -76,3 +76,32 @@ class SegmentTracker:
                     live_segments.append(segment)
 
         return self.finalized_segments + live_segments, newly_finalized
+
+    def force_finalize_all(self, live_segments: list[Segment]) -> list[Segment]:
+        """
+        Force-finalize any remaining live segments.
+        Call this when recording stops to ensure all segments get translated.
+
+        Args:
+            live_segments: List of live (non-final) segments to finalize
+
+        Returns:
+            List of newly finalized segments
+        """
+        newly_finalized = []
+        for seg in live_segments:
+            if seg.final:
+                continue
+            finalized_seg = Segment(
+                id=self.next_id,
+                abs_start=seg.abs_start,
+                abs_end=seg.abs_end,
+                src=seg.src,
+                src_lang=seg.src_lang,
+                final=True,
+            )
+            self.finalized_segments.append(finalized_seg)
+            newly_finalized.append(finalized_seg)
+            self.finalized_end_time = max(self.finalized_end_time, seg.abs_end)
+            self.next_id += 1
+        return newly_finalized

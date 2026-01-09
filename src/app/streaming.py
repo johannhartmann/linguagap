@@ -413,8 +413,43 @@ async def handle_websocket(websocket: WebSocket):
                 elif data.get("type") == "request_summary":
                     # Handle summary request
                     if session is not None:
+                        # Get all segments including live ones
+                        all_segs, _ = session.segment_tracker.update_from_hypothesis(
+                            [], 0.0, session.get_current_time(), "unknown"
+                        )
+
+                        # Identify live segments that need finalization
+                        live_segs = [s for s in all_segs if not s.final]
+                        if live_segs:
+                            print(f"Force-finalizing {len(live_segs)} live segments")
+                            newly_final = session.segment_tracker.force_finalize_all(live_segs)
+                            # Queue for translation
+                            for seg in newly_final:
+                                print(f"Queuing force-finalized segment {seg.id}: {seg.src[:50]}")
+                                await translation_queue.put(seg)
+
                         finalized = session.segment_tracker.finalized_segments
                         if finalized:
+                            # Wait for translation queue to drain (up to 10s)
+                            await websocket.send_text(
+                                json.dumps(
+                                    {
+                                        "type": "summary_progress",
+                                        "step": "translate",
+                                        "message": "Completing translations...",
+                                    }
+                                )
+                            )
+
+                            wait_start = time.time()
+                            while not translation_queue.empty() and (time.time() - wait_start) < 10:
+                                await asyncio.sleep(0.2)
+
+                            if not translation_queue.empty():
+                                print(
+                                    f"Warning: {translation_queue.qsize()} translations still pending"
+                                )
+
                             # Build segments data with translations
                             segments_data = []
                             for seg in finalized:
@@ -429,7 +464,7 @@ async def handle_websocket(websocket: WebSocket):
                                 json.dumps(
                                     {
                                         "type": "summary_progress",
-                                        "stage": "summarizing",
+                                        "step": "summarize_foreign",
                                         "message": "Generating summaries...",
                                     }
                                 )
