@@ -44,13 +44,16 @@ def get_metrics() -> dict:
 class StreamingSession:
     def __init__(self, sample_rate: int = 16000, src_lang: str = "auto"):
         self.sample_rate = sample_rate
-        self.src_lang = src_lang
+        self.src_lang = src_lang  # User-selected source language (or "auto")
         self.audio_buffer: deque[bytes] = deque()
         self.total_samples = 0
-        self.detected_lang: str | None = None
+        self.detected_lang: str | None = None  # Currently detected language from ASR
+        self.foreign_lang: str | None = (
+            None  # The non-German language (auto-detected or user-selected)
+        )
         self.segment_tracker = SegmentTracker()
         self.dropped_frames = 0
-        self.translations: dict[int, str] = {}  # segment_id -> translation
+        self.translations: dict[int, dict[str, str]] = {}  # segment_id -> {lang -> translation}
 
     def add_audio(self, pcm16_bytes: bytes):
         self.audio_buffer.append(pcm16_bytes)
@@ -148,10 +151,14 @@ def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
             }
         )
 
+    # Get the detected language for this segment
+    segment_lang = session.detected_lang or "unknown"
+
     all_segments, newly_finalized = session.segment_tracker.update_from_hypothesis(
         hyp_segments=hyp_segments,
         window_start=window_start,
         now_sec=now_sec,
+        src_lang=segment_lang,
     )
 
     tick_time = time.time() - tick_start
@@ -160,10 +167,10 @@ def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
     return all_segments, newly_finalized
 
 
-def run_translation(text: str, src_lang: str) -> str:
-    """Translate a single text."""
+def run_translation(text: str, src_lang: str, tgt_lang: str) -> str:
+    """Translate a single text from src_lang to tgt_lang."""
     mt_start = time.time()
-    result = translate_texts([text], src_lang=src_lang, tgt_lang="de")[0]
+    result = translate_texts([text], src_lang=src_lang, tgt_lang=tgt_lang)[0]
     mt_time = time.time() - mt_start
     _metrics["mt_times"].append(mt_time)
     return result
@@ -195,11 +202,22 @@ async def handle_websocket(websocket: WebSocket):
                     )
 
                     if running:
+                        # Auto-detect foreign language from first non-German speech
+                        if session.foreign_lang is None and session.detected_lang:
+                            if session.src_lang != "auto":
+                                # User explicitly selected a foreign language
+                                if session.src_lang != "de":
+                                    session.foreign_lang = session.src_lang
+                            elif session.detected_lang != "de":
+                                # Auto-detect: first non-German speech sets the foreign language
+                                session.foreign_lang = session.detected_lang
+                                print(f"Auto-detected foreign language: {session.foreign_lang}")
+
                         # Build segments with translations where available
                         segments_data = []
                         for seg in all_segments:
                             seg_dict = asdict(seg)
-                            seg_dict["de"] = session.translations.get(seg.id, "...")
+                            seg_dict["translations"] = session.translations.get(seg.id, {})
                             segments_data.append(seg_dict)
 
                         # Send ASR results immediately
@@ -209,6 +227,7 @@ async def handle_websocket(websocket: WebSocket):
                                     "type": "segments",
                                     "t": session.get_current_time(),
                                     "src_lang": session.detected_lang or "unknown",
+                                    "foreign_lang": session.foreign_lang,
                                     "segments": segments_data,
                                 }
                             )
@@ -241,19 +260,27 @@ async def handle_websocket(websocket: WebSocket):
                 if not running or session is None:
                     break
 
-                # Run translation in executor
+                # Run translation in executor - bidirectional
                 loop = asyncio.get_event_loop()
-                src_lang = session.detected_lang or "en"
+                seg_src_lang = segment.src_lang
 
                 try:
-                    print(f"Translating segment {segment.id}: {segment.src[:50]}")
+                    # Determine translation direction: German → foreign, foreign → German
+                    # Default to English if foreign language not yet detected
+                    tgt_lang = (session.foreign_lang or "en") if seg_src_lang == "de" else "de"
+
+                    print(
+                        f"Translating segment {segment.id} ({seg_src_lang}→{tgt_lang}): {segment.src[:50]}"
+                    )
                     translation = await loop.run_in_executor(
-                        _executor, run_translation, segment.src, src_lang
+                        _executor, run_translation, segment.src, seg_src_lang, tgt_lang
                     )
                     print(f"Translation done {segment.id}: {translation[:50]}")
 
-                    # Store translation
-                    session.translations[segment.id] = translation
+                    # Store translation in dict
+                    if segment.id not in session.translations:
+                        session.translations[segment.id] = {}
+                    session.translations[segment.id][tgt_lang] = translation
 
                     if running:
                         # Send translation update
@@ -262,7 +289,8 @@ async def handle_websocket(websocket: WebSocket):
                                 {
                                     "type": "translation",
                                     "segment_id": segment.id,
-                                    "de": translation,
+                                    "tgt_lang": tgt_lang,
+                                    "text": translation,
                                 }
                             )
                         )

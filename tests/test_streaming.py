@@ -256,7 +256,7 @@ class TestRunTranslation:
         """Test run_translation returns translated text."""
         mock_translate.return_value = ["Hallo Welt"]
 
-        result = run_translation("Hello world", "en")
+        result = run_translation("Hello world", "en", "de")
 
         assert result == "Hallo Welt"
         mock_translate.assert_called_once_with(["Hello world"], src_lang="en", tgt_lang="de")
@@ -270,7 +270,7 @@ class TestRunTranslation:
 
         initial_count = len(_metrics["mt_times"])
 
-        run_translation("Test", "en")
+        run_translation("Test", "en", "de")
 
         assert len(_metrics["mt_times"]) >= initial_count
 

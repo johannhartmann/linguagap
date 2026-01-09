@@ -13,12 +13,14 @@ class TestSegment:
             abs_start=0.0,
             abs_end=1.5,
             src="Hello world",
+            src_lang="en",
             final=True,
         )
         assert segment.id == 1
         assert segment.abs_start == 0.0
         assert segment.abs_end == 1.5
         assert segment.src == "Hello world"
+        assert segment.src_lang == "en"
         assert segment.final is True
 
     def test_segment_live(self):
@@ -28,9 +30,11 @@ class TestSegment:
             abs_start=0.0,
             abs_end=0.5,
             src="Test",
+            src_lang="de",
             final=False,
         )
         assert segment.final is False
+        assert segment.src_lang == "de"
 
 
 class TestSegmentTracker:

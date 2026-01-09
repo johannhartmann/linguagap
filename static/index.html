@@ -165,12 +165,12 @@
 
         <div class="panes">
             <div class="pane">
-                <h2>Source Transcript</h2>
-                <div class="transcript" id="sourceTranscript"></div>
+                <h2 id="leftLangLabel">Foreign Language</h2>
+                <div class="transcript" id="leftTranscript"></div>
             </div>
             <div class="pane">
-                <h2>German Translation</h2>
-                <div class="transcript" id="germanTranscript"></div>
+                <h2 id="rightLangLabel">German</h2>
+                <div class="transcript" id="rightTranscript"></div>
             </div>
         </div>
     </div>
@@ -182,10 +182,22 @@
         const audioInputSelect = document.getElementById('audioInputSelect');
         const audioOutputSelect = document.getElementById('audioOutputSelect');
         const statusEl = document.getElementById('status');
-        const sourceTranscript = document.getElementById('sourceTranscript');
-        const germanTranscript = document.getElementById('germanTranscript');
+        const leftTranscript = document.getElementById('leftTranscript');
+        const rightTranscript = document.getElementById('rightTranscript');
+        const leftLangLabel = document.getElementById('leftLangLabel');
+        const rightLangLabel = document.getElementById('rightLangLabel');
+
+        // Language display names
+        const LANG_NAMES = {
+            'en': 'English', 'de': 'German', 'fr': 'French', 'es': 'Spanish',
+            'it': 'Italian', 'pl': 'Polish', 'ro': 'Romanian', 'hr': 'Croatian',
+            'bg': 'Bulgarian', 'sq': 'Albanian', 'tr': 'Turkish', 'ru': 'Russian',
+            'uk': 'Ukrainian', 'hu': 'Hungarian', 'ar': 'Arabic', 'fa': 'Persian',
+            'sr': 'Serbian'
+        };
 
         let isRecording = false;
+        let foreignLang = null;  // The detected/selected foreign (non-German) language
         let ws = null;
         let audioContext = null;
         let mediaStream = null;
@@ -231,34 +243,74 @@
             statusEl.className = 'status ' + type;
         }
 
-        function renderSegments(segments) {
-            sourceTranscript.innerHTML = '';
-            germanTranscript.innerHTML = '';
+        function renderSegments(segments, serverForeignLang) {
+            // Update foreign language from server if detected
+            if (serverForeignLang && !foreignLang) {
+                foreignLang = serverForeignLang;
+                leftLangLabel.textContent = LANG_NAMES[foreignLang] || foreignLang;
+            }
+
+            leftTranscript.innerHTML = '';
+            rightTranscript.innerHTML = '';
 
             segments.forEach(seg => {
-                const srcDiv = document.createElement('div');
-                srcDiv.className = 'segment ' + (seg.final ? 'final' : 'live');
-                srcDiv.textContent = seg.src || '...';
-                srcDiv.dataset.id = seg.id;
-                sourceTranscript.appendChild(srcDiv);
+                const segLang = seg.src_lang;
+                const translations = seg.translations || {};
 
-                const deDiv = document.createElement('div');
-                deDiv.className = 'segment ' + (seg.final ? 'final' : 'live');
-                deDiv.textContent = seg.de || '...';
-                deDiv.dataset.id = seg.id;
-                germanTranscript.appendChild(deDiv);
+                // Determine what goes on left (foreign) and right (German)
+                let leftText, rightText;
+                if (segLang === 'de') {
+                    // German segment: source on right, translation on left
+                    rightText = seg.src;
+                    leftText = translations[foreignLang] || '...';
+                } else {
+                    // Foreign segment: source on left, translation on right
+                    leftText = seg.src;
+                    rightText = translations['de'] || '...';
+                }
+
+                // Left pane (foreign language)
+                const leftDiv = document.createElement('div');
+                leftDiv.className = 'segment ' + (seg.final ? 'final' : 'live');
+                leftDiv.textContent = leftText;
+                leftDiv.dataset.id = seg.id;
+                leftDiv.dataset.srcLang = segLang;
+                leftTranscript.appendChild(leftDiv);
+
+                // Right pane (German)
+                const rightDiv = document.createElement('div');
+                rightDiv.className = 'segment ' + (seg.final ? 'final' : 'live');
+                rightDiv.textContent = rightText;
+                rightDiv.dataset.id = seg.id;
+                rightDiv.dataset.srcLang = segLang;
+                rightTranscript.appendChild(rightDiv);
             });
 
             // Auto-scroll to bottom
-            sourceTranscript.scrollTop = sourceTranscript.scrollHeight;
-            germanTranscript.scrollTop = germanTranscript.scrollHeight;
+            leftTranscript.scrollTop = leftTranscript.scrollHeight;
+            rightTranscript.scrollTop = rightTranscript.scrollHeight;
         }
 
-        function updateTranslation(segmentId, translation) {
-            // Find the translation element by segment ID and update it
-            const deDiv = germanTranscript.querySelector(`[data-id="${segmentId}"]`);
-            if (deDiv) {
-                deDiv.textContent = translation || '...';
+        function updateTranslation(segmentId, tgtLang, text) {
+            // Find the segment elements by ID
+            const leftDiv = leftTranscript.querySelector(`[data-id="${segmentId}"]`);
+            const rightDiv = rightTranscript.querySelector(`[data-id="${segmentId}"]`);
+
+            if (!leftDiv || !rightDiv) return;
+
+            // Determine which pane needs the translation update
+            const segSrcLang = leftDiv.dataset.srcLang;
+
+            if (segSrcLang === 'de') {
+                // German source: translation goes to left (foreign) pane
+                if (tgtLang !== 'de') {
+                    leftDiv.textContent = text || '...';
+                }
+            } else {
+                // Foreign source: translation goes to right (German) pane
+                if (tgtLang === 'de') {
+                    rightDiv.textContent = text || '...';
+                }
             }
         }
 
@@ -335,10 +387,18 @@
 
                 ws.onopen = () => {
                     setStatus('Connected - Recording...', 'connected');
+
+                    // Set foreign language from selection if not "auto" or "de"
+                    const selectedLang = languageSelect.value;
+                    if (selectedLang !== 'auto' && selectedLang !== 'de') {
+                        foreignLang = selectedLang;
+                        leftLangLabel.textContent = LANG_NAMES[foreignLang] || foreignLang;
+                    }
+
                     const config = {
                         type: 'config',
                         sample_rate: SAMPLE_RATE,
-                        src_lang: languageSelect.value
+                        src_lang: selectedLang
                     };
                     ws.send(JSON.stringify(config));
 
@@ -350,13 +410,14 @@
                     try {
                         const data = JSON.parse(event.data);
                         if (data.type === 'segments' && data.segments) {
-                            renderSegments(data.segments);
+                            renderSegments(data.segments, data.foreign_lang);
                             if (data.src_lang && data.src_lang !== 'unknown') {
-                                setStatus(`Recording... (detected: ${data.src_lang})`, 'connected');
+                                const langName = LANG_NAMES[data.src_lang] || data.src_lang;
+                                setStatus(`Recording... (speaking: ${langName})`, 'connected');
                             }
                         } else if (data.type === 'translation') {
                             // Update translation for specific segment
-                            updateTranslation(data.segment_id, data.de);
+                            updateTranslation(data.segment_id, data.tgt_lang, data.text);
                         }
                     } catch (e) {
                         console.error('Parse error:', e);
@@ -446,8 +507,10 @@
         });
 
         clearBtn.addEventListener('click', () => {
-            sourceTranscript.innerHTML = '';
-            germanTranscript.innerHTML = '';
+            leftTranscript.innerHTML = '';
+            rightTranscript.innerHTML = '';
+            foreignLang = null;
+            leftLangLabel.textContent = 'Foreign Language';
         });
     </script>
 </body>

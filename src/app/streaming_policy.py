@@ -10,6 +10,7 @@ class Segment:
     abs_start: float
     abs_end: float
     src: str
+    src_lang: str
     final: bool
 
 
@@ -24,6 +25,7 @@ class SegmentTracker:
         hyp_segments: list[dict],
         window_start: float,
         now_sec: float,
+        src_lang: str = "unknown",
     ) -> tuple[list[Segment], list[Segment]]:
         """
         Process hypothesis segments and return (all_segments, newly_finalized).
@@ -54,6 +56,7 @@ class SegmentTracker:
                         abs_start=abs_start,
                         abs_end=abs_end,
                         src=src_text,
+                        src_lang=src_lang,
                         final=True,
                     )
                     self.finalized_segments.append(segment)
@@ -67,6 +70,7 @@ class SegmentTracker:
                         abs_start=abs_start,
                         abs_end=abs_end,
                         src=src_text,
+                        src_lang=src_lang,
                         final=False,
                     )
                     live_segments.append(segment)

@@ -135,6 +135,6 @@ class TestTranslateTexts:
         translate_texts(["Hello"], src_lang="en", tgt_lang="de")
 
         call_args = mock_llm.create_chat_completion.call_args
-        assert call_args[1]["max_tokens"] == 512
+        assert call_args[1]["max_tokens"] == 256
         assert call_args[1]["temperature"] == 0.3
         assert call_args[1]["top_p"] == 0.9
