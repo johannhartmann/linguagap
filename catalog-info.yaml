@@ -1,0 +1,73 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: linguagap
+  title: LinguaGap
+  description: Real-time speech transcription and translation system using GPU-accelerated ASR and LLM translation
+  annotations:
+    backstage.io/techdocs-ref: dir:.
+    github.com/project-slug: johannhartmann/linguagap
+    argocd/app-name: linguagap
+  tags:
+    - python
+    - fastapi
+    - machine-learning
+    - asr
+    - translation
+    - gpu
+    - websocket
+  links:
+    - url: https://linguagap.data.mayflower.tech
+      title: Live Application
+      icon: web
+    - url: https://github.com/johannhartmann/linguagap
+      title: GitHub Repository
+      icon: github
+    - url: https://github.com/johannhartmann/linguagap/actions
+      title: CI/CD Pipeline
+      icon: dashboard
+spec:
+  type: service
+  lifecycle: production
+  owner: guests
+  providesApis:
+    - linguagap-api
+---
+apiVersion: backstage.io/v1alpha1
+kind: API
+metadata:
+  name: linguagap-api
+  title: LinguaGap API
+  description: REST and WebSocket API for real-time speech transcription and translation
+  tags:
+    - rest
+    - websocket
+spec:
+  type: openapi
+  lifecycle: production
+  owner: guests
+  definition: |
+    openapi: 3.0.0
+    info:
+      title: LinguaGap API
+      version: 1.0.0
+      description: Real-time speech transcription and translation
+    servers:
+      - url: https://linguagap.data.mayflower.tech
+    paths:
+      /health:
+        get:
+          summary: Health check
+          responses:
+            '200':
+              description: Service healthy
+      /metrics:
+        get:
+          summary: Performance metrics
+          responses:
+            '200':
+              description: Metrics JSON
+      /ws:
+        get:
+          summary: WebSocket endpoint for real-time streaming
+          description: Connect via WebSocket for real-time audio streaming

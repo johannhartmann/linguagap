@@ -1,0 +1,34 @@
+site_name: LinguaGap
+site_description: Real-time speech transcription and translation system
+repo_url: https://github.com/johannhartmann/linguagap
+edit_uri: edit/main/docs/
+
+nav:
+  - Overview: index.md
+  - Architecture: architecture.md
+  - API Reference: api-reference.md
+  - Configuration: configuration.md
+  - Deployment: deployment.md
+  - Development: development.md
+  - Troubleshooting: troubleshooting.md
+
+plugins:
+  - techdocs-core
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - tables
+  - attr_list
+  - md_in_html
