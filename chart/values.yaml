@@ -79,3 +79,21 @@ nodeSelector: {}
 tolerations: []
 
 affinity: {}
+
+# Monitoring configuration
+monitoring:
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+    scrapeTimeout: 10s
+    labels:
+      release: monitoring
+  prometheusRule:
+    enabled: true
+    labels:
+      release: monitoring
+  grafana:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      folder: LinguaGap
