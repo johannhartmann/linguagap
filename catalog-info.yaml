@@ -8,6 +8,12 @@ metadata:
     backstage.io/techdocs-ref: dir:.
     github.com/project-slug: johannhartmann/linguagap
     argocd/app-name: linguagap
+    backstage.io/kubernetes-id: linguagap
+    backstage.io/kubernetes-namespace: linguagap
+    prometheus.io/alert: "true"
+    prometheus.io/rule: linguagap
+    grafana/dashboard-selector: linguagap
+    grafana/alert-label-selector: app=linguagap
   tags:
     - python
     - fastapi
