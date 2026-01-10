@@ -30,11 +30,11 @@ persistence:
 
 resources:
   requests:
-    memory: "8Gi"
+    memory: "12Gi"
     cpu: "2"
     nvidia.com/gpu: "1"
   limits:
-    memory: "16Gi"
+    memory: "24Gi"
     cpu: "8"
     nvidia.com/gpu: "1"
 
@@ -62,8 +62,8 @@ env:
   ASR_MODEL: deepdml/faster-whisper-large-v3-turbo-ct2
   ASR_DEVICE: cuda
   ASR_COMPUTE_TYPE: float16
-  MT_MODEL_REPO: Qwen/Qwen3-4B-GGUF
-  MT_MODEL_FILE: Qwen3-4B-Q4_K_M.gguf
+  MT_MODEL_REPO: Qwen/Qwen3-14B-GGUF
+  MT_MODEL_FILE: Qwen3-14B-Q4_K_M.gguf
   MT_N_GPU_LAYERS: "-1"
   MT_N_CTX: "2048"
   WINDOW_SEC: "8.0"

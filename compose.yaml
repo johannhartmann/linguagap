@@ -20,6 +20,8 @@ services:
       - PYTHONUNBUFFERED=1
       - HF_HOME=/data/hf
       - HF_HUB_DISABLE_TELEMETRY=1
+      - MT_MODEL_REPO=Qwen/Qwen3-14B-GGUF
+      - MT_MODEL_FILE=Qwen3-14B-Q4_K_M.gguf
     deploy:
       resources:
         reservations:

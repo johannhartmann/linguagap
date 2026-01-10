@@ -2,6 +2,8 @@ import os
 from dataclasses import dataclass, field
 
 STABILITY_SEC = float(os.getenv("STABILITY_SEC", "1.25"))
+# How many ticks a live segment can be missing before being dropped
+LIVE_SEGMENT_GRACE_TICKS = int(os.getenv("LIVE_SEGMENT_GRACE_TICKS", "3"))
 
 
 @dataclass
@@ -15,10 +17,29 @@ class Segment:
 
 
 @dataclass
+class LiveSegmentState:
+    """Track state of a live (non-finalized) segment."""
+
+    segment: Segment
+    missing_ticks: int = 0  # How many ticks since last seen
+
+
+@dataclass
 class SegmentTracker:
     next_id: int = 0
     finalized_segments: list[Segment] = field(default_factory=list)
     finalized_end_time: float = 0.0
+    # Persistent live segments: keyed by a rough time bucket for matching
+    live_segment_states: list[LiveSegmentState] = field(default_factory=list)
+
+    def _segments_overlap(self, seg1_start: float, seg1_end: float, seg2: Segment) -> bool:
+        """Check if two segments overlap significantly."""
+        overlap_start = max(seg1_start, seg2.abs_start)
+        overlap_end = min(seg1_end, seg2.abs_end)
+        overlap_duration = max(0, overlap_end - overlap_start)
+        seg1_duration = seg1_end - seg1_start
+        # Consider overlapping if > 50% of the new segment overlaps
+        return overlap_duration > seg1_duration * 0.5 if seg1_duration > 0 else False
 
     def update_from_hypothesis(
         self,
@@ -36,8 +57,8 @@ class SegmentTracker:
         """
         stability_threshold = now_sec - STABILITY_SEC
 
-        live_segments = []
         newly_finalized = []
+        seen_live_indices: set[int] = set()
 
         for seg in hyp_segments:
             abs_start = window_start + seg["start"]
@@ -47,34 +68,72 @@ class SegmentTracker:
             if abs_start < self.finalized_end_time:
                 continue
 
+            if not src_text:
+                continue
+
             is_final = abs_end <= stability_threshold
 
             if is_final:
-                if src_text:
-                    segment = Segment(
-                        id=self.next_id,
-                        abs_start=abs_start,
-                        abs_end=abs_end,
-                        src=src_text,
-                        src_lang=src_lang,
-                        final=True,
-                    )
-                    self.finalized_segments.append(segment)
-                    newly_finalized.append(segment)
-                    self.finalized_end_time = abs_end
-                    self.next_id += 1
+                # Finalize this segment
+                segment = Segment(
+                    id=self.next_id,
+                    abs_start=abs_start,
+                    abs_end=abs_end,
+                    src=src_text,
+                    src_lang=src_lang,
+                    final=True,
+                )
+                self.finalized_segments.append(segment)
+                newly_finalized.append(segment)
+                self.finalized_end_time = abs_end
+                self.next_id += 1
+
+                # Remove any live segments that overlap with the finalized segment
+                self.live_segment_states = [
+                    ls
+                    for ls in self.live_segment_states
+                    if not self._segments_overlap(ls.segment.abs_start, ls.segment.abs_end, segment)
+                ]
             else:
-                if src_text:
-                    segment = Segment(
-                        id=self.next_id + len(live_segments),
+                # Try to match with existing live segment
+                matched = False
+                for i, ls in enumerate(self.live_segment_states):
+                    if self._segments_overlap(abs_start, abs_end, ls.segment):
+                        # Update existing live segment
+                        ls.segment.abs_start = abs_start
+                        ls.segment.abs_end = abs_end
+                        ls.segment.src = src_text
+                        ls.segment.src_lang = src_lang
+                        ls.missing_ticks = 0
+                        seen_live_indices.add(i)
+                        matched = True
+                        break
+
+                if not matched:
+                    # Create new live segment
+                    new_segment = Segment(
+                        id=self.next_id,
                         abs_start=abs_start,
                         abs_end=abs_end,
                         src=src_text,
                         src_lang=src_lang,
                         final=False,
                     )
-                    live_segments.append(segment)
+                    self.live_segment_states.append(LiveSegmentState(segment=new_segment))
+                    seen_live_indices.add(len(self.live_segment_states) - 1)
+                    self.next_id += 1
 
+        # Increment missing count for unseen live segments and remove expired ones
+        updated_live_states = []
+        for i, ls in enumerate(self.live_segment_states):
+            if i not in seen_live_indices:
+                ls.missing_ticks += 1
+            if ls.missing_ticks <= LIVE_SEGMENT_GRACE_TICKS:
+                updated_live_states.append(ls)
+        self.live_segment_states = updated_live_states
+
+        # Build result: finalized + current live segments
+        live_segments = [ls.segment for ls in self.live_segment_states]
         return self.finalized_segments + live_segments, newly_finalized
 
     def force_finalize_all(self, live_segments: list[Segment]) -> list[Segment]:
