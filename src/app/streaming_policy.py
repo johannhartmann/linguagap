@@ -14,6 +14,7 @@ class Segment:
     src: str
     src_lang: str
     final: bool
+    speaker_id: str | None = None  # Speaker identifier from diarization
 
 
 @dataclass
@@ -73,6 +74,10 @@ class SegmentTracker:
 
             is_final = abs_end <= stability_threshold
 
+            # Get speaker_id and per-segment language from hypothesis if available
+            speaker_id = seg.get("speaker_id")
+            seg_lang = seg.get("lang", src_lang)  # Use per-segment lang or fallback
+
             if is_final:
                 # Finalize this segment
                 segment = Segment(
@@ -80,8 +85,9 @@ class SegmentTracker:
                     abs_start=abs_start,
                     abs_end=abs_end,
                     src=src_text,
-                    src_lang=src_lang,
+                    src_lang=seg_lang,
                     final=True,
+                    speaker_id=speaker_id,
                 )
                 self.finalized_segments.append(segment)
                 newly_finalized.append(segment)
@@ -103,7 +109,9 @@ class SegmentTracker:
                         ls.segment.abs_start = abs_start
                         ls.segment.abs_end = abs_end
                         ls.segment.src = src_text
-                        ls.segment.src_lang = src_lang
+                        ls.segment.src_lang = seg_lang
+                        if speaker_id is not None:
+                            ls.segment.speaker_id = speaker_id
                         ls.missing_ticks = 0
                         seen_live_indices.add(i)
                         matched = True
@@ -116,8 +124,9 @@ class SegmentTracker:
                         abs_start=abs_start,
                         abs_end=abs_end,
                         src=src_text,
-                        src_lang=src_lang,
+                        src_lang=seg_lang,
                         final=False,
+                        speaker_id=speaker_id,
                     )
                     self.live_segment_states.append(LiveSegmentState(segment=new_segment))
                     seen_live_indices.add(len(self.live_segment_states) - 1)
@@ -158,6 +167,7 @@ class SegmentTracker:
                 src=seg.src,
                 src_lang=seg.src_lang,
                 final=True,
+                speaker_id=seg.speaker_id,
             )
             self.finalized_segments.append(finalized_seg)
             newly_finalized.append(finalized_seg)

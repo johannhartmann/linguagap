@@ -9,6 +9,8 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.asr import get_model, transcribe_wav_path
+from app.diarization import warmup_diarization
+from app.lang_id import warmup_lang_id
 from app.mt import get_llm, translate_texts
 from app.scripts.asr_smoke import generate_silence_wav
 from app.streaming import get_metrics, handle_websocket
@@ -25,6 +27,10 @@ def warmup_models():
     get_llm()
     translate_texts(["Hello"], src_lang="en", tgt_lang="de")
     print("MT model ready")
+
+    # Warm up diarization and language ID models
+    warmup_diarization()
+    warmup_lang_id()
 
 
 @asynccontextmanager

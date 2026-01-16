@@ -190,6 +190,24 @@
             background: #f8d7da;
             color: #721c24;
         }
+        /* Speaker label styles */
+        .speaker-label {
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+            opacity: 0.7;
+        }
+        .bubble.speaker-left .speaker-label {
+            color: #666;
+        }
+        .bubble.speaker-right .speaker-label {
+            color: rgba(255, 255, 255, 0.8);
+        }
+        .bubble-content {
+            display: block;
+        }
     </style>
 </head>
 <body>
@@ -388,6 +406,12 @@
             statusEl.className = 'status ' + type;
         }
 
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
         function renderSegments(segments, serverForeignLang) {
             // Update foreign language from server if detected
             if (serverForeignLang && !foreignLang) {
@@ -403,6 +427,7 @@
                 const translations = seg.translations || {};
                 const isGermanSpeaker = (segLang === 'de');
                 const liveClass = seg.final ? '' : ' live';
+                const speakerId = seg.speaker_id;  // From diarization
 
                 // Determine what goes on left (foreign) and right (German)
                 let leftText, rightText;
@@ -416,14 +441,24 @@
                     rightText = translations['de'] || '...';
                 }
 
+                // Format speaker label (e.g., "SPEAKER_00" -> "Speaker 1")
+                const speakerLabel = speakerId
+                    ? speakerId.replace('SPEAKER_', 'Speaker ').replace(/^Speaker 0+/, 'Speaker ')
+                    : '';
+
                 // Left pane (foreign language view)
                 // Foreign speaker = left bubble (owner), German speaker = right bubble (other)
                 const leftDiv = document.createElement('div');
                 const leftSpeakerClass = isGermanSpeaker ? 'speaker-right' : 'speaker-left';
                 leftDiv.className = 'bubble ' + leftSpeakerClass + liveClass;
-                leftDiv.textContent = leftText;
+                if (speakerLabel) {
+                    leftDiv.innerHTML = `<div class="speaker-label">${speakerLabel}</div><span class="bubble-content">${escapeHtml(leftText)}</span>`;
+                } else {
+                    leftDiv.textContent = leftText;
+                }
                 leftDiv.dataset.id = seg.id;
                 leftDiv.dataset.srcLang = segLang;
+                if (speakerId) leftDiv.dataset.speakerId = speakerId;
                 leftTranscript.appendChild(leftDiv);
 
                 // Right pane (German view)
@@ -431,9 +466,14 @@
                 const rightDiv = document.createElement('div');
                 const rightSpeakerClass = isGermanSpeaker ? 'speaker-right' : 'speaker-left';
                 rightDiv.className = 'bubble ' + rightSpeakerClass + liveClass;
-                rightDiv.textContent = rightText;
+                if (speakerLabel) {
+                    rightDiv.innerHTML = `<div class="speaker-label">${speakerLabel}</div><span class="bubble-content">${escapeHtml(rightText)}</span>`;
+                } else {
+                    rightDiv.textContent = rightText;
+                }
                 rightDiv.dataset.id = seg.id;
                 rightDiv.dataset.srcLang = segLang;
+                if (speakerId) rightDiv.dataset.speakerId = speakerId;
                 rightTranscript.appendChild(rightDiv);
             });
 
@@ -452,15 +492,25 @@
             // Determine which pane needs the translation update
             const isGermanSpeaker = (leftDiv.dataset.srcLang === 'de');
 
+            // Update the bubble content (handles both plain text and speaker-labeled bubbles)
+            function updateBubbleContent(div, newText) {
+                const contentSpan = div.querySelector('.bubble-content');
+                if (contentSpan) {
+                    contentSpan.textContent = newText || '...';
+                } else {
+                    div.textContent = newText || '...';
+                }
+            }
+
             if (isGermanSpeaker) {
                 // German speaker: translation goes to left (foreign) pane
                 if (tgtLang !== 'de') {
-                    leftDiv.textContent = text || '...';
+                    updateBubbleContent(leftDiv, text);
                 }
             } else {
                 // Foreign speaker: translation goes to right (German) pane
                 if (tgtLang === 'de') {
-                    rightDiv.textContent = text || '...';
+                    updateBubbleContent(rightDiv, text);
                 }
             }
         }

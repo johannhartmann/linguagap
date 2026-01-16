@@ -11,6 +11,8 @@ import numpy as np
 from fastapi import WebSocket
 
 from app.asr import get_model
+from app.diarization import SpeakerSegment, StreamingDiarizer
+from app.lang_id import SpeakerLanguageTracker
 from app.mt import (
     regenerate_summary_with_feedback,
     summarize_conversation,
@@ -29,6 +31,7 @@ _executor = ThreadPoolExecutor(max_workers=2)
 _metrics = {
     "asr_times": deque(maxlen=100),
     "mt_times": deque(maxlen=100),
+    "diar_times": deque(maxlen=100),
     "tick_times": deque(maxlen=100),
 }
 
@@ -36,11 +39,13 @@ _metrics = {
 def get_metrics() -> dict:
     asr_times = list(_metrics["asr_times"])
     mt_times = list(_metrics["mt_times"])
+    diar_times = list(_metrics["diar_times"])
     tick_times = list(_metrics["tick_times"])
 
     return {
         "avg_asr_time_ms": sum(asr_times) / len(asr_times) * 1000 if asr_times else 0,
         "avg_mt_time_ms": sum(mt_times) / len(mt_times) * 1000 if mt_times else 0,
+        "avg_diar_time_ms": sum(diar_times) / len(diar_times) * 1000 if diar_times else 0,
         "avg_tick_time_ms": sum(tick_times) / len(tick_times) * 1000 if tick_times else 0,
         "sample_count": len(tick_times),
     }
@@ -59,6 +64,10 @@ class StreamingSession:
         self.segment_tracker = SegmentTracker()
         self.dropped_frames = 0
         self.translations: dict[int, dict[str, str]] = {}  # segment_id -> {lang -> translation}
+        # Speaker diarization and language tracking
+        self.diarizer = StreamingDiarizer(sample_rate=sample_rate)
+        self.language_tracker = SpeakerLanguageTracker()
+        self.last_diar_segments: list[SpeakerSegment] = []  # Cache for merging with ASR
 
     def add_audio(self, pcm16_bytes: bytes):
         self.audio_buffer.append(pcm16_bytes)
@@ -101,6 +110,29 @@ class StreamingSession:
         return len(all_bytes) / 2 / self.sample_rate
 
 
+def run_diarization(
+    session: StreamingSession,
+    audio: np.ndarray,
+    window_start: float,
+) -> list[SpeakerSegment]:
+    """Run speaker diarization on audio window."""
+    diar_start = time.time()
+    try:
+        diar_segments = session.diarizer.process_audio(audio, window_start)
+        diar_time = time.time() - diar_start
+        _metrics["diar_times"].append(diar_time)
+
+        if diar_segments:
+            print(f"Diarization: {len(diar_segments)} speaker segments in {diar_time*1000:.1f}ms")
+            for seg in diar_segments[:3]:
+                print(f"  - [{seg.start:.2f}-{seg.end:.2f}] {seg.speaker_id}")
+
+        return diar_segments
+    except Exception as e:
+        print(f"Diarization error: {e}")
+        return []
+
+
 def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
     """Run ASR and return (all_segments, newly_finalized)."""
     tick_start = time.time()
@@ -111,6 +143,7 @@ def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
     if len(audio) < 1600:
         return list(session.segment_tracker.finalized_segments), []
 
+    # Run ASR
     asr_start = time.time()
     model = get_model()
     asr_segments, info = model.transcribe(
@@ -124,10 +157,9 @@ def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
     asr_time = time.time() - asr_start
     _metrics["asr_times"].append(asr_time)
 
-    if session.src_lang == "auto":
-        session.detected_lang = info.language
-    else:
-        session.detected_lang = session.src_lang
+    # Run diarization (can be parallelized in the future)
+    diar_segments = run_diarization(session, audio, window_start)
+    session.last_diar_segments = diar_segments
 
     # Debug: log raw ASR output
     audio_rms = float(np.sqrt(np.mean(audio**2)))
@@ -148,22 +180,58 @@ def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
         words = text.split()
         if len(words) > 1 and len(set(words)) == 1:
             continue
+
+        # Calculate absolute times for this segment
+        abs_start = window_start + seg.start
+        abs_end = window_start + seg.end
+
+        # Find dominant speaker for this segment using diarization
+        speaker_id = session.diarizer.get_dominant_speaker(diar_segments, abs_start, abs_end)
+
+        # Get language for this speaker (detects once, then caches)
+        if speaker_id:
+            # Extract segment audio for language detection if needed
+            seg_start_sample = int(seg.start * session.sample_rate)
+            seg_end_sample = int(seg.end * session.sample_rate)
+            seg_audio = (
+                audio[seg_start_sample:seg_end_sample] if seg_end_sample <= len(audio) else None
+            )
+
+            segment_lang = session.language_tracker.get_speaker_language(
+                speaker_id,
+                audio=seg_audio,
+                sample_rate=session.sample_rate,
+            )
+
+            # Update foreign language tracking if detected
+            if segment_lang not in ("unknown", "de") and session.foreign_lang is None:
+                session.foreign_lang = segment_lang
+                print(f"Foreign language detected for {speaker_id}: {segment_lang}")
+        else:
+            # No speaker identified, use Whisper's detection
+            segment_lang = info.language if session.src_lang == "auto" else session.src_lang
+
         hyp_segments.append(
             {
                 "start": seg.start,
                 "end": seg.end,
                 "text": text,
+                "speaker_id": speaker_id,
+                "lang": segment_lang,
             }
         )
 
-    # Get the detected language for this segment
-    segment_lang = session.detected_lang or "unknown"
+    # Update session's detected language (for backwards compatibility)
+    if session.src_lang == "auto":
+        session.detected_lang = info.language
+    else:
+        session.detected_lang = session.src_lang
 
     all_segments, newly_finalized = session.segment_tracker.update_from_hypothesis(
         hyp_segments=hyp_segments,
         window_start=window_start,
         now_sec=now_sec,
-        src_lang=segment_lang,
+        src_lang=session.detected_lang or "unknown",
     )
 
     tick_time = time.time() - tick_start
