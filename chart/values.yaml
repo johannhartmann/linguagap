@@ -73,6 +73,21 @@ env:
   HF_HOME: /data/hf
   HF_HUB_DISABLE_TELEMETRY: "1"
   PYTHONUNBUFFERED: "1"
+  # Diarization settings
+  DIARIZATION_ENABLED: "true"
+  DIARIZATION_DEVICE: cuda
+
+# Secrets configuration
+# For HF_TOKEN: either create the secret manually or set create: true with value
+# Manual creation: kubectl create secret generic hf-token --from-literal=token=YOUR_TOKEN -n linguagap
+secrets:
+  hfToken:
+    enabled: true
+    secretName: hf-token
+    secretKey: token
+    # Set create: true and value to create the secret via Helm (not recommended for production)
+    create: false
+    value: ""
 
 nodeSelector: {}
 
