@@ -39,23 +39,24 @@ resources:
     nvidia.com/gpu: "1"
 
 # Probes - very long initial delay for model warmup (ASR + MT 14B + diarization + language ID)
+# 14B model loading from PVC can take 15-20 minutes on slow storage
 livenessProbe:
   httpGet:
     path: /health
     port: http
-  initialDelaySeconds: 600
-  periodSeconds: 30
-  timeoutSeconds: 10
+  initialDelaySeconds: 1200
+  periodSeconds: 60
+  timeoutSeconds: 30
   failureThreshold: 10
 
 readinessProbe:
   httpGet:
     path: /health
     port: http
-  initialDelaySeconds: 600
-  periodSeconds: 10
-  timeoutSeconds: 10
-  failureThreshold: 30
+  initialDelaySeconds: 1200
+  periodSeconds: 30
+  timeoutSeconds: 30
+  failureThreshold: 20
 
 # Environment variables
 env:
