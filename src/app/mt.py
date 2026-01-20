@@ -63,8 +63,8 @@ def get_llm() -> Llama:
 
 def translate_texts(texts: list[str], src_lang: str, tgt_lang: str = "de") -> list[str]:
     llm = get_llm()
-    src_name, src_code = LANG_INFO.get(src_lang, (src_lang, src_lang))
-    tgt_name, tgt_code = LANG_INFO.get(tgt_lang, (tgt_lang, tgt_lang))
+    _, src_code = LANG_INFO.get(src_lang, (src_lang, src_lang))
+    _, tgt_code = LANG_INFO.get(tgt_lang, (tgt_lang, tgt_lang))
 
     results = []
     for text in texts:
@@ -72,18 +72,18 @@ def translate_texts(texts: list[str], src_lang: str, tgt_lang: str = "de") -> li
             results.append("")
             continue
 
-        # TranslateGemma prompt format: single user message with two blank lines before text
-        prompt = (
-            f"You are a professional {src_name} ({src_code}) to {tgt_name} ({tgt_code}) translator. "
-            f"Your goal is to accurately convey the meaning and nuances of the source text in the "
-            f"target language. Provide only the translation without any explanations or comments."
-            f"\n\n\n{text}"
-        )
-
+        # TranslateGemma requires structured content with type, lang codes, and text
         messages = [
             {
                 "role": "user",
-                "content": prompt,
+                "content": [
+                    {
+                        "type": "text",
+                        "source_lang_code": src_code,
+                        "target_lang_code": tgt_code,
+                        "text": text,
+                    }
+                ],
             },
         ]
 
