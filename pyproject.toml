@@ -30,8 +30,9 @@ dependencies = [
     "llama-cpp-python>=0.3.0",
     "huggingface-hub>=0.20.0",
     # Speaker diarization and language identification
-    "torch>=2.0.0",
-    "torchaudio>=2.0.0",
+    # Pin to 2.5.x for cuDNN 9.7 compatibility (base image has 9.7, torch 2.8 needs 9.8)
+    "torch>=2.5.0,<2.6.0",
+    "torchaudio>=2.5.0,<2.6.0",
     "pyannote.audio>=3.1.0",
     "speechbrain>=1.0.0",
 ]
