@@ -46,6 +46,7 @@ def get_llm() -> Llama:
             n_gpu_layers=MT_N_GPU_LAYERS,
             n_ctx=MT_N_CTX,
             verbose=False,
+            use_mmap=False,  # Sequential read - faster on network storage
         )
         print("MT model loaded")
     return _llm
