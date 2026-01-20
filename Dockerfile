@@ -21,8 +21,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install uv
 RUN pip3 install --no-cache-dir uv --break-system-packages
 
-# Enable CUDA for llama-cpp-python build
-ENV CMAKE_ARGS="-DGGML_CUDA=on"
+# Enable CUDA for llama-cpp-python build with Blackwell (sm_120) support
+# FORCE_CUBLAS avoids custom kernel crashes, NO_PINNED for GDDR7 compatibility
+ENV CMAKE_ARGS="-DGGML_CUDA=ON -DGGML_CUDA_FORCE_CUBLAS=1 -DGGML_CUDA_NO_PINNED=1 -DCMAKE_CUDA_ARCHITECTURES=120"
 ENV FORCE_CMAKE=1
 
 WORKDIR /app
