@@ -24,7 +24,7 @@ ingress:
 
 persistence:
   enabled: true
-  size: 40Gi
+  size: 20Gi
   storageClassName: longhorn
   accessMode: ReadWriteOnce
 
@@ -64,7 +64,7 @@ env:
   ASR_DEVICE: cuda
   ASR_COMPUTE_TYPE: float16
   MT_MODEL_REPO: bullerwins/translategemma-27b-it-GGUF
-  MT_MODEL_FILE: translategemma-27b-it-Q4_K_M.gguf
+  MT_MODEL_FILE: translategemma-27b-it-Q3_K_L.gguf
   MT_N_GPU_LAYERS: "-1"
   MT_N_CTX: "4096"
   WINDOW_SEC: "8.0"
