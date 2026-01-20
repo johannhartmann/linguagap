@@ -1,4 +1,5 @@
-FROM nvidia/cuda:12.8.0-cudnn-devel-ubuntu24.04 AS builder
+# CUDA 12.9 with cuDNN 9.8+ required for PyTorch 2.8+ and Blackwell GPUs (sm_120)
+FROM nvidia/cuda:12.9.0-cudnn-devel-ubuntu24.04 AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
@@ -35,8 +36,8 @@ RUN ln -s /usr/local/cuda/lib64/stubs/libcuda.so /usr/local/cuda/lib64/libcuda.s
     ldconfig && \
     uv sync --frozen
 
-# Runtime stage
-FROM nvidia/cuda:12.8.0-cudnn-runtime-ubuntu24.04
+# Runtime stage - must match builder CUDA version
+FROM nvidia/cuda:12.9.0-cudnn-runtime-ubuntu24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
