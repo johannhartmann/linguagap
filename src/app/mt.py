@@ -3,31 +3,40 @@ import os
 from huggingface_hub import hf_hub_download
 from llama_cpp import Llama
 
-MT_MODEL_REPO = os.getenv("MT_MODEL_REPO", "Qwen/Qwen3-4B-GGUF")
-MT_MODEL_FILE = os.getenv("MT_MODEL_FILE", "Qwen3-4B-Q4_K_M.gguf")
+MT_MODEL_REPO = os.getenv("MT_MODEL_REPO", "bullerwins/translategemma-27b-it-GGUF")
+MT_MODEL_FILE = os.getenv("MT_MODEL_FILE", "translategemma-27b-it-Q4_K_M.gguf")
 MT_N_GPU_LAYERS = int(os.getenv("MT_N_GPU_LAYERS", "-1"))  # -1 = all layers on GPU
-MT_N_CTX = int(os.getenv("MT_N_CTX", "2048"))
+MT_N_CTX = int(os.getenv("MT_N_CTX", "4096"))
 
-# Language name mapping for prompts
-LANG_NAMES = {
-    "en": "English",
-    "de": "German",
-    "fr": "French",
-    "es": "Spanish",
-    "it": "Italian",
-    "pl": "Polish",
-    "ro": "Romanian",
-    "hr": "Croatian",
-    "bg": "Bulgarian",
-    "sq": "Albanian",
-    "tr": "Turkish",
-    "ru": "Russian",
-    "uk": "Ukrainian",
-    "hu": "Hungarian",
-    "ar": "Arabic",
-    "fa": "Persian",
-    "sr": "Serbian",
+# Language name and code mapping for TranslateGemma prompts
+# Format: lang_code -> (full_name, iso_code)
+LANG_INFO = {
+    "en": ("English", "en"),
+    "de": ("German", "de"),
+    "fr": ("French", "fr"),
+    "es": ("Spanish", "es"),
+    "it": ("Italian", "it"),
+    "pl": ("Polish", "pl"),
+    "ro": ("Romanian", "ro"),
+    "hr": ("Croatian", "hr"),
+    "bg": ("Bulgarian", "bg"),
+    "sq": ("Albanian", "sq"),
+    "tr": ("Turkish", "tr"),
+    "ru": ("Russian", "ru"),
+    "uk": ("Ukrainian", "uk"),
+    "hu": ("Hungarian", "hu"),
+    "ar": ("Arabic", "ar"),
+    "fa": ("Persian", "fa"),
+    "sr": ("Serbian", "sr"),
+    "zh": ("Chinese", "zh-Hans"),
+    "ja": ("Japanese", "ja"),
+    "ko": ("Korean", "ko"),
+    "pt": ("Portuguese", "pt"),
+    "nl": ("Dutch", "nl"),
 }
+
+# Keep LANG_NAMES for backward compatibility
+LANG_NAMES = {k: v[0] for k, v in LANG_INFO.items()}
 
 _llm: Llama | None = None
 
@@ -54,8 +63,8 @@ def get_llm() -> Llama:
 
 def translate_texts(texts: list[str], src_lang: str, tgt_lang: str = "de") -> list[str]:
     llm = get_llm()
-    tgt_name = LANG_NAMES.get(tgt_lang, tgt_lang)
-    src_name = LANG_NAMES.get(src_lang, src_lang)
+    src_name, src_code = LANG_INFO.get(src_lang, (src_lang, src_lang))
+    tgt_name, tgt_code = LANG_INFO.get(tgt_lang, (tgt_lang, tgt_lang))
 
     results = []
     for text in texts:
@@ -63,16 +72,18 @@ def translate_texts(texts: list[str], src_lang: str, tgt_lang: str = "de") -> li
             results.append("")
             continue
 
-        # Use chat completion with /no_think to disable thinking mode
-        # /no_think must be at the END of the user message
+        # TranslateGemma prompt format: single user message with two blank lines before text
+        prompt = (
+            f"You are a professional {src_name} ({src_code}) to {tgt_name} ({tgt_code}) translator. "
+            f"Your goal is to accurately convey the meaning and nuances of the source text in the "
+            f"target language. Provide only the translation without any explanations or comments."
+            f"\n\n\n{text}"
+        )
+
         messages = [
             {
-                "role": "system",
-                "content": f"You are a translator. Translate {src_name} to {tgt_name}. Output only the translation.",
-            },
-            {
                 "role": "user",
-                "content": f"{text} /no_think",
+                "content": prompt,
             },
         ]
 
@@ -84,11 +95,6 @@ def translate_texts(texts: list[str], src_lang: str, tgt_lang: str = "de") -> li
         )
 
         response = output["choices"][0]["message"]["content"].strip()
-
-        # Clean up any residual thinking tags
-        if "<think>" in response:
-            response = response.split("</think>")[-1].strip() if "</think>" in response else ""
-
         results.append(response)
 
     return results
@@ -100,7 +106,7 @@ def summarize_conversation(segments: list[dict], _foreign_lang: str, target_lang
 
     Args:
         segments: List of segment dicts with 'src', 'src_lang', and 'translations'
-        foreign_lang: The non-German language code (e.g., 'en')
+        _foreign_lang: The non-German language code (unused, kept for API compatibility)
         target_lang: Language to generate summary in ('de' or foreign_lang)
 
     Returns:
@@ -123,15 +129,18 @@ def summarize_conversation(segments: list[dict], _foreign_lang: str, target_lang
 
     conversation_text = "\n".join(conversation_lines)
 
+    # TranslateGemma-style prompt for summarization
+    prompt = (
+        f"You are a professional summarizer. Create a concise summary of the following conversation "
+        f"in {target_name}. Capture the key points and main topics discussed. "
+        f"Output only the summary in 2-4 sentences."
+        f"\n\n\n{conversation_text}"
+    )
+
     messages = [
         {
-            "role": "system",
-            "content": f"You are a summarizer. Create a concise summary of the conversation in {target_name}. "
-            f"Capture the key points and main topics discussed. Output only the summary, 2-4 sentences.",
-        },
-        {
             "role": "user",
-            "content": f"Summarize this conversation:\n\n{conversation_text} /no_think",
+            "content": prompt,
         },
     ]
 
@@ -143,11 +152,6 @@ def summarize_conversation(segments: list[dict], _foreign_lang: str, target_lang
     )
 
     response = output["choices"][0]["message"]["content"].strip()
-
-    # Clean up any residual thinking tags
-    if "<think>" in response:
-        response = response.split("</think>")[-1].strip() if "</think>" in response else ""
-
     return response
 
 
@@ -169,21 +173,22 @@ def validate_summary_alignment(
 
     original_text = "\n".join(original_german_segments)
 
+    prompt = (
+        "You are a quality checker for translations and summaries. "
+        "Compare the German summary against the original German conversation segments below. "
+        "Check if key information is preserved and there are no mistranslations or missing points. "
+        "Respond in this exact format:\n"
+        "ALIGNED: yes or no\n"
+        "ISSUES: description of issues (or 'none')\n"
+        "FEEDBACK: specific suggestions for improvement (or 'none')"
+        f"\n\n\nOriginal German segments:\n{original_text}\n\n"
+        f"German summary to validate:\n{german_summary}"
+    )
+
     messages = [
         {
-            "role": "system",
-            "content": "You are a quality checker for translations and summaries. "
-            "Compare a German summary against original German conversation segments. "
-            "Check if key information is preserved and there are no mistranslations or missing points. "
-            "Respond in this exact format:\n"
-            "ALIGNED: yes or no\n"
-            "ISSUES: description of issues (or 'none')\n"
-            "FEEDBACK: specific suggestions for improvement (or 'none')",
-        },
-        {
             "role": "user",
-            "content": f"Original German segments from conversation:\n{original_text}\n\n"
-            f"German summary to validate:\n{german_summary} /no_think",
+            "content": prompt,
         },
     ]
 
@@ -195,10 +200,6 @@ def validate_summary_alignment(
     )
 
     response = output["choices"][0]["message"]["content"].strip()
-
-    # Clean up any residual thinking tags
-    if "<think>" in response:
-        response = response.split("</think>")[-1].strip() if "</think>" in response else ""
 
     # Parse response
     aligned = "ALIGNED: yes" in response.lower() or "aligned: yes" in response.lower()
@@ -236,7 +237,7 @@ def regenerate_summary_with_feedback(
 
     Args:
         segments: List of segment dicts
-        foreign_lang: The non-German language code
+        _foreign_lang: The non-German language code (unused, kept for API compatibility)
         target_lang: Language to generate summary in
         previous_issues: Issues from validation
         previous_feedback: Feedback from validation
@@ -263,20 +264,21 @@ def regenerate_summary_with_feedback(
     # Include feedback in prompt
     feedback_section = ""
     if previous_issues:
-        feedback_section += f"\n\nPrevious attempt had these issues: {previous_issues}"
+        feedback_section += f" Previous attempt had these issues: {previous_issues}."
     if previous_feedback:
-        feedback_section += f"\nPlease address: {previous_feedback}"
+        feedback_section += f" Please address: {previous_feedback}."
+
+    prompt = (
+        f"You are a professional summarizer. Create a concise summary of the following conversation "
+        f"in {target_name}. Capture the key points and main topics discussed. "
+        f"Output only the summary in 2-4 sentences.{feedback_section}"
+        f"\n\n\n{conversation_text}"
+    )
 
     messages = [
         {
-            "role": "system",
-            "content": f"You are a summarizer. Create a concise summary of the conversation in {target_name}. "
-            f"Capture the key points and main topics discussed. Output only the summary, 2-4 sentences."
-            f"{feedback_section}",
-        },
-        {
             "role": "user",
-            "content": f"Summarize this conversation:\n\n{conversation_text} /no_think",
+            "content": prompt,
         },
     ]
 
@@ -288,8 +290,4 @@ def regenerate_summary_with_feedback(
     )
 
     response = output["choices"][0]["message"]["content"].strip()
-
-    if "<think>" in response:
-        response = response.split("</think>")[-1].strip() if "</think>" in response else ""
-
     return response
