@@ -1,4 +1,5 @@
 import os
+import re
 
 from huggingface_hub import hf_hub_download
 from llama_cpp import Llama
@@ -7,6 +8,21 @@ MT_MODEL_REPO = os.getenv("MT_MODEL_REPO", "bullerwins/translategemma-27b-it-GGU
 MT_MODEL_FILE = os.getenv("MT_MODEL_FILE", "translategemma-27b-it-Q4_K_M.gguf")
 MT_N_GPU_LAYERS = int(os.getenv("MT_N_GPU_LAYERS", "-1"))  # -1 = all layers on GPU
 MT_N_CTX = int(os.getenv("MT_N_CTX", "4096"))
+
+# Summarization model configuration (Qwen3-4B - general purpose)
+SUMM_MODEL_REPO = os.getenv("SUMM_MODEL_REPO", "Qwen/Qwen3-4B-GGUF")
+SUMM_MODEL_FILE = os.getenv("SUMM_MODEL_FILE", "Qwen3-4B-Q4_K_M.gguf")
+SUMM_N_GPU_LAYERS = int(os.getenv("SUMM_N_GPU_LAYERS", "-1"))
+SUMM_N_CTX = int(os.getenv("SUMM_N_CTX", "4096"))
+
+# Regex to strip Qwen3 <think>...</think> blocks from responses
+_THINK_PATTERN = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
+
+
+def _strip_think_block(text: str) -> str:
+    """Strip Qwen3 thinking blocks from model output."""
+    return _THINK_PATTERN.sub("", text).strip()
+
 
 # Language name and code mapping for TranslateGemma prompts
 # Format: lang_code -> (full_name, iso_code)
@@ -39,9 +55,11 @@ LANG_INFO = {
 LANG_NAMES = {k: v[0] for k, v in LANG_INFO.items()}
 
 _llm: Llama | None = None
+_summ_llm: Llama | None = None
 
 
 def get_llm() -> Llama:
+    """Get the translation LLM (TranslateGemma - specialized for translation)."""
     global _llm
     if _llm is None:
         print(f"Downloading MT model: {MT_MODEL_REPO}/{MT_MODEL_FILE}")
@@ -59,6 +77,27 @@ def get_llm() -> Llama:
         )
         print("MT model loaded")
     return _llm
+
+
+def get_summ_llm() -> Llama:
+    """Get the summarization LLM (Qwen3-4B - general purpose model)."""
+    global _summ_llm
+    if _summ_llm is None:
+        print(f"Downloading summarization model: {SUMM_MODEL_REPO}/{SUMM_MODEL_FILE}")
+        model_path = hf_hub_download(  # nosec B615
+            repo_id=SUMM_MODEL_REPO,
+            filename=SUMM_MODEL_FILE,
+        )
+        print(f"Loading summarization model from: {model_path}")
+        _summ_llm = Llama(
+            model_path=model_path,
+            n_gpu_layers=SUMM_N_GPU_LAYERS,
+            n_ctx=SUMM_N_CTX,
+            verbose=False,
+            use_mmap=False,
+        )
+        print("Summarization model loaded")
+    return _summ_llm
 
 
 def translate_texts(texts: list[str], src_lang: str, tgt_lang: str = "de") -> list[str]:
@@ -112,7 +151,7 @@ def summarize_conversation(segments: list[dict], _foreign_lang: str, target_lang
     Returns:
         Summary text in target_lang
     """
-    llm = get_llm()
+    llm = get_summ_llm()
     target_name = LANG_NAMES.get(target_lang, target_lang)
 
     # Build conversation text with speaker labels
@@ -146,13 +185,13 @@ def summarize_conversation(segments: list[dict], _foreign_lang: str, target_lang
 
     output = llm.create_chat_completion(
         messages=messages,
-        max_tokens=512,
+        max_tokens=2048,
         temperature=0.5,
         top_p=0.9,
     )
 
     response = output["choices"][0]["message"]["content"].strip()
-    return response
+    return _strip_think_block(response)
 
 
 def validate_summary_alignment(
@@ -169,7 +208,7 @@ def validate_summary_alignment(
     Returns:
         Dict with 'aligned' (bool), 'issues' (str or None), 'feedback' (str)
     """
-    llm = get_llm()
+    llm = get_summ_llm()
 
     original_text = "\n".join(original_german_segments)
 
@@ -194,12 +233,12 @@ def validate_summary_alignment(
 
     output = llm.create_chat_completion(
         messages=messages,
-        max_tokens=512,
+        max_tokens=2048,
         temperature=0.3,
         top_p=0.9,
     )
 
-    response = output["choices"][0]["message"]["content"].strip()
+    response = _strip_think_block(output["choices"][0]["message"]["content"])
 
     # Parse response
     aligned = "ALIGNED: yes" in response.lower() or "aligned: yes" in response.lower()
@@ -245,7 +284,7 @@ def regenerate_summary_with_feedback(
     Returns:
         Improved summary text
     """
-    llm = get_llm()
+    llm = get_summ_llm()
     target_name = LANG_NAMES.get(target_lang, target_lang)
 
     # Build conversation text
@@ -284,10 +323,10 @@ def regenerate_summary_with_feedback(
 
     output = llm.create_chat_completion(
         messages=messages,
-        max_tokens=512,
+        max_tokens=2048,
         temperature=0.4,  # Slightly lower for more focused regeneration
         top_p=0.9,
     )
 
     response = output["choices"][0]["message"]["content"].strip()
-    return response
+    return _strip_think_block(response)

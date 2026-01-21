@@ -66,6 +66,11 @@ env:
   MT_MODEL_FILE: translategemma-27b-it.Q3_K_S.gguf
   MT_N_GPU_LAYERS: "-1"
   MT_N_CTX: "4096"
+  # Summarization model (Qwen3-4B - general purpose)
+  SUMM_MODEL_REPO: Qwen/Qwen3-4B-GGUF
+  SUMM_MODEL_FILE: Qwen3-4B-Q4_K_M.gguf
+  SUMM_N_GPU_LAYERS: "-1"
+  SUMM_N_CTX: "4096"
   WINDOW_SEC: "8.0"
   TICK_SEC: "0.5"
   STABILITY_SEC: "1.25"
