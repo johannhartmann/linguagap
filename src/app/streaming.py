@@ -694,9 +694,8 @@ async def handle_viewer_websocket(websocket: WebSocket, token: str) -> None:
             # Session is active, send current state
             session = entry.session
             segments_data = []
-            all_segments = list(session.segment_tracker.finalized_segments) + list(
-                session.segment_tracker.live_segments.values()
-            )
+            live_segments = [ls.segment for ls in session.segment_tracker.live_segment_states]
+            all_segments = list(session.segment_tracker.finalized_segments) + live_segments
             for seg in all_segments:
                 seg_dict = asdict(seg)
                 seg_dict["translations"] = session.translations.get(seg.id, {})
