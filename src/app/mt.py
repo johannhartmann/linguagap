@@ -168,12 +168,11 @@ def summarize_conversation(segments: list[dict], _foreign_lang: str, target_lang
 
     conversation_text = "\n".join(conversation_lines)
 
-    # TranslateGemma-style prompt for summarization
     prompt = (
-        f"You are a professional summarizer. Create a concise summary of the following conversation "
-        f"in {target_name}. Capture the key points and main topics discussed. "
-        f"Output only the summary in 2-4 sentences."
-        f"\n\n\n{conversation_text}"
+        f"Summarize this dialogue between two speakers in {target_name}. "
+        f"Include what BOTH the German speaker and the Foreign speaker said. "
+        f"Write 2-4 sentences covering the main topics from both sides."
+        f"\n\nConversation:\n{conversation_text}\n\nSummary:"
     )
 
     messages = [
@@ -308,10 +307,10 @@ def regenerate_summary_with_feedback(
         feedback_section += f" Please address: {previous_feedback}."
 
     prompt = (
-        f"You are a professional summarizer. Create a concise summary of the following conversation "
-        f"in {target_name}. Capture the key points and main topics discussed. "
-        f"Output only the summary in 2-4 sentences.{feedback_section}"
-        f"\n\n\n{conversation_text}"
+        f"Summarize this dialogue between two speakers in {target_name}. "
+        f"Include what BOTH the German speaker and the Foreign speaker said. "
+        f"Write 2-4 sentences covering the main topics from both sides.{feedback_section}"
+        f"\n\nConversation:\n{conversation_text}\n\nSummary:"
     )
 
     messages = [
