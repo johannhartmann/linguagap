@@ -13,7 +13,7 @@ from app.diarization import warmup_diarization
 from app.lang_id import warmup_lang_id
 from app.mt import get_llm, get_summ_llm, translate_texts
 from app.scripts.asr_smoke import generate_silence_wav
-from app.streaming import get_metrics, handle_websocket
+from app.streaming import get_metrics, handle_viewer_websocket, handle_websocket
 
 
 def warmup_models():
@@ -132,3 +132,21 @@ async def transcribe_translate(
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await handle_websocket(websocket)
+
+
+@app.get("/viewer/{token}")
+async def viewer_page(token: str):  # noqa: ARG001
+    """Serve the mobile viewer page.
+
+    The token is validated client-side via WebSocket connection.
+    """
+    viewer_html = STATIC_DIR / "viewer.html"
+    if not viewer_html.exists():
+        return {"error": "Viewer not available"}
+    return FileResponse(viewer_html)
+
+
+@app.websocket("/ws/viewer/{token}")
+async def viewer_websocket_endpoint(websocket: WebSocket, token: str):
+    """WebSocket endpoint for read-only viewers."""
+    await handle_viewer_websocket(websocket, token)

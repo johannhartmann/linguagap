@@ -38,12 +38,12 @@ resources:
     cpu: "8"
     nvidia.com/gpu: "1"
 
-# Probes - models are cached on PVC, startup is fast after first download
+# Probes - 27B model takes ~5min to load into GPU memory
 livenessProbe:
   httpGet:
     path: /health
     port: http
-  initialDelaySeconds: 180
+  initialDelaySeconds: 600
   periodSeconds: 60
   timeoutSeconds: 30
   failureThreshold: 10
@@ -52,7 +52,7 @@ readinessProbe:
   httpGet:
     path: /health
     port: http
-  initialDelaySeconds: 180
+  initialDelaySeconds: 600
   periodSeconds: 30
   timeoutSeconds: 30
   failureThreshold: 20

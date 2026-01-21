@@ -19,6 +19,7 @@ from app.mt import (
     translate_texts,
     validate_summary_alignment,
 )
+from app.session_registry import SessionEntry, registry
 from app.streaming_policy import Segment, SegmentTracker
 
 WINDOW_SEC = float(os.getenv("WINDOW_SEC", "8.0"))
@@ -49,6 +50,25 @@ def get_metrics() -> dict:
         "avg_tick_time_ms": sum(tick_times) / len(tick_times) * 1000 if tick_times else 0,
         "sample_count": len(tick_times),
     }
+
+
+async def broadcast_to_viewers(entry: SessionEntry, message: dict) -> None:
+    """Broadcast JSON message to all viewers, remove dead connections."""
+    if not entry.viewers:
+        return
+
+    message_json = json.dumps(message)
+    dead_viewers: list[WebSocket] = []
+
+    for viewer_ws in list(entry.viewers):
+        try:
+            await viewer_ws.send_text(message_json)
+        except Exception:
+            dead_viewers.append(viewer_ws)
+
+    # Clean up dead viewers
+    for viewer_ws in dead_viewers:
+        entry.viewers.discard(viewer_ws)
 
 
 class StreamingSession:
@@ -123,7 +143,7 @@ def run_diarization(
         _metrics["diar_times"].append(diar_time)
 
         if diar_segments:
-            print(f"Diarization: {len(diar_segments)} speaker segments in {diar_time*1000:.1f}ms")
+            print(f"Diarization: {len(diar_segments)} speaker segments in {diar_time * 1000:.1f}ms")
             for seg in diar_segments[:3]:
                 print(f"  - [{seg.start:.2f}-{seg.end:.2f}] {seg.speaker_id}")
 
@@ -337,6 +357,7 @@ async def handle_websocket(websocket: WebSocket):
     await websocket.accept()
 
     session: StreamingSession | None = None
+    session_token: str | None = None
     asr_task: asyncio.Task | None = None
     mt_task: asyncio.Task | None = None
     running = True
@@ -378,17 +399,20 @@ async def handle_websocket(websocket: WebSocket):
                             segments_data.append(seg_dict)
 
                         # Send ASR results immediately
-                        await websocket.send_text(
-                            json.dumps(
-                                {
-                                    "type": "segments",
-                                    "t": session.get_current_time(),
-                                    "src_lang": session.detected_lang or "unknown",
-                                    "foreign_lang": session.foreign_lang,
-                                    "segments": segments_data,
-                                }
-                            )
-                        )
+                        segments_msg = {
+                            "type": "segments",
+                            "t": session.get_current_time(),
+                            "src_lang": session.detected_lang or "unknown",
+                            "foreign_lang": session.foreign_lang,
+                            "segments": segments_data,
+                        }
+                        await websocket.send_text(json.dumps(segments_msg))
+
+                        # Broadcast to viewers
+                        if session_token:
+                            entry = await registry.get(session_token)
+                            if entry:
+                                await broadcast_to_viewers(entry, segments_msg)
 
                         # Queue newly finalized segments for translation
                         for seg in newly_finalized:
@@ -441,16 +465,19 @@ async def handle_websocket(websocket: WebSocket):
 
                     if running:
                         # Send translation update
-                        await websocket.send_text(
-                            json.dumps(
-                                {
-                                    "type": "translation",
-                                    "segment_id": segment.id,
-                                    "tgt_lang": tgt_lang,
-                                    "text": translation,
-                                }
-                            )
-                        )
+                        translation_msg = {
+                            "type": "translation",
+                            "segment_id": segment.id,
+                            "tgt_lang": tgt_lang,
+                            "text": translation,
+                        }
+                        await websocket.send_text(json.dumps(translation_msg))
+
+                        # Broadcast to viewers
+                        if session_token:
+                            entry = await registry.get(session_token)
+                            if entry:
+                                await broadcast_to_viewers(entry, translation_msg)
                 except Exception as e:
                     print(f"Translation error for segment {segment.id}: {e}")
 
@@ -473,10 +500,44 @@ async def handle_websocket(websocket: WebSocket):
                 if data.get("type") == "config":
                     sample_rate = data.get("sample_rate", 16000)
                     src_lang = data.get("src_lang", "auto")
+                    # Use client-provided token (generated on page load)
+                    session_token = data.get("token")
+                    if not session_token:
+                        print("Error: No token provided in config message")
+                        continue
+
                     session = StreamingSession(sample_rate=sample_rate, src_lang=src_lang)
                     asr_task = asyncio.create_task(asr_loop())
                     mt_task = asyncio.create_task(mt_loop())
-                    print(f"Session started: sample_rate={sample_rate}, src_lang={src_lang}")
+
+                    # Activate the session with the client-provided token
+                    await registry.activate(session_token, session, websocket)
+                    print(
+                        f"Session activated: sample_rate={sample_rate}, src_lang={src_lang}, token={session_token[:8]}..."
+                    )
+
+                    # Send config acknowledgment
+                    await websocket.send_text(
+                        json.dumps(
+                            {
+                                "type": "config_ack",
+                                "status": "active",
+                            }
+                        )
+                    )
+
+                    # Notify waiting viewers that session is now active
+                    entry = await registry.get(session_token)
+                    if entry and entry.viewers:
+                        segments_data = []
+                        await broadcast_to_viewers(
+                            entry,
+                            {
+                                "type": "session_active",
+                                "foreign_lang": session.foreign_lang,
+                                "segments": segments_data,
+                            },
+                        )
 
                 elif data.get("type") == "request_summary":
                     # Handle summary request
@@ -596,6 +657,14 @@ async def handle_websocket(websocket: WebSocket):
         print(f"WebSocket error: {e}")
     finally:
         running = False
+
+        # Notify viewers that session has ended and unregister
+        if session_token:
+            entry = await registry.get(session_token)
+            if entry:
+                await broadcast_to_viewers(entry, {"type": "session_ended"})
+            await registry.unregister(session_token)
+
         if asr_task:
             asr_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -604,3 +673,73 @@ async def handle_websocket(websocket: WebSocket):
             mt_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await mt_task
+
+
+async def handle_viewer_websocket(websocket: WebSocket, token: str) -> None:
+    """Handle a read-only viewer WebSocket connection."""
+    await websocket.accept()
+
+    # Add viewer to session (creates pending entry if doesn't exist)
+    if not await registry.add_viewer(token, websocket):
+        # Token not reserved - reserve it now for the viewer
+        await registry.reserve(token)
+        await registry.add_viewer(token, websocket)
+
+    print(f"Viewer connected to session {token[:8]}...")
+
+    try:
+        # Check if session is already active
+        entry = await registry.get(token)
+        if entry and entry.is_active:
+            # Session is active, send current state
+            session = entry.session
+            segments_data = []
+            all_segments = list(session.segment_tracker.finalized_segments) + list(
+                session.segment_tracker.live_segments.values()
+            )
+            for seg in all_segments:
+                seg_dict = asdict(seg)
+                seg_dict["translations"] = session.translations.get(seg.id, {})
+                segments_data.append(seg_dict)
+
+            await websocket.send_text(
+                json.dumps(
+                    {
+                        "type": "init",
+                        "status": "active",
+                        "foreign_lang": session.foreign_lang,
+                        "segments": segments_data,
+                    }
+                )
+            )
+        else:
+            # Session is pending - tell viewer to wait
+            await websocket.send_text(
+                json.dumps(
+                    {
+                        "type": "init",
+                        "status": "waiting",
+                        "message": "Waiting for recording to start...",
+                    }
+                )
+            )
+
+        # Keep connection alive with ping/pong
+        while True:
+            try:
+                # Wait for any message (used for pong/keepalive)
+                message = await asyncio.wait_for(websocket.receive(), timeout=30.0)
+                if message["type"] == "websocket.disconnect":
+                    break
+            except TimeoutError:
+                # Send ping
+                try:
+                    await websocket.send_text(json.dumps({"type": "ping"}))
+                except Exception:
+                    break
+
+    except Exception as e:
+        print(f"Viewer websocket error: {e}")
+    finally:
+        await registry.remove_viewer(token, websocket)
+        print(f"Viewer disconnected from session {token[:8]}...")
