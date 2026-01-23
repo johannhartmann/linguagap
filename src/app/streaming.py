@@ -12,7 +12,7 @@ from fastapi import WebSocket
 
 from app.asr import get_model
 from app.diarization import SpeakerSegment, StreamingDiarizer
-from app.lang_id import SpeakerLanguageTracker
+from app.lang_id import SpeakerLanguageTracker, detect_language_from_audio
 from app.mt import (
     regenerate_summary_with_feedback,
     summarize_conversation,
@@ -208,33 +208,34 @@ def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
         # Find dominant speaker for this segment using diarization
         speaker_id = session.diarizer.get_dominant_speaker(diar_segments, abs_start, abs_end)
 
-        # Get language for this speaker (detects once, then caches)
+        # Always run SpeechBrain on segment audio for reliable language detection
+        seg_start_sample = int(seg.start * session.sample_rate)
+        seg_end_sample = int(seg.end * session.sample_rate)
+        seg_audio = audio[seg_start_sample:seg_end_sample] if seg_end_sample <= len(audio) else None
+
+        segment_lang = "unknown"
+        confidence = 0.0
+
+        if seg_audio is not None and len(seg_audio) > 0:
+            segment_lang, confidence = detect_language_from_audio(seg_audio, session.sample_rate)
+
+        # If speaker identified, update cache if this detection has higher confidence
         if speaker_id:
-            # Extract segment audio for language detection if needed
-            seg_start_sample = int(seg.start * session.sample_rate)
-            seg_end_sample = int(seg.end * session.sample_rate)
-            seg_audio = (
-                audio[seg_start_sample:seg_end_sample] if seg_end_sample <= len(audio) else None
-            )
+            cached_conf = session.language_tracker.speaker_confidences.get(speaker_id, 0.0)
+            if confidence > cached_conf and confidence >= 0.5:
+                session.language_tracker.set_speaker_language(speaker_id, segment_lang, confidence)
+            elif cached_conf > 0:
+                # Use cached language if it has better confidence
+                segment_lang = session.language_tracker.speaker_languages.get(speaker_id, segment_lang)
 
-            segment_lang = session.language_tracker.get_speaker_language(
-                speaker_id,
-                audio=seg_audio,
-                sample_rate=session.sample_rate,
-            )
-
-            # Update foreign language tracking if detected
-            if segment_lang not in ("unknown", "de") and session.foreign_lang is None:
-                session.foreign_lang = segment_lang
-                print(f"Foreign language detected for {speaker_id}: {segment_lang}")
-        else:
-            # No speaker identified, use Whisper's detection
+        # Fall back to Whisper only if SpeechBrain confidence is very low
+        if confidence < 0.3 and segment_lang == "unknown":
             segment_lang = info.language if session.src_lang == "auto" else session.src_lang
 
-            # Also update foreign language tracking from Whisper detection
-            if segment_lang not in ("unknown", "de") and session.foreign_lang is None:
-                session.foreign_lang = segment_lang
-                print(f"Foreign language detected (no speaker): {segment_lang}")
+        # Update foreign language tracking
+        if segment_lang not in ("unknown", "de") and session.foreign_lang is None:
+            session.foreign_lang = segment_lang
+            print(f"Foreign language detected: {segment_lang} (confidence: {confidence:.2f})")
 
         hyp_segments.append(
             {
