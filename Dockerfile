@@ -23,7 +23,8 @@ RUN pip3 install --no-cache-dir uv --break-system-packages
 
 # Enable CUDA for llama-cpp-python build with Blackwell (sm_120) support
 # FORCE_CUBLAS avoids custom kernel crashes, NO_PINNED for GDDR7 compatibility
-ENV CMAKE_ARGS="-DGGML_CUDA=ON -DGGML_CUDA_FORCE_CUBLAS=1 -DGGML_CUDA_NO_PINNED=1 -DCMAKE_CUDA_ARCHITECTURES=120"
+# CPU flags: target Xeon E5 (AVX/AVX2/FMA, no AVX512), disable native detection
+ENV CMAKE_ARGS="-DGGML_CUDA=ON -DGGML_CUDA_FORCE_CUBLAS=1 -DGGML_CUDA_NO_PINNED=1 -DCMAKE_CUDA_ARCHITECTURES=120 -DGGML_NATIVE=OFF -DGGML_AVX=ON -DGGML_AVX2=ON -DGGML_AVX512=OFF -DGGML_FMA=ON -DGGML_F16C=ON"
 ENV FORCE_CMAKE=1
 
 WORKDIR /app
