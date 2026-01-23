@@ -90,7 +90,7 @@ class SpeakerLanguageTracker:
     Performs language detection once per new speaker and caches the result.
     """
 
-    def __init__(self, confidence_threshold: float = 0.7):
+    def __init__(self, confidence_threshold: float = 0.5):
         self.speaker_languages: dict[str, str] = {}  # speaker_id -> language
         self.speaker_confidences: dict[str, float] = {}  # speaker_id -> confidence
         self.confidence_threshold = confidence_threshold
