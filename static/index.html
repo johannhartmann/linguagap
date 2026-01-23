@@ -607,8 +607,11 @@
             });
 
             // Auto-scroll panes to bottom (pane is the scroll container)
-            leftTranscript.parentElement.scrollTop = leftTranscript.parentElement.scrollHeight;
-            rightTranscript.parentElement.scrollTop = rightTranscript.parentElement.scrollHeight;
+            // Use requestAnimationFrame to ensure DOM has been updated before scrolling
+            requestAnimationFrame(() => {
+                leftTranscript.parentElement.scrollTop = leftTranscript.parentElement.scrollHeight;
+                rightTranscript.parentElement.scrollTop = rightTranscript.parentElement.scrollHeight;
+            });
         }
 
         function updateTranslation(segmentId, tgtLang, text) {

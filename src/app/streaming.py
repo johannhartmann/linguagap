@@ -231,6 +231,11 @@ def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
             # No speaker identified, use Whisper's detection
             segment_lang = info.language if session.src_lang == "auto" else session.src_lang
 
+            # Also update foreign language tracking from Whisper detection
+            if segment_lang not in ("unknown", "de") and session.foreign_lang is None:
+                session.foreign_lang = segment_lang
+                print(f"Foreign language detected (no speaker): {segment_lang}")
+
         hyp_segments.append(
             {
                 "start": seg.start,

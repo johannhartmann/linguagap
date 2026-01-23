@@ -218,8 +218,10 @@
                 transcript.appendChild(div);
             });
 
-            // Auto-scroll to bottom
-            transcript.scrollTop = transcript.scrollHeight;
+            // Auto-scroll to bottom - defer to ensure DOM is updated
+            requestAnimationFrame(() => {
+                transcript.scrollTop = transcript.scrollHeight;
+            });
         }
 
         function updateSegments(newSegments) {
@@ -244,7 +246,9 @@
             notice.className = 'ended-notice';
             notice.innerHTML = '<strong>Session Ended</strong>The recording has stopped. This transcript is preserved for your review.';
             transcript.appendChild(notice);
-            transcript.scrollTop = transcript.scrollHeight;
+            requestAnimationFrame(() => {
+                transcript.scrollTop = transcript.scrollHeight;
+            });
         }
 
         function connect() {
