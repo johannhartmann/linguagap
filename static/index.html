@@ -810,18 +810,15 @@
 
             console.log('Rendered', segments.length, 'segments, children:', leftTranscript.children.length);
 
-            // Auto-scroll panes to bottom (pane is the scroll container)
-            // Use double RAF to ensure DOM is fully laid out before scrolling
-            requestAnimationFrame(() => {
-                requestAnimationFrame(() => {
-                    try {
-                        leftTranscript.parentElement.scrollTop = leftTranscript.parentElement.scrollHeight;
-                        rightTranscript.parentElement.scrollTop = rightTranscript.parentElement.scrollHeight;
-                    } catch (e) {
-                        console.error('Auto-scroll error:', e);
-                    }
-                });
-            });
+            // Auto-scroll: use scrollIntoView on last element for reliable scrolling
+            const lastLeft = leftTranscript.lastElementChild;
+            const lastRight = rightTranscript.lastElementChild;
+            if (lastLeft) {
+                lastLeft.scrollIntoView({ behavior: 'auto', block: 'end' });
+            }
+            if (lastRight) {
+                lastRight.scrollIntoView({ behavior: 'auto', block: 'end' });
+            }
             console.log('renderSegments END');
         }
 
@@ -1093,11 +1090,38 @@
         });
 
         clearBtn.addEventListener('click', () => {
+            // Stop recording first to prevent immediate refill
+            if (isRecording) {
+                // Skip summary generation, just stop
+                isRecording = false;
+                if (processor) {
+                    processor.disconnect();
+                    processor = null;
+                }
+                if (audioContext) {
+                    audioContext.close();
+                    audioContext = null;
+                }
+                if (mediaStream) {
+                    mediaStream.getTracks().forEach(track => track.stop());
+                    mediaStream = null;
+                }
+                if (ws) {
+                    ws.close();
+                    ws = null;
+                }
+                startBtn.textContent = t('startRecording');
+                startBtn.classList.remove('recording');
+                languageSelect.disabled = false;
+                audioInputSelect.disabled = false;
+            }
+            // Clear display
             leftTranscript.innerHTML = '';
             rightTranscript.innerHTML = '';
             foreignLang = null;
             leftLangLabel.textContent = t('foreignLang');
             hideSummaries();
+            setStatus(t('statusReady'), '');
         });
     </script>
 </body>
