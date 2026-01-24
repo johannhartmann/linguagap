@@ -33,6 +33,7 @@
         header {
             text-align: center;
             margin-bottom: 30px;
+            position: relative;
         }
         .logo {
             max-height: 60px;
@@ -263,6 +264,24 @@
             }
         }
 
+        /* UI Language selector */
+        .ui-lang-select {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            padding: 6px 10px;
+            font-size: 0.9rem;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            background: #fff;
+            cursor: pointer;
+            font-family: 'Assistant', sans-serif;
+        }
+        .ui-lang-select:focus {
+            outline: 2px solid var(--synia-teal);
+            outline-offset: 2px;
+        }
+
         /* Speaker label styles */
         .speaker-label {
             font-size: 0.7rem;
@@ -287,7 +306,11 @@
     <div class="container">
         <header>
             <img src="/static/synia-logo.png" alt="SYNIA Solutions" class="logo">
-            <p>Real-time Speech Transcription & Translation</p>
+            <p id="subtitle">Real-time Speech Transcription & Translation</p>
+            <select id="uiLangSelect" class="ui-lang-select" title="Interface Language">
+                <option value="de">🇩🇪 DE</option>
+                <option value="en">🇬🇧 EN</option>
+            </select>
         </header>
 
         <div class="controls">
@@ -362,6 +385,102 @@
     </script>
 
     <script>
+        // Translations for UI internationalization
+        const TRANSLATIONS = {
+            de: {
+                title: 'Echtzeit-Sprachübersetzung',
+                subtitle: 'Echtzeit-Transkription & Übersetzung',
+                defaultMic: 'Standard-Mikrofon',
+                autoDetect: 'Automatisch',
+                startRecording: 'Aufnahme starten',
+                stopRecording: 'Aufnahme stoppen',
+                clear: 'Löschen',
+                statusReady: 'Klicken Sie auf "Aufnahme starten"',
+                foreignLang: 'Fremdsprache',
+                german: 'Deutsch',
+                summary: 'Zusammenfassung',
+                shareTitle: 'Mit Gesprächspartner teilen',
+                shareSubtitle: 'QR-Code scannen für Live-Transkript',
+                badgeVerified: 'Geprüft',
+                badgeRefined: 'Verfeinert',
+                badgeNeedsReview: 'Prüfung erforderlich',
+                statusMicRequest: 'Mikrofonzugriff wird angefordert...',
+                statusConnecting: 'Verbindung zum Server...',
+                statusRecording: 'Verbunden - Aufnahme läuft...',
+                statusSpeaking: 'Aufnahme... (spricht: {lang})',
+                statusGeneratingSummary: 'Zusammenfassung wird erstellt...',
+                statusSummaryGenerated: 'Zusammenfassung erstellt',
+                statusStopped: 'Aufnahme beendet',
+                statusConnError: 'Verbindungsfehler',
+                statusConnClosed: 'Verbindung geschlossen',
+                summaryLoading: 'Zusammenfassung wird erstellt...',
+                summaryForeign: 'Gespräch wird zusammengefasst...',
+                summaryGerman: 'Deutsche Zusammenfassung wird erstellt...',
+                summaryValidate: 'Ausrichtung wird geprüft...',
+                summaryRefine: 'Zusammenfassung wird verfeinert...',
+                summaryUnavailable: 'Zusammenfassung nicht verfügbar',
+                summaryTimeout: 'Zeitüberschreitung',
+                summaryNone: 'Keine Zusammenfassung verfügbar',
+                errorHttps: 'Fehler: Mikrofon erfordert HTTPS oder localhost',
+                errorBrowser: 'Fehler: Browser unterstützt keinen Mikrofonzugriff',
+                errorMicDenied: 'Mikrofonzugriff verweigert',
+                errorSummaryFailed: 'Zusammenfassungserstellung fehlgeschlagen',
+                speaker: 'Sprecher {n}'
+            },
+            en: {
+                title: 'Real-time Speech Translation',
+                subtitle: 'Real-time Speech Transcription & Translation',
+                defaultMic: 'Default Microphone',
+                autoDetect: 'Auto-detect',
+                startRecording: 'Start Recording',
+                stopRecording: 'Stop Recording',
+                clear: 'Clear',
+                statusReady: 'Click "Start Recording" to begin',
+                foreignLang: 'Foreign Language',
+                german: 'German',
+                summary: 'Summary',
+                shareTitle: 'Share with Foreign Speaker',
+                shareSubtitle: 'Scan to view live transcript',
+                badgeVerified: 'Verified',
+                badgeRefined: 'Refined',
+                badgeNeedsReview: 'Needs review',
+                statusMicRequest: 'Requesting microphone access...',
+                statusConnecting: 'Connecting to server...',
+                statusRecording: 'Connected - Recording...',
+                statusSpeaking: 'Recording... (speaking: {lang})',
+                statusGeneratingSummary: 'Generating summary...',
+                statusSummaryGenerated: 'Summary generated',
+                statusStopped: 'Recording stopped',
+                statusConnError: 'Connection error',
+                statusConnClosed: 'Connection closed',
+                summaryLoading: 'Generating summary...',
+                summaryForeign: 'Summarizing conversation...',
+                summaryGerman: 'Generating German summary...',
+                summaryValidate: 'Validating alignment...',
+                summaryRefine: 'Refining summary...',
+                summaryUnavailable: 'Summary unavailable',
+                summaryTimeout: 'Summary timed out',
+                summaryNone: 'No summary available',
+                errorHttps: 'Error: Microphone requires HTTPS or localhost access',
+                errorBrowser: 'Error: Browser does not support microphone access',
+                errorMicDenied: 'Microphone access denied',
+                errorSummaryFailed: 'Summary generation failed',
+                speaker: 'Speaker {n}'
+            }
+        };
+
+        // Current UI language (default: German)
+        let currentUiLang = localStorage.getItem('uiLang') || 'de';
+
+        // Translation function
+        function t(key, replacements = {}) {
+            let text = TRANSLATIONS[currentUiLang]?.[key] || TRANSLATIONS['en']?.[key] || key;
+            for (const [k, v] of Object.entries(replacements)) {
+                text = text.replace(`{${k}}`, v);
+            }
+            return text;
+        }
+
         const startBtn = document.getElementById('startBtn');
         const clearBtn = document.getElementById('clearBtn');
         const languageSelect = document.getElementById('languageSelect');
@@ -380,6 +499,8 @@
         const leftSummaryText = document.getElementById('leftSummaryText');
         const rightSummaryText = document.getElementById('rightSummaryText');
         const alignmentBadge = document.getElementById('alignmentBadge');
+        const uiLangSelect = document.getElementById('uiLangSelect');
+        const subtitleEl = document.getElementById('subtitle');
 
         // Language display names
         const LANG_NAMES = {
@@ -463,25 +584,69 @@
         // Initialize QR code on page load
         initQRCode();
 
+        // Apply translations to all UI elements
+        function applyTranslations() {
+            // Header
+            subtitleEl.textContent = t('subtitle');
+
+            // Controls
+            audioInputSelect.querySelector('option[value=""]').textContent = t('defaultMic');
+            languageSelect.querySelector('option[value="auto"]').textContent = t('autoDetect');
+            startBtn.textContent = isRecording ? t('stopRecording') : t('startRecording');
+            clearBtn.textContent = t('clear');
+
+            // Status (only if showing ready message)
+            if (statusEl.textContent.includes('Start') || statusEl.textContent.includes('starten')) {
+                statusEl.textContent = t('statusReady');
+            }
+
+            // Pane labels (only if not showing detected language)
+            if (!foreignLang) {
+                leftLangLabel.textContent = t('foreignLang');
+            }
+            rightLangLabel.textContent = t('german');
+
+            // Summary headers
+            document.querySelectorAll('.summary-card h3').forEach(el => {
+                el.textContent = t('summary');
+            });
+
+            // QR sidebar
+            document.querySelector('.qr-sidebar h3').textContent = t('shareTitle');
+            document.querySelector('.qr-sidebar p').textContent = t('shareSubtitle');
+        }
+
+        // Initialize UI language
+        uiLangSelect.value = currentUiLang;
+        applyTranslations();
+
+        // Handle UI language change
+        uiLangSelect.addEventListener('change', (e) => {
+            currentUiLang = e.target.value;
+            localStorage.setItem('uiLang', currentUiLang);
+            applyTranslations();
+        });
+
         function showSummaryLoading() {
             leftSummarySection.classList.add('visible');
             rightSummarySection.classList.add('visible');
             leftSummaryCard.classList.add('loading');
             rightSummaryCard.classList.add('loading');
-            leftSummaryText.textContent = 'Generating summary...';
-            rightSummaryText.textContent = 'Generating summary...';
+            leftSummaryText.textContent = t('summaryLoading');
+            rightSummaryText.textContent = t('summaryLoading');
             alignmentBadge.textContent = '';
             alignmentBadge.className = 'alignment-badge';
         }
 
         function updateSummaryProgress(step) {
-            const messages = {
-                'summarize_foreign': 'Summarizing conversation...',
-                'summarize_german': 'Generating German summary...',
-                'validate': 'Validating alignment...',
-                'regenerate': 'Refining summary...'
+            const messageKeys = {
+                'summarize_foreign': 'summaryForeign',
+                'summarize_german': 'summaryGerman',
+                'validate': 'summaryValidate',
+                'regenerate': 'summaryRefine'
             };
-            const msg = messages[step] || 'Processing...';
+            const key = messageKeys[step] || 'summaryLoading';
+            const msg = t(key);
             leftSummaryText.textContent = msg;
             rightSummaryText.textContent = msg;
         }
@@ -490,18 +655,18 @@
             leftSummaryCard.classList.remove('loading');
             rightSummaryCard.classList.remove('loading');
 
-            leftSummaryText.textContent = data.foreign_summary || 'No summary available';
-            rightSummaryText.textContent = data.german_summary || 'No summary available';
+            leftSummaryText.textContent = data.foreign_summary || t('summaryNone');
+            rightSummaryText.textContent = data.german_summary || t('summaryNone');
 
             // Show alignment status
             if (data.regenerated) {
-                alignmentBadge.textContent = 'Refined';
+                alignmentBadge.textContent = t('badgeRefined');
                 alignmentBadge.className = 'alignment-badge regenerated';
             } else if (data.aligned) {
-                alignmentBadge.textContent = 'Verified';
+                alignmentBadge.textContent = t('badgeVerified');
                 alignmentBadge.className = 'alignment-badge aligned';
             } else {
-                alignmentBadge.textContent = 'Needs review';
+                alignmentBadge.textContent = t('badgeNeedsReview');
                 alignmentBadge.className = 'alignment-badge misaligned';
             }
         }
@@ -509,8 +674,8 @@
         function displaySummaryError(error) {
             leftSummaryCard.classList.remove('loading');
             rightSummaryCard.classList.remove('loading');
-            leftSummaryText.textContent = 'Summary unavailable';
-            rightSummaryText.textContent = error || 'Error generating summary';
+            leftSummaryText.textContent = t('summaryUnavailable');
+            rightSummaryText.textContent = error || t('errorSummaryFailed');
             alignmentBadge.textContent = '';
             alignmentBadge.className = 'alignment-badge';
         }
@@ -535,7 +700,7 @@
                 const devices = await navigator.mediaDevices.enumerateDevices();
 
                 // Clear existing options (except default)
-                audioInputSelect.innerHTML = '<option value="">Default Microphone</option>';
+                audioInputSelect.innerHTML = `<option value="">${t('defaultMic')}</option>`;
 
                 devices.forEach(device => {
                     if (device.kind === 'audioinput') {
@@ -595,10 +760,11 @@
                     rightText = translations['de'] || '...';
                 }
 
-                // Format speaker label (e.g., "SPEAKER_00" -> "Speaker 1")
-                const speakerLabel = speakerId
-                    ? speakerId.replace('SPEAKER_', 'Speaker ').replace(/^Speaker 0+/, 'Speaker ')
-                    : '';
+                // Format speaker label (e.g., "SPEAKER_00" -> "Speaker 1" or "Sprecher 1")
+                const speakerNum = speakerId
+                    ? parseInt(speakerId.replace('SPEAKER_', ''), 10) + 1
+                    : null;
+                const speakerLabel = speakerNum ? t('speaker', { n: speakerNum }) : '';
 
                 // Left pane (foreign language view)
                 // Foreign speaker = left bubble (owner), German speaker = right bubble (other)
@@ -703,19 +869,19 @@
         async function startRecording() {
             // Check for secure context (HTTPS or localhost)
             if (!window.isSecureContext) {
-                setStatus('Error: Microphone requires HTTPS or localhost access', 'error');
+                setStatus(t('errorHttps'), 'error');
                 alert('Microphone access requires a secure context.\n\nOptions:\n1. Access via http://localhost:8000\n2. Use SSH tunnel: ssh -L 8000:localhost:8000 user@server\n3. Launch Chrome with: --unsafely-treat-insecure-origin-as-secure=http://' + window.location.host);
                 return;
             }
 
             // Check if getUserMedia is available
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                setStatus('Error: Browser does not support microphone access', 'error');
+                setStatus(t('errorBrowser'), 'error');
                 return;
             }
 
             try {
-                setStatus('Requesting microphone access...', '');
+                setStatus(t('statusMicRequest'), '');
 
                 const audioConstraints = {
                     channelCount: 1,
@@ -742,11 +908,11 @@
                 const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
                 const wsUrl = `${wsProtocol}//${window.location.host}/ws`;
 
-                setStatus('Connecting to server...', '');
+                setStatus(t('statusConnecting'), '');
                 ws = new WebSocket(wsUrl);
 
                 ws.onopen = () => {
-                    setStatus('Connected - Recording...', 'connected');
+                    setStatus(t('statusRecording'), 'connected');
 
                     // Set foreign language from selection if not "auto" or "de"
                     const selectedLang = languageSelect.value;
@@ -774,7 +940,7 @@
                             renderSegments(data.segments, data.foreign_lang);
                             if (data.src_lang && data.src_lang !== 'unknown') {
                                 const langName = LANG_NAMES[data.src_lang] || data.src_lang;
-                                setStatus(`Recording... (speaking: ${langName})`, 'connected');
+                                setStatus(t('statusSpeaking', { lang: langName }), 'connected');
                             }
                         } else if (data.type === 'translation') {
                             // Update translation for specific segment
@@ -783,11 +949,11 @@
                             updateSummaryProgress(data.step);
                         } else if (data.type === 'summary') {
                             displaySummary(data);
-                            setStatus('Summary generated', '');
+                            setStatus(t('statusSummaryGenerated'), '');
                             finishStopRecording();
                         } else if (data.type === 'summary_error') {
                             displaySummaryError(data.error);
-                            setStatus('Summary generation failed', 'error');
+                            setStatus(t('errorSummaryFailed'), 'error');
                             finishStopRecording();
                         }
                     } catch (e) {
@@ -797,12 +963,12 @@
 
                 ws.onerror = (error) => {
                     console.error('WebSocket error:', error);
-                    setStatus('Connection error', 'error');
+                    setStatus(t('statusConnError'), 'error');
                 };
 
                 ws.onclose = () => {
                     if (isRecording) {
-                        setStatus('Connection closed', 'error');
+                        setStatus(t('statusConnClosed'), 'error');
                     }
                 };
 
@@ -826,14 +992,14 @@
                 };
 
                 isRecording = true;
-                startBtn.textContent = 'Stop Recording';
+                startBtn.textContent = t('stopRecording');
                 startBtn.classList.add('recording');
                 languageSelect.disabled = true;
                 audioInputSelect.disabled = true;
 
             } catch (error) {
                 console.error('Error starting recording:', error);
-                setStatus('Microphone access denied', 'error');
+                setStatus(t('errorMicDenied'), 'error');
             }
         }
 
@@ -860,7 +1026,7 @@
             if (ws && ws.readyState === WebSocket.OPEN && foreignLang) {
                 awaitingSummary = true;
                 showSummaryLoading();
-                setStatus('Generating summary...', '');
+                setStatus(t('statusGeneratingSummary'), '');
                 startBtn.disabled = true;
 
                 // Request summary from server
@@ -869,7 +1035,7 @@
                 // Set a timeout in case summary takes too long
                 setTimeout(() => {
                     if (awaitingSummary) {
-                        displaySummaryError('Summary timed out');
+                        displaySummaryError(t('summaryTimeout'));
                         finishStopRecording();
                     }
                 }, 60000);  // 60 second timeout
@@ -886,14 +1052,14 @@
                 ws = null;
             }
 
-            startBtn.textContent = 'Start Recording';
+            startBtn.textContent = t('startRecording');
             startBtn.classList.remove('recording');
             startBtn.disabled = false;
             languageSelect.disabled = false;
             audioInputSelect.disabled = false;
 
             if (!leftSummarySection.classList.contains('visible')) {
-                setStatus('Recording stopped', '');
+                setStatus(t('statusStopped'), '');
             }
         }
 
@@ -909,7 +1075,7 @@
             leftTranscript.innerHTML = '';
             rightTranscript.innerHTML = '';
             foreignLang = null;
-            leftLangLabel.textContent = 'Foreign Language';
+            leftLangLabel.textContent = t('foreignLang');
             hideSummaries();
         });
     </script>
