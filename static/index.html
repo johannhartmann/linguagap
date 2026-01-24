@@ -738,6 +738,7 @@
         }
 
         function renderSegments(segments, serverForeignLang) {
+            console.log('renderSegments START:', segments.length, 'segs, foreignLang:', serverForeignLang);
             // Update foreign language from server if detected
             if (serverForeignLang && !foreignLang) {
                 foreignLang = serverForeignLang;
@@ -746,6 +747,7 @@
 
             leftTranscript.innerHTML = '';
             rightTranscript.innerHTML = '';
+            console.log('Cleared transcripts, rendering...');
 
             segments.forEach(seg => {
                 const segLang = seg.src_lang;
@@ -806,14 +808,21 @@
                 rightTranscript.appendChild(rightDiv);
             });
 
+            console.log('Rendered', segments.length, 'segments, children:', leftTranscript.children.length);
+
             // Auto-scroll panes to bottom (pane is the scroll container)
             // Use double RAF to ensure DOM is fully laid out before scrolling
             requestAnimationFrame(() => {
                 requestAnimationFrame(() => {
-                    leftTranscript.parentElement.scrollTop = leftTranscript.parentElement.scrollHeight;
-                    rightTranscript.parentElement.scrollTop = rightTranscript.parentElement.scrollHeight;
+                    try {
+                        leftTranscript.parentElement.scrollTop = leftTranscript.parentElement.scrollHeight;
+                        rightTranscript.parentElement.scrollTop = rightTranscript.parentElement.scrollHeight;
+                    } catch (e) {
+                        console.error('Auto-scroll error:', e);
+                    }
                 });
             });
+            console.log('renderSegments END');
         }
 
         function updateTranslation(segmentId, tgtLang, text) {
@@ -945,8 +954,11 @@
                 ws.onmessage = (event) => {
                     try {
                         const data = JSON.parse(event.data);
+                        console.log('WS message:', data.type, data.segments?.length || 0);
                         if (data.type === 'segments' && data.segments) {
+                            console.log('Calling renderSegments with', data.segments.length, 'segments');
                             renderSegments(data.segments, data.foreign_lang);
+                            console.log('renderSegments completed');
                             if (data.src_lang && data.src_lang !== 'unknown') {
                                 const langName = LANG_NAMES[data.src_lang] || data.src_lang;
                                 setStatus(t('statusSpeaking', { lang: langName }), 'connected');
