@@ -66,7 +66,9 @@ class SegmentTracker:
             abs_end = window_start + seg["end"]
             src_text = seg["text"].strip()
 
-            if abs_start < self.finalized_end_time:
+            # Skip only if segment is ENTIRELY within already-finalized time range
+            # (Previously checked abs_start which was too aggressive with sliding window)
+            if abs_end <= self.finalized_end_time:
                 continue
 
             if not src_text:

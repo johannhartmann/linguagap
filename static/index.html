@@ -518,6 +518,7 @@
         let mediaStream = null;
         let processor = null;
         let awaitingSummary = false;  // Track if we're waiting for summary before closing
+        let sessionCleared = false;  // Guard flag to prevent renderSegments after clear
 
         const SAMPLE_RATE = 16000;
 
@@ -810,15 +811,17 @@
 
             console.log('Rendered', segments.length, 'segments, children:', leftTranscript.children.length);
 
-            // Auto-scroll: set scrollTop directly on the pane containers
-            const leftPane = leftTranscript.parentElement;
-            const rightPane = rightTranscript.parentElement;
-            if (leftPane) {
-                leftPane.scrollTop = leftPane.scrollHeight;
-            }
-            if (rightPane) {
-                rightPane.scrollTop = rightPane.scrollHeight;
-            }
+            // Auto-scroll after DOM update - use requestAnimationFrame to ensure layout is complete
+            requestAnimationFrame(() => {
+                const leftPane = leftTranscript.parentElement;
+                const rightPane = rightTranscript.parentElement;
+                if (leftPane) {
+                    leftPane.scrollTop = leftPane.scrollHeight;
+                }
+                if (rightPane) {
+                    rightPane.scrollTop = rightPane.scrollHeight;
+                }
+            });
             console.log('renderSegments END');
         }
 
@@ -882,6 +885,9 @@
         }
 
         async function startRecording() {
+            // Reset the cleared flag when starting a new session
+            sessionCleared = false;
+
             // Check for secure context (HTTPS or localhost)
             if (!window.isSecureContext) {
                 setStatus(t('errorHttps'), 'error');
@@ -949,6 +955,11 @@
                 };
 
                 ws.onmessage = (event) => {
+                    // Guard: ignore messages if session was cleared
+                    if (sessionCleared) {
+                        console.log('WS message ignored (session cleared)');
+                        return;
+                    }
                     try {
                         const data = JSON.parse(event.data);
                         console.log('WS message:', data.type, data.segments?.length || 0);
@@ -1090,7 +1101,11 @@
         });
 
         clearBtn.addEventListener('click', () => {
-            // Stop recording first to prevent immediate refill
+            // Set guard flag FIRST to block any pending WebSocket messages
+            sessionCleared = true;
+            console.log('Cleared: sessionCleared =', sessionCleared);
+
+            // Stop recording to prevent new messages
             if (isRecording) {
                 // Skip summary generation, just stop
                 isRecording = false;
