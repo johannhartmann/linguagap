@@ -810,14 +810,14 @@
 
             console.log('Rendered', segments.length, 'segments, children:', leftTranscript.children.length);
 
-            // Auto-scroll: use scrollIntoView on last element for reliable scrolling
-            const lastLeft = leftTranscript.lastElementChild;
-            const lastRight = rightTranscript.lastElementChild;
-            if (lastLeft) {
-                lastLeft.scrollIntoView({ behavior: 'auto', block: 'end' });
+            // Auto-scroll: set scrollTop directly on the pane containers
+            const leftPane = leftTranscript.parentElement;
+            const rightPane = rightTranscript.parentElement;
+            if (leftPane) {
+                leftPane.scrollTop = leftPane.scrollHeight;
             }
-            if (lastRight) {
-                lastRight.scrollIntoView({ behavior: 'auto', block: 'end' });
+            if (rightPane) {
+                rightPane.scrollTop = rightPane.scrollHeight;
             }
             console.log('renderSegments END');
         }
