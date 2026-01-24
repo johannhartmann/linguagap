@@ -57,6 +57,13 @@ WORKDIR /app
 # Copy venv from builder
 COPY --from=builder /app/.venv /app/.venv
 
+# Patch pyannote.audio for torchaudio 2.9+ compatibility
+# See: https://github.com/pyannote/pyannote-audio/issues/1952
+RUN sed -i 's/-> torchaudio.AudioMetaData:/-> object:/g' \
+    /app/.venv/lib/python3.12/site-packages/pyannote/audio/core/io.py && \
+    sed -i "s/torchaudio.list_audio_backends()/getattr(torchaudio, 'list_audio_backends', lambda: ['sox_io'])()/g" \
+    /app/.venv/lib/python3.12/site-packages/pyannote/audio/core/io.py
+
 # Copy application code
 COPY src/ ./src/
 

@@ -17,11 +17,25 @@ SUMM_N_CTX = int(os.getenv("SUMM_N_CTX", "4096"))
 
 # Regex to strip Qwen3 <think>...</think> blocks from responses
 _THINK_PATTERN = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
+# Also match incomplete/truncated think blocks (no closing tag)
+_INCOMPLETE_THINK_PATTERN = re.compile(r"<think>.*$", re.DOTALL)
 
 
 def _strip_think_block(text: str) -> str:
-    """Strip Qwen3 thinking blocks from model output."""
-    return _THINK_PATTERN.sub("", text).strip()
+    """Strip Qwen3 thinking blocks from model output, including truncated ones."""
+    original = text
+    text = _THINK_PATTERN.sub("", text)
+    text = _INCOMPLETE_THINK_PATTERN.sub("", text)
+    result = text.strip()
+    # If stripping left us with nothing, return original without think tags
+    if not result:
+        # Try to extract any content before <think>
+        before_think = original.split("<think>")[0].strip()
+        if before_think:
+            return before_think
+        # Last resort: return a placeholder
+        return "(Summary generation incomplete)"
+    return result
 
 
 # Language name and code mapping for TranslateGemma prompts
@@ -184,7 +198,7 @@ def summarize_conversation(segments: list[dict], _foreign_lang: str, target_lang
 
     output = llm.create_chat_completion(
         messages=messages,
-        max_tokens=2048,
+        max_tokens=4096,  # Qwen3 thinking blocks can be long, need room for think + summary
         temperature=0.5,
         top_p=0.9,
     )
@@ -232,7 +246,7 @@ def validate_summary_alignment(
 
     output = llm.create_chat_completion(
         messages=messages,
-        max_tokens=2048,
+        max_tokens=4096,
         temperature=0.3,
         top_p=0.9,
     )
@@ -322,7 +336,7 @@ def regenerate_summary_with_feedback(
 
     output = llm.create_chat_completion(
         messages=messages,
-        max_tokens=2048,
+        max_tokens=4096,
         temperature=0.4,  # Slightly lower for more focused regeneration
         top_p=0.9,
     )
