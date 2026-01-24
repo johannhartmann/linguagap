@@ -587,24 +587,28 @@
         // Apply translations to all UI elements
         function applyTranslations() {
             // Header
-            subtitleEl.textContent = t('subtitle');
+            if (subtitleEl) subtitleEl.textContent = t('subtitle');
 
-            // Controls
-            audioInputSelect.querySelector('option[value=""]').textContent = t('defaultMic');
-            languageSelect.querySelector('option[value="auto"]').textContent = t('autoDetect');
-            startBtn.textContent = isRecording ? t('stopRecording') : t('startRecording');
-            clearBtn.textContent = t('clear');
+            // Controls - use optional chaining for safety
+            const defaultMicOption = audioInputSelect?.querySelector('option[value=""]');
+            if (defaultMicOption) defaultMicOption.textContent = t('defaultMic');
+
+            const autoDetectOption = languageSelect?.querySelector('option[value="auto"]');
+            if (autoDetectOption) autoDetectOption.textContent = t('autoDetect');
+
+            if (startBtn) startBtn.textContent = isRecording ? t('stopRecording') : t('startRecording');
+            if (clearBtn) clearBtn.textContent = t('clear');
 
             // Status (only if showing ready message)
-            if (statusEl.textContent.includes('Start') || statusEl.textContent.includes('starten')) {
+            if (statusEl && (statusEl.textContent.includes('Start') || statusEl.textContent.includes('starten'))) {
                 statusEl.textContent = t('statusReady');
             }
 
             // Pane labels (only if not showing detected language)
-            if (!foreignLang) {
+            if (!foreignLang && leftLangLabel) {
                 leftLangLabel.textContent = t('foreignLang');
             }
-            rightLangLabel.textContent = t('german');
+            if (rightLangLabel) rightLangLabel.textContent = t('german');
 
             // Summary headers
             document.querySelectorAll('.summary-card h3').forEach(el => {
@@ -612,8 +616,10 @@
             });
 
             // QR sidebar
-            document.querySelector('.qr-sidebar h3').textContent = t('shareTitle');
-            document.querySelector('.qr-sidebar p').textContent = t('shareSubtitle');
+            const qrTitle = document.querySelector('.qr-sidebar h3');
+            const qrSubtitle = document.querySelector('.qr-sidebar p');
+            if (qrTitle) qrTitle.textContent = t('shareTitle');
+            if (qrSubtitle) qrSubtitle.textContent = t('shareSubtitle');
         }
 
         // Initialize UI language
@@ -761,10 +767,13 @@
                 }
 
                 // Format speaker label (e.g., "SPEAKER_00" -> "Speaker 1" or "Sprecher 1")
-                const speakerNum = speakerId
-                    ? parseInt(speakerId.replace('SPEAKER_', ''), 10) + 1
-                    : null;
-                const speakerLabel = speakerNum ? t('speaker', { n: speakerNum }) : '';
+                let speakerLabel = '';
+                if (speakerId && typeof speakerId === 'string') {
+                    const speakerNum = parseInt(speakerId.replace('SPEAKER_', ''), 10);
+                    if (!isNaN(speakerNum)) {
+                        speakerLabel = t('speaker', { n: speakerNum + 1 });
+                    }
+                }
 
                 // Left pane (foreign language view)
                 // Foreign speaker = left bubble (owner), German speaker = right bubble (other)
@@ -957,7 +966,7 @@
                             finishStopRecording();
                         }
                     } catch (e) {
-                        console.error('Parse error:', e);
+                        console.error('WebSocket message error:', e, e.stack);
                     }
                 };
 
