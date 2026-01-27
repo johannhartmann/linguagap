@@ -117,13 +117,40 @@ spec:
       selfHeal: true
 ```
 
+### Quick Build & Deploy
+
+Complete workflow to build, push, and deploy changes:
+
+```bash
+# 1. Commit your changes
+git add -p  # stage specific changes
+git commit -m "Your commit message"
+git push origin feature/your-branch
+
+# 2. Build Docker image
+docker build -t ghcr.io/johannhartmann/linguagap:latest .
+
+# 3. Push to GitHub Container Registry
+docker push ghcr.io/johannhartmann/linguagap:latest
+
+# 4. Trigger rollout restart (pulls new image)
+argocd app actions run linguagap restart \
+  --kind Deployment \
+  --resource-name linguagap
+
+# 5. Monitor rollout (optional, takes ~5-10 min for model warmup)
+kubectl rollout status deployment/linguagap -n linguagap --timeout=600s
+```
+
+**Note:** The pod takes 5-10 minutes to become ready due to model warmup. The readiness probe is configured with a 600s initial delay.
+
 ### Sync and Deploy
 
 ```bash
 # Login to ArgoCD
 argocd login <argocd-server>
 
-# Sync the application
+# Sync the application (for Helm chart changes)
 argocd app sync linguagap
 
 # Check status
