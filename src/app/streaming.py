@@ -12,7 +12,7 @@ from fastapi import WebSocket
 
 from app.asr import get_model
 from app.diarization import SpeakerSegment, StreamingDiarizer
-from app.lang_id import SpeakerLanguageTracker, detect_language_from_audio
+from app.lang_id import SpeakerLanguageTracker
 from app.mt import (
     regenerate_summary_with_feedback,
     summarize_conversation,
@@ -208,34 +208,13 @@ def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
         # Find dominant speaker for this segment using diarization
         speaker_id = session.diarizer.get_dominant_speaker(diar_segments, abs_start, abs_end)
 
-        # Always run SpeechBrain on segment audio for reliable language detection
-        seg_start_sample = int(seg.start * session.sample_rate)
-        seg_end_sample = int(seg.end * session.sample_rate)
-        seg_audio = audio[seg_start_sample:seg_end_sample] if seg_end_sample <= len(audio) else None
-
-        segment_lang = "unknown"
-        confidence = 0.0
-
-        if seg_audio is not None and len(seg_audio) > 0:
-            segment_lang, confidence = detect_language_from_audio(seg_audio, session.sample_rate)
-
-        # If speaker identified, update cache if this detection has higher confidence
-        if speaker_id:
-            cached_conf = session.language_tracker.speaker_confidences.get(speaker_id, 0.0)
-            if confidence > cached_conf and confidence >= 0.5:
-                session.language_tracker.set_speaker_language(speaker_id, segment_lang, confidence)
-            elif cached_conf > 0:
-                # Use cached language if it has better confidence
-                segment_lang = session.language_tracker.speaker_languages.get(speaker_id, segment_lang)
-
-        # Fall back to Whisper only if SpeechBrain confidence is very low
-        if confidence < 0.3 and segment_lang == "unknown":
-            segment_lang = info.language if session.src_lang == "auto" else session.src_lang
+        # Determine segment language: use user selection or Whisper's detection
+        segment_lang = session.src_lang if session.src_lang != "auto" else info.language
 
         # Update foreign language tracking
         if segment_lang not in ("unknown", "de") and session.foreign_lang is None:
             session.foreign_lang = segment_lang
-            print(f"Foreign language detected: {segment_lang} (confidence: {confidence:.2f})")
+            print(f"Foreign language detected: {segment_lang}")
 
         hyp_segments.append(
             {
@@ -373,6 +352,7 @@ async def handle_websocket(websocket: WebSocket):
         """ASR loop - runs independently, sends segments immediately."""
         nonlocal running
         tick_count = 0
+        last_segment_hash = None  # Track last sent state to avoid redundant sends
         while running:
             await asyncio.sleep(TICK_SEC)
             if session is not None and running:
@@ -404,21 +384,35 @@ async def handle_websocket(websocket: WebSocket):
                             seg_dict["translations"] = session.translations.get(seg.id, {})
                             segments_data.append(seg_dict)
 
-                        # Send ASR results immediately
-                        segments_msg = {
-                            "type": "segments",
-                            "t": session.get_current_time(),
-                            "src_lang": session.detected_lang or "unknown",
-                            "foreign_lang": session.foreign_lang,
-                            "segments": segments_data,
-                        }
-                        await websocket.send_text(json.dumps(segments_msg))
+                        # Only send if segments changed (avoid redundant updates)
+                        # Hash: (id, src, final, translations) for each segment
+                        current_hash = tuple(
+                            (
+                                s["id"],
+                                s["src"],
+                                s["final"],
+                                tuple(sorted(s["translations"].items())),
+                            )
+                            for s in segments_data
+                        )
+                        if current_hash != last_segment_hash:
+                            last_segment_hash = current_hash
 
-                        # Broadcast to viewers
-                        if session_token:
-                            entry = await registry.get(session_token)
-                            if entry:
-                                await broadcast_to_viewers(entry, segments_msg)
+                            # Send ASR results
+                            segments_msg = {
+                                "type": "segments",
+                                "t": session.get_current_time(),
+                                "src_lang": session.detected_lang or "unknown",
+                                "foreign_lang": session.foreign_lang,
+                                "segments": segments_data,
+                            }
+                            await websocket.send_text(json.dumps(segments_msg))
+
+                            # Broadcast to viewers
+                            if session_token:
+                                entry = await registry.get(session_token)
+                                if entry:
+                                    await broadcast_to_viewers(entry, segments_msg)
 
                         # Queue newly finalized segments for translation
                         for seg in newly_finalized:

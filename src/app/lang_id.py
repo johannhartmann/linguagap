@@ -9,6 +9,11 @@ import os
 
 import numpy as np
 import torch
+import torchaudio
+
+# Monkey-patch for torchaudio 2.x which removed list_audio_backends
+if not hasattr(torchaudio, "list_audio_backends"):
+    torchaudio.list_audio_backends = lambda: ["soundfile"]  # type: ignore[attr-defined]
 
 LANG_ID_MODEL = os.getenv("LANG_ID_MODEL", "speechbrain/lang-id-voxlingua107-ecapa")
 LANG_ID_DEVICE = os.getenv("LANG_ID_DEVICE", "cuda")

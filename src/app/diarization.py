@@ -11,6 +11,27 @@ from dataclasses import dataclass
 import numpy as np
 import torch
 
+
+# PyTorch 2.6+ requires explicit safe_globals for torch.load with weights_only=True
+# pyannote models use these classes in their checkpoints
+def _setup_torch_safe_globals():
+    try:
+        import torch.torch_version
+
+        safe_globals = [torch.torch_version.TorchVersion]
+        try:
+            from pyannote.audio.core.task import Problem, Specifications
+
+            safe_globals.extend([Specifications, Problem])
+        except ImportError:
+            pass
+        torch.serialization.add_safe_globals(safe_globals)
+    except (AttributeError, ImportError):
+        pass  # Older PyTorch versions don't need this
+
+
+_setup_torch_safe_globals()
+
 DIARIZATION_DEVICE = os.getenv("DIARIZATION_DEVICE", "cuda")
 DIARIZATION_ENABLED = os.getenv("DIARIZATION_ENABLED", "true").lower() == "true"
 

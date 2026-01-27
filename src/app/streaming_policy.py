@@ -66,10 +66,22 @@ class SegmentTracker:
             abs_end = window_start + seg["end"]
             src_text = seg["text"].strip()
 
-            # Skip only if segment is ENTIRELY within already-finalized time range
-            # (Previously checked abs_start which was too aggressive with sliding window)
-            if abs_end <= self.finalized_end_time:
-                continue
+            # Skip if segment is MOSTLY within already-finalized time range (>50% overlap)
+            # - Too strict (abs_start check): skips new speech that starts near finalized boundary
+            # - Too loose (abs_end check): causes duplicates from re-detected old speech
+            segment_duration = abs_end - abs_start
+            if segment_duration > 0:
+                overlap_with_finalized = max(0, min(abs_end, self.finalized_end_time) - abs_start)
+                overlap_ratio = overlap_with_finalized / segment_duration
+                if overlap_ratio > 0.5:
+                    print(
+                        f"  SKIP: [{abs_start:.1f}-{abs_end:.1f}] overlap={overlap_ratio:.1%} with finalized_end={self.finalized_end_time:.1f}"
+                    )
+                    continue
+                else:
+                    print(
+                        f"  KEEP: [{abs_start:.1f}-{abs_end:.1f}] overlap={overlap_ratio:.1%} with finalized_end={self.finalized_end_time:.1f}"
+                    )
 
             if not src_text:
                 continue
