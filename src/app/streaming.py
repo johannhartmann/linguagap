@@ -26,6 +26,37 @@ WINDOW_SEC = float(os.getenv("WINDOW_SEC", "8.0"))
 TICK_SEC = float(os.getenv("TICK_SEC", "0.5"))
 MAX_BUFFER_SEC = float(os.getenv("MAX_BUFFER_SEC", "30.0"))
 
+# Bag of Hallucinations (BoH) - common Whisper hallucinations on silence/noise
+# Based on research: https://arxiv.org/abs/2501.11378
+HALLUCINATION_PHRASES = frozenset(
+    phrase.lower()
+    for phrase in [
+        "Thank you.",
+        "Thanks for watching.",
+        "Thanks for watching!",
+        "Thank you for watching.",
+        "Thank you for watching!",
+        "Please subscribe.",
+        "Please subscribe!",
+        "Subscribe to my channel.",
+        "Like and subscribe.",
+        "Subtitles by the Amara.org community",
+        "Subtitles by",
+        "ご視聴ありがとうございました",
+        "Bye.",
+        "Bye!",
+        "Goodbye.",
+        "See you next time.",
+        "See you in the next video.",
+        "...",
+        "MBC 뉴스 , 뉴스를 전해 드립니다.",
+        "Продолжение следует...",  # Russian "To be continued"
+        "Продолжение следует",
+        "To be continued...",
+        "To be continued",
+    ]
+)
+
 _executor = ThreadPoolExecutor(max_workers=2)
 
 # Metrics
@@ -168,10 +199,27 @@ def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
     model = get_model()
     asr_segments, info = model.transcribe(
         audio,
+        # Core settings for accuracy
+        beam_size=1,  # Lowest hallucination rate per research
+        patience=1.0,  # Standard beam search patience
+        # VAD for filtering non-speech
         vad_filter=True,
-        vad_parameters={"min_silence_duration_ms": 300},
-        no_speech_threshold=0.6,
-        condition_on_previous_text=False,
+        vad_parameters={
+            "threshold": 0.5,  # Speech detection threshold (0-1)
+            "min_silence_duration_ms": 500,  # Tighter segmentation than default 2000ms
+            "min_speech_duration_ms": 250,  # Ignore very short sounds
+            "speech_pad_ms": 200,  # Padding around speech segments
+        },
+        # Hallucination prevention thresholds
+        compression_ratio_threshold=1.8,  # Stricter than default 2.4, filters repetitive output
+        no_speech_threshold=0.3,  # More aggressive silence detection than default 0.6
+        log_prob_threshold=-0.8,  # Reject low-confidence segments
+        condition_on_previous_text=False,  # Prevents repetition loops
+        word_timestamps=True,  # Required for hallucination_silence_threshold
+        hallucination_silence_threshold=1.5,  # Skip silent periods when hallucination detected
+        # Multilingual support
+        multilingual=True,  # Per-segment language detection (requires fork with PR #1274)
+        language_detection_threshold=0.5,  # Confidence threshold for language detection
     )
     asr_segments = list(asr_segments)  # Consume generator
     asr_time = time.time() - asr_start
@@ -189,16 +237,38 @@ def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
         f"audio_len={len(audio)}, rms={audio_rms:.4f}, max={audio_max:.4f}"
     )
     if asr_segments:
-        for seg in asr_segments[:2]:  # Log first 2
-            print(f"  - [{seg.start:.1f}-{seg.end:.1f}] {seg.text[:50]}")
+        for seg in asr_segments[:3]:  # Log first 3
+            seg_lang = getattr(seg, "language", "?")
+            print(f"  - [{seg.start:.1f}-{seg.end:.1f}] lang={seg_lang}: {seg.text[:40]}")
+
+    # Filter out suspicious segments (likely hallucinations)
+    MAX_SEGMENT_DURATION = 10.0  # Reject segments longer than 10 seconds
 
     hyp_segments = []
     for seg in asr_segments:
         text = seg.text.strip()
+        duration = seg.end - seg.start
+
+        # Skip very short text
         if len(text) < 2:
             continue
+
+        # Skip repeated words (e.g., "Thank you. Thank you. Thank you.")
         words = text.split()
         if len(words) > 1 and len(set(words)) == 1:
+            continue
+
+        # Skip suspiciously long segments (likely hallucinations during silence)
+        if duration > MAX_SEGMENT_DURATION:
+            print(
+                f"  SKIP hallucination (long): [{seg.start:.1f}-{seg.end:.1f}] "
+                f"{duration:.1f}s > {MAX_SEGMENT_DURATION}s: {text[:50]}"
+            )
+            continue
+
+        # Skip known hallucination phrases (Bag of Hallucinations filter)
+        if text.lower() in HALLUCINATION_PHRASES:
+            print(f"  SKIP hallucination (BoH): [{seg.start:.1f}-{seg.end:.1f}] {text}")
             continue
 
         # Calculate absolute times for this segment
@@ -208,8 +278,13 @@ def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
         # Find dominant speaker for this segment using diarization
         speaker_id = session.diarizer.get_dominant_speaker(diar_segments, abs_start, abs_end)
 
-        # Determine segment language: use user selection or Whisper's detection
-        segment_lang = session.src_lang if session.src_lang != "auto" else info.language
+        # Determine segment language: use user selection, or per-segment detection
+        if session.src_lang != "auto":
+            segment_lang = session.src_lang
+        else:
+            # Use faster-whisper's per-segment language detection (multilingual=True)
+            # Each segment has a .language attribute when multilingual mode is enabled
+            segment_lang = getattr(seg, "language", None) or info.language
 
         # Update foreign language tracking
         if segment_lang not in ("unknown", "de") and session.foreign_lang is None:

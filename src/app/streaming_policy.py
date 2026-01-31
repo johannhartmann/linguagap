@@ -146,11 +146,26 @@ class SegmentTracker:
                     seen_live_indices.add(len(self.live_segment_states) - 1)
                     self.next_id += 1
 
-        # Increment missing count for unseen live segments and remove expired ones
+        # Increment missing count for unseen live segments
+        # Finalize segments that fell behind the window, drop truly stale ones
         updated_live_states = []
         for i, ls in enumerate(self.live_segment_states):
             if i not in seen_live_indices:
                 ls.missing_ticks += 1
+
+                # If segment is now entirely behind the window, finalize it
+                # (it fell out of the sliding window but is valid speech)
+                if ls.segment.abs_end < window_start:
+                    print(
+                        f"  FINALIZE (behind window): [{ls.segment.abs_start:.1f}-{ls.segment.abs_end:.1f}] "
+                        f"{ls.segment.src[:50]}"
+                    )
+                    ls.segment.final = True
+                    self.finalized_segments.append(ls.segment)
+                    newly_finalized.append(ls.segment)
+                    self.finalized_end_time = max(self.finalized_end_time, ls.segment.abs_end)
+                    continue  # Don't keep in live_segment_states
+
             if ls.missing_ticks <= LIVE_SEGMENT_GRACE_TICKS:
                 updated_live_states.append(ls)
         self.live_segment_states = updated_live_states

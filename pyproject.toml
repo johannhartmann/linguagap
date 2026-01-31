@@ -21,7 +21,7 @@ classifiers = [
 dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
-    "faster-whisper>=1.0.0",
+    "faster-whisper @ git+https://github.com/mayflower/faster-whisper.git",  # Fork with segment.language attribute (PR #1274)
     "numpy>=1.26.0",
     "ctranslate2>=4.0.0",
     "python-multipart>=0.0.9",
@@ -33,7 +33,8 @@ dependencies = [
     # PyTorch 2.8+ required for Blackwell GPUs (sm_120), needs CUDA 12.9 + cuDNN 9.8+
     "torch>=2.8.0",
     "torchaudio>=2.8.0",
-    "pyannote.audio>=3.1.0",
+    "pyannote.audio>=4.0.0",  # 4.x required for PyTorch 2.6+ (weights_only=True fix)
+    "omegaconf>=2.3.0",  # Required by pyannote for loading pretrained models
     "speechbrain>=1.0.0",
 ]
 
@@ -111,5 +112,15 @@ python-version = "3.12"
 [tool.ty.rules]
 unresolved-import = "ignore"
 invalid-argument-type = "ignore"  # llama-cpp-python complex types
-non-subscriptable = "ignore"  # llama-cpp-python return types
+not-subscriptable = "ignore"  # llama-cpp-python return types
 possibly-missing-attribute = "ignore"  # llama-cpp-python nullable fields
+
+[tool.uv.sources]
+# Force torch packages from cu129 index for CUDA 12.9 / cuDNN 9.8+ compatibility
+torch = { index = "pytorch-cu129" }
+torchaudio = { index = "pytorch-cu129" }
+
+[[tool.uv.index]]
+name = "pytorch-cu129"
+url = "https://download.pytorch.org/whl/cu129"
+explicit = true

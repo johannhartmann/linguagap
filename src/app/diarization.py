@@ -1,5 +1,5 @@
 """
-Speaker diarization module using Diart for real-time streaming.
+Speaker diarization module using pyannote for real-time streaming.
 
 Provides speaker segmentation that runs in parallel with ASR,
 identifying which speaker is talking at each moment.
@@ -10,27 +10,6 @@ from dataclasses import dataclass
 
 import numpy as np
 import torch
-
-
-# PyTorch 2.6+ requires explicit safe_globals for torch.load with weights_only=True
-# pyannote models use these classes in their checkpoints
-def _setup_torch_safe_globals():
-    try:
-        import torch.torch_version
-
-        safe_globals = [torch.torch_version.TorchVersion]
-        try:
-            from pyannote.audio.core.task import Problem, Specifications
-
-            safe_globals.extend([Specifications, Problem])
-        except ImportError:
-            pass
-        torch.serialization.add_safe_globals(safe_globals)
-    except (AttributeError, ImportError):
-        pass  # Older PyTorch versions don't need this
-
-
-_setup_torch_safe_globals()
 
 DIARIZATION_DEVICE = os.getenv("DIARIZATION_DEVICE", "cuda")
 DIARIZATION_ENABLED = os.getenv("DIARIZATION_ENABLED", "true").lower() == "true"
@@ -57,7 +36,7 @@ def get_segmentation_model():
 
         _segmentation_model = Model.from_pretrained(
             "pyannote/segmentation-3.0",
-            use_auth_token=os.getenv("HF_TOKEN"),
+            token=os.getenv("HF_TOKEN"),  # pyannote 4.x uses 'token' instead of 'use_auth_token'
         )
         if DIARIZATION_DEVICE == "cuda" and torch.cuda.is_available():
             _segmentation_model = _segmentation_model.to(DIARIZATION_DEVICE)
@@ -72,7 +51,7 @@ def get_embedding_model():
 
         _embedding_model = Model.from_pretrained(
             "pyannote/embedding",
-            use_auth_token=os.getenv("HF_TOKEN"),
+            token=os.getenv("HF_TOKEN"),  # pyannote 4.x uses 'token' instead of 'use_auth_token'
         )
         if DIARIZATION_DEVICE == "cuda" and torch.cuda.is_available():
             _embedding_model = _embedding_model.to(DIARIZATION_DEVICE)
