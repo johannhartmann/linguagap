@@ -4,8 +4,8 @@ import re
 from huggingface_hub import hf_hub_download
 from llama_cpp import Llama
 
-MT_MODEL_REPO = os.getenv("MT_MODEL_REPO", "bullerwins/translategemma-27b-it-GGUF")
-MT_MODEL_FILE = os.getenv("MT_MODEL_FILE", "translategemma-27b-it-Q4_K_M.gguf")
+MT_MODEL_REPO = os.getenv("MT_MODEL_REPO", "bullerwins/translategemma-12b-it-GGUF")
+MT_MODEL_FILE = os.getenv("MT_MODEL_FILE", "translategemma-12b-it-Q4_K_M.gguf")
 MT_N_GPU_LAYERS = int(os.getenv("MT_N_GPU_LAYERS", "-1"))  # -1 = all layers on GPU
 MT_N_CTX = int(os.getenv("MT_N_CTX", "4096"))
 

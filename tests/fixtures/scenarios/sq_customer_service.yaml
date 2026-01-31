@@ -1,0 +1,36 @@
+name: sq_customer_service
+description: Customer service dialogue between German support and Albanian customer
+german_lang: de
+foreign_lang: sq
+speakers:
+  speaker_1: Frau Weber
+  speaker_2: Besnik
+turns:
+  - speaker_id: speaker_1
+    language: de
+    text: Guten Tag, herzlich willkommen. Was kann ich für Sie tun?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: sq
+    text: Mirëdita, doja të ktheja këtë produkt.
+    expected_translation: Guten Tag, ich möchte dieses Produkt zurückgeben.
+  - speaker_id: speaker_1
+    language: de
+    text: Natürlich. Haben Sie den Kassenbon dabei?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: sq
+    text: Po, ja ku është. E bleva javën e kaluar.
+    expected_translation: Ja, hier ist er. Ich habe es letzte Woche gekauft.
+  - speaker_id: speaker_1
+    language: de
+    text: Alles in Ordnung. Ich kann Ihnen eine Rückerstattung geben.
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: sq
+    text: Faleminderit shumë për ndihmën tuaj.
+    expected_translation: Vielen Dank für Ihre Hilfe.
+expected_summary_topics:
+  - product return
+  - receipt
+  - refund

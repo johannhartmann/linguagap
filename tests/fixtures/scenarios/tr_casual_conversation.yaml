@@ -1,0 +1,37 @@
+name: tr_casual_conversation
+description: Casual conversation between German and Turkish colleagues
+german_lang: de
+foreign_lang: tr
+speakers:
+  speaker_1: Peter
+  speaker_2: Ayşe
+turns:
+  - speaker_id: speaker_1
+    language: de
+    text: Hey Ayşe, hast du schon zu Mittag gegessen?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: tr
+    text: Hayır, henüz yemedim. Sen ne yiyeceksin?
+    expected_translation: Nein, ich habe noch nicht gegessen. Was wirst du essen?
+  - speaker_id: speaker_1
+    language: de
+    text: Ich dachte an den Döner-Laden um die Ecke.
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: tr
+    text: Aa, orası çok güzel! Ben de geleyim mi?
+    expected_translation: Oh, dort ist es sehr gut! Soll ich auch mitkommen?
+  - speaker_id: speaker_1
+    language: de
+    text: Ja, gerne! Ich lade dich ein.
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: tr
+    text: Çok naziksin, teşekkür ederim! Hadi gidelim.
+    expected_translation: Das ist sehr nett von dir, danke! Lass uns gehen.
+expected_summary_topics:
+  - lunch
+  - döner
+  - invitation
+  - colleagues

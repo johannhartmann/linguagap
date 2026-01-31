@@ -1,0 +1,36 @@
+name: fa_customer_service
+description: Customer service dialogue between German support and Persian customer
+german_lang: de
+foreign_lang: fa
+speakers:
+  speaker_1: Herr Fischer
+  speaker_2: آرش
+turns:
+  - speaker_id: speaker_1
+    language: de
+    text: Guten Tag, wie kann ich Ihnen behilflich sein?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: fa
+    text: سلام، من می‌خواهم یک حساب بانکی باز کنم.
+    expected_translation: Hallo, ich möchte ein Bankkonto eröffnen.
+  - speaker_id: speaker_1
+    language: de
+    text: Sehr gerne. Haben Sie Ihren Ausweis dabei?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: fa
+    text: بله، پاسپورت و اجازه اقامتم را آوردم.
+    expected_translation: Ja, ich habe meinen Reisepass und meine Aufenthaltserlaubnis mitgebracht.
+  - speaker_id: speaker_1
+    language: de
+    text: Perfekt. Möchten Sie ein Girokonto oder ein Sparkonto?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: fa
+    text: یک حساب جاری لطفاً. ممنون از کمکتان.
+    expected_translation: Ein Girokonto bitte. Danke für Ihre Hilfe.
+expected_summary_topics:
+  - bank account
+  - identification
+  - checking account

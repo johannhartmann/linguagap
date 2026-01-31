@@ -1,0 +1,37 @@
+name: tr_business_meeting
+description: Business meeting between German and Turkish business partners
+german_lang: de
+foreign_lang: tr
+speakers:
+  speaker_1: Frau Hoffmann
+  speaker_2: Bay Yılmaz
+turns:
+  - speaker_id: speaker_1
+    language: de
+    text: Herzlich willkommen in München. Wie war Ihre Reise?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: tr
+    text: Teşekkürler, uçuş çok rahattı. Münih çok güzel bir şehir.
+    expected_translation: Danke, der Flug war sehr angenehm. München ist eine sehr schöne Stadt.
+  - speaker_id: speaker_1
+    language: de
+    text: Freut mich. Lassen Sie uns über die Produktionskapazitäten sprechen.
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: tr
+    text: Türkiye'deki fabrikamız yılda iki milyon birim üretebilir.
+    expected_translation: Unsere Fabrik in der Türkei kann zwei Millionen Einheiten pro Jahr produzieren.
+  - speaker_id: speaker_1
+    language: de
+    text: Das ist beeindruckend. Wie sieht es mit der Qualitätskontrolle aus?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: tr
+    text: ISO sertifikamız var ve Alman standartlarına uygun çalışıyoruz.
+    expected_translation: Wir haben eine ISO-Zertifizierung und arbeiten nach deutschen Standards.
+expected_summary_topics:
+  - production capacity
+  - Turkish factory
+  - quality control
+  - ISO certification

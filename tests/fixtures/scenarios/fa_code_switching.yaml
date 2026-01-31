@@ -1,0 +1,36 @@
+name: fa_code_switching
+description: Conversation with code-switching between German and Persian
+german_lang: de
+foreign_lang: fa
+speakers:
+  speaker_1: Julia
+  speaker_2: نازنین
+turns:
+  - speaker_id: speaker_1
+    language: de
+    text: Hast du die Prüfung bestanden?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: fa
+    text: آره، خدا رو شکر! Ich habe eine Eins bekommen.
+    expected_translation: Ja, Gott sei Dank! Ich habe eine Eins bekommen.
+  - speaker_id: speaker_1
+    language: de
+    text: Herzlichen Glückwunsch! Das ist fantastisch!
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: fa
+    text: ممنون! Es war wirklich schwer, ولی خوشحالم که تموم شد.
+    expected_translation: Danke! Es war wirklich schwer, aber ich bin froh, dass es vorbei ist.
+  - speaker_id: speaker_1
+    language: de
+    text: Jetzt müssen wir feiern!
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: fa
+    text: Ja, unbedingt! بریم یه کافه؟
+    expected_translation: Ja, unbedingt! Sollen wir in ein Café gehen?
+expected_summary_topics:
+  - exam
+  - celebration
+  - success

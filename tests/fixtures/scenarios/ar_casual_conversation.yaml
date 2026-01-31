@@ -1,0 +1,37 @@
+name: ar_casual_conversation
+description: Casual conversation between German and Arabic neighbors
+german_lang: de
+foreign_lang: ar
+speakers:
+  speaker_1: Klaus
+  speaker_2: محمد
+turns:
+  - speaker_id: speaker_1
+    language: de
+    text: Guten Morgen, Nachbar! Schönes Wetter heute, oder?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: ar
+    text: صباح الخير! نعم، الطقس رائع اليوم.
+    expected_translation: Guten Morgen! Ja, das Wetter ist heute wunderbar.
+  - speaker_id: speaker_1
+    language: de
+    text: Haben Sie Pläne für das Wochenende?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: ar
+    text: سنذهب إلى حديقة الحيوان مع الأطفال.
+    expected_translation: Wir gehen mit den Kindern in den Zoo.
+  - speaker_id: speaker_1
+    language: de
+    text: Das ist eine tolle Idee. Der Zoo hier ist wirklich schön.
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: ar
+    text: نعم، الأطفال متحمسون جداً. هل تريد أن تأتي معنا؟
+    expected_translation: Ja, die Kinder sind sehr aufgeregt. Möchten Sie mitkommen?
+expected_summary_topics:
+  - weather
+  - weekend plans
+  - zoo visit
+  - family

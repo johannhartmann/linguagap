@@ -1,0 +1,37 @@
+name: sq_casual_conversation
+description: Casual conversation between German and Albanian acquaintances
+german_lang: de
+foreign_lang: sq
+speakers:
+  speaker_1: Marco
+  speaker_2: Erion
+turns:
+  - speaker_id: speaker_1
+    language: de
+    text: Na, wie war dein Wochenende?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: sq
+    text: Shumë mirë! Shkova në mal me familjen.
+    expected_translation: Sehr gut! Ich bin mit der Familie in die Berge gefahren.
+  - speaker_id: speaker_1
+    language: de
+    text: Toll! Wo genau wart ihr?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: sq
+    text: Ishim në Alpet Bavareze. Pamja ishte e mrekullueshme.
+    expected_translation: Wir waren in den Bayerischen Alpen. Die Aussicht war wunderbar.
+  - speaker_id: speaker_1
+    language: de
+    text: Das ist eine schöne Gegend. Seid ihr auch gewandert?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: sq
+    text: Po, bëmë një shëtitje prej pesë orësh. Ishte e lodhshme por e bukur.
+    expected_translation: Ja, wir haben eine fünfstündige Wanderung gemacht. Es war anstrengend aber schön.
+expected_summary_topics:
+  - weekend
+  - mountains
+  - Bavarian Alps
+  - hiking

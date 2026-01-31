@@ -1,0 +1,19 @@
+name: sample_scenario
+description: A simple test scenario for basic tests
+german_lang: de
+foreign_lang: en
+speakers:
+  speaker_1: Anna
+  speaker_2: John
+turns:
+  - speaker_id: speaker_1
+    language: de
+    text: Guten Tag, wie kann ich Ihnen helfen?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: en
+    text: Hello, I need help with my order.
+    expected_translation: Hallo, ich brauche Hilfe mit meiner Bestellung.
+expected_summary_topics:
+  - greeting
+  - order help

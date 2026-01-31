@@ -1,0 +1,37 @@
+name: ar_business_meeting
+description: Business meeting between German and Arabic business partners
+german_lang: de
+foreign_lang: ar
+speakers:
+  speaker_1: Herr Wagner
+  speaker_2: السيد الخالدي
+turns:
+  - speaker_id: speaker_1
+    language: de
+    text: Es freut mich sehr, Sie persönlich zu treffen. Willkommen in Deutschland.
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: ar
+    text: شكراً لك. سعيد بلقائك أيضاً. سمعت كثيراً عن شركتكم.
+    expected_translation: Danke. Freut mich auch, Sie zu treffen. Ich habe viel über Ihr Unternehmen gehört.
+  - speaker_id: speaker_1
+    language: de
+    text: Wir sind sehr an einer Zusammenarbeit im Nahen Osten interessiert.
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: ar
+    text: السوق العربي ينمو بسرعة. هناك فرص كبيرة للشركات الألمانية.
+    expected_translation: Der arabische Markt wächst schnell. Es gibt große Chancen für deutsche Unternehmen.
+  - speaker_id: speaker_1
+    language: de
+    text: Können Sie uns bei der Markteinführung unterstützen?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: ar
+    text: بالتأكيد. لدينا شبكة واسعة من الموزعين في المنطقة.
+    expected_translation: Natürlich. Wir haben ein breites Netzwerk von Distributoren in der Region.
+expected_summary_topics:
+  - Middle East market
+  - business partnership
+  - market entry
+  - distribution network

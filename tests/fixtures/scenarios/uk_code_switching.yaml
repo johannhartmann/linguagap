@@ -1,0 +1,37 @@
+name: uk_code_switching
+description: Conversation with code-switching between German and Ukrainian
+german_lang: de
+foreign_lang: uk
+speakers:
+  speaker_1: Lisa
+  speaker_2: Оксана
+turns:
+  - speaker_id: speaker_1
+    language: de
+    text: Hast du das neue Restaurant probiert?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: uk
+    text: Так, дуже смачно! Die Pasta war ausgezeichnet.
+    expected_translation: Ja, sehr lecker! Die Pasta war ausgezeichnet.
+  - speaker_id: speaker_1
+    language: de
+    text: Das klingt toll. Ich muss unbedingt auch hin.
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: uk
+    text: Обов'язково спробуй їхній тірамісу, es ist der Wahnsinn!
+    expected_translation: Probier unbedingt ihr Tiramisu, es ist der Wahnsinn!
+  - speaker_id: speaker_1
+    language: de
+    text: Super, danke für den Tipp!
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: uk
+    text: Нема за що! Bis bald!
+    expected_translation: Gern geschehen! Bis bald!
+expected_summary_topics:
+  - restaurant
+  - food recommendation
+  - pasta
+  - tiramisu

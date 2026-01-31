@@ -1,0 +1,37 @@
+name: sq_business_meeting
+description: Business meeting between German and Albanian partners
+german_lang: de
+foreign_lang: sq
+speakers:
+  speaker_1: Herr Müller
+  speaker_2: Zoti Hoxha
+turns:
+  - speaker_id: speaker_1
+    language: de
+    text: Willkommen in unserer Zentrale. Freut mich, Sie kennenzulernen.
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: sq
+    text: Faleminderit. Edhe mua më vjen mirë që jemi këtu për të diskutuar partneritetin.
+    expected_translation: Danke. Es freut mich auch, hier zu sein, um die Partnerschaft zu besprechen.
+  - speaker_id: speaker_1
+    language: de
+    text: Lassen Sie uns über die Exportmöglichkeiten nach Albanien sprechen.
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: sq
+    text: Tregu shqiptar ka potencial të madh. Popullsia është e re dhe e interesuar për produkte gjermane.
+    expected_translation: Der albanische Markt hat großes Potenzial. Die Bevölkerung ist jung und an deutschen Produkten interessiert.
+  - speaker_id: speaker_1
+    language: de
+    text: Das klingt vielversprechend. Welche Produkte würden Sie empfehlen?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: sq
+    text: Teknologjia dhe makineria janë shumë të kërkuara.
+    expected_translation: Technologie und Maschinen sind sehr gefragt.
+expected_summary_topics:
+  - partnership
+  - Albanian market
+  - export
+  - technology

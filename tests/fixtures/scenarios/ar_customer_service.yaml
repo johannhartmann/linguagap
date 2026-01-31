@@ -1,0 +1,36 @@
+name: ar_customer_service
+description: Customer service dialogue between German support and Arabic customer
+german_lang: de
+foreign_lang: ar
+speakers:
+  speaker_1: Frau Bauer
+  speaker_2: أحمد
+turns:
+  - speaker_id: speaker_1
+    language: de
+    text: Guten Tag, willkommen in unserer Filiale. Wie kann ich Ihnen helfen?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: ar
+    text: مرحباً، أريد أن أسأل عن تأمين السيارات.
+    expected_translation: Hallo, ich möchte mich über die Kfz-Versicherung erkundigen.
+  - speaker_id: speaker_1
+    language: de
+    text: Gerne. Haben Sie bereits ein Fahrzeug oder planen Sie einen Kauf?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: ar
+    text: اشتريت سيارة جديدة الأسبوع الماضي.
+    expected_translation: Ich habe letzte Woche ein neues Auto gekauft.
+  - speaker_id: speaker_1
+    language: de
+    text: Herzlichen Glückwunsch! Ich kann Ihnen verschiedene Tarife anbieten.
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: ar
+    text: شكراً جزيلاً. أريد تغطية شاملة من فضلك.
+    expected_translation: Vielen Dank. Ich möchte eine Vollkasko-Versicherung bitte.
+expected_summary_topics:
+  - car insurance
+  - new car
+  - coverage options

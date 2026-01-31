@@ -1,0 +1,37 @@
+name: uk_casual_conversation
+description: Casual conversation between German and Ukrainian friends
+german_lang: de
+foreign_lang: uk
+speakers:
+  speaker_1: Thomas
+  speaker_2: Андрій
+turns:
+  - speaker_id: speaker_1
+    language: de
+    text: Hey, wie geht's dir? Lange nicht gesehen!
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: uk
+    text: Привіт! Все добре, дякую. А в тебе як справи?
+    expected_translation: Hi! Alles gut, danke. Und wie geht es dir?
+  - speaker_id: speaker_1
+    language: de
+    text: Mir geht's super. Ich war letzte Woche im Urlaub in Spanien.
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: uk
+    text: О, класно! Як там погода була?
+    expected_translation: Oh, cool! Wie war das Wetter dort?
+  - speaker_id: speaker_1
+    language: de
+    text: Fantastisch, jeden Tag Sonne und dreißig Grad.
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: uk
+    text: Заздрю! Я теж хочу поїхати кудись на відпочинок.
+    expected_translation: Ich bin neidisch! Ich will auch irgendwohin in den Urlaub fahren.
+expected_summary_topics:
+  - greeting
+  - vacation
+  - Spain
+  - weather

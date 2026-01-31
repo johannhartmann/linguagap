@@ -1,0 +1,37 @@
+name: uk_business_meeting
+description: Business meeting between German and Ukrainian colleagues
+german_lang: de
+foreign_lang: uk
+speakers:
+  speaker_1: Herr Schmidt
+  speaker_2: Пані Коваленко
+turns:
+  - speaker_id: speaker_1
+    language: de
+    text: Guten Morgen, lassen Sie uns die Quartalszahlen besprechen.
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: uk
+    text: Доброго ранку. Так, я підготувала звіт про продажі.
+    expected_translation: Guten Morgen. Ja, ich habe den Verkaufsbericht vorbereitet.
+  - speaker_id: speaker_1
+    language: de
+    text: Ausgezeichnet. Wie sieht es mit dem ukrainischen Markt aus?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: uk
+    text: Продажі зросли на п'ятнадцять відсотків у порівнянні з минулим кварталом.
+    expected_translation: Die Verkäufe sind um fünfzehn Prozent im Vergleich zum letzten Quartal gestiegen.
+  - speaker_id: speaker_1
+    language: de
+    text: Das sind sehr gute Nachrichten. Wir sollten die Marketingstrategie beibehalten.
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: uk
+    text: Згодна. Також пропоную розширити асортимент продукції.
+    expected_translation: Einverstanden. Ich schlage auch vor, das Produktsortiment zu erweitern.
+expected_summary_topics:
+  - quarterly results
+  - sales report
+  - Ukrainian market
+  - marketing strategy

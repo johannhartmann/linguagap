@@ -1,0 +1,36 @@
+name: tr_customer_service
+description: Customer service dialogue between German support and Turkish customer
+german_lang: de
+foreign_lang: tr
+speakers:
+  speaker_1: Herr Klein
+  speaker_2: Mehmet
+turns:
+  - speaker_id: speaker_1
+    language: de
+    text: Guten Tag, wie kann ich Ihnen helfen?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: tr
+    text: Merhaba, internet bağlantımda bir sorun var.
+    expected_translation: Hallo, ich habe ein Problem mit meiner Internetverbindung.
+  - speaker_id: speaker_1
+    language: de
+    text: Das tut mir leid. Seit wann besteht das Problem?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: tr
+    text: Dünden beri çalışmıyor. Birkaç kez yeniden başlattım ama olmadı.
+    expected_translation: Seit gestern funktioniert es nicht. Ich habe es mehrmals neu gestartet, aber es hat nicht geholfen.
+  - speaker_id: speaker_1
+    language: de
+    text: Ich werde einen Techniker zu Ihnen schicken. Wann passt es Ihnen?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: tr
+    text: Yarın öğleden sonra uygun olur. Çok teşekkür ederim.
+    expected_translation: Morgen Nachmittag wäre gut. Vielen Dank.
+expected_summary_topics:
+  - internet problem
+  - technical support
+  - technician appointment

@@ -73,6 +73,8 @@ COPY static/ ./static/
 # Set PYTHONPATH to include src directory
 ENV PYTHONPATH=/app/src
 ENV PATH="/app/.venv/bin:$PATH"
+# Prioritize PyTorch's bundled cuDNN over system cuDNN to avoid version mismatch
+ENV LD_LIBRARY_PATH="/app/.venv/lib/python3.12/site-packages/nvidia/cudnn/lib:${LD_LIBRARY_PATH}"
 
 # Expose port
 EXPOSE 8000

@@ -1,0 +1,37 @@
+name: tr_code_switching
+description: Conversation with code-switching between German and Turkish
+german_lang: de
+foreign_lang: tr
+speakers:
+  speaker_1: Michael
+  speaker_2: Deniz
+turns:
+  - speaker_id: speaker_1
+    language: de
+    text: Wie war das Konzert gestern?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: tr
+    text: Çok güzeldi! Die Band war einfach fantastisch.
+    expected_translation: Es war sehr schön! Die Band war einfach fantastisch.
+  - speaker_id: speaker_1
+    language: de
+    text: Welche Lieder haben sie gespielt?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: tr
+    text: Eski şarkılarını çaldılar, und auch einige neue. Vallahi süper bir gece idi.
+    expected_translation: Sie haben ihre alten Lieder gespielt, und auch einige neue. Es war wirklich eine super Nacht.
+  - speaker_id: speaker_1
+    language: de
+    text: Das klingt toll. Nächstes Mal komme ich mit!
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: tr
+    text: Tamam, söz mü? Das wird bestimmt super!
+    expected_translation: Okay, versprochen? Das wird bestimmt super!
+expected_summary_topics:
+  - concert
+  - band
+  - music
+  - future plans

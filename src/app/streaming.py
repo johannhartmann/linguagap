@@ -278,13 +278,27 @@ def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
         # Find dominant speaker for this segment using diarization
         speaker_id = session.diarizer.get_dominant_speaker(diar_segments, abs_start, abs_end)
 
-        # Determine segment language: use user selection, or per-segment detection
+        # Determine segment language: use user selection, or SpeechBrain language ID
         if session.src_lang != "auto":
             segment_lang = session.src_lang
         else:
-            # Use faster-whisper's per-segment language detection (multilingual=True)
-            # Each segment has a .language attribute when multilingual mode is enabled
-            segment_lang = getattr(seg, "language", None) or info.language
+            # Extract segment audio for language detection
+            seg_start_sample = int(seg.start * 16000)
+            seg_end_sample = int(seg.end * 16000)
+            segment_audio = (
+                audio[seg_start_sample:seg_end_sample]
+                if seg_end_sample <= len(audio)
+                else audio[seg_start_sample:]
+            )
+
+            # Use SpeechBrain language ID (more accurate than Whisper for short segments)
+            from app.lang_id import detect_language_from_audio
+
+            speechbrain_lang, confidence = detect_language_from_audio(segment_audio, 16000)
+
+            # Fall back to Whisper if SpeechBrain returns unknown
+            whisper_lang = getattr(seg, "language", None) or info.language
+            segment_lang = speechbrain_lang if speechbrain_lang != "unknown" else whisper_lang
 
         # Update foreign language tracking
         if segment_lang not in ("unknown", "de") and session.foreign_lang is None:

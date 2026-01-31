@@ -1,0 +1,36 @@
+name: sq_code_switching
+description: Conversation with code-switching between German and Albanian
+german_lang: de
+foreign_lang: sq
+speakers:
+  speaker_1: Nina
+  speaker_2: Albana
+turns:
+  - speaker_id: speaker_1
+    language: de
+    text: Kommst du heute Abend zur Party?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: sq
+    text: Po, sigurisht! Ich freue mich schon sehr darauf.
+    expected_translation: Ja, natürlich! Ich freue mich schon sehr darauf.
+  - speaker_id: speaker_1
+    language: de
+    text: Super! Soll ich dich abholen?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: sq
+    text: Ah, das wäre toll. Mund të vish në orën tetë?
+    expected_translation: Ah, das wäre toll. Kannst du um acht Uhr kommen?
+  - speaker_id: speaker_1
+    language: de
+    text: Ja, kein Problem. Bis später!
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: sq
+    text: Perfekt, bis dann! Shihemi!
+    expected_translation: Perfekt, bis dann! Wir sehen uns!
+expected_summary_topics:
+  - party
+  - pickup
+  - evening plans

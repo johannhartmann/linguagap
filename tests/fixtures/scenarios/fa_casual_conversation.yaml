@@ -1,0 +1,36 @@
+name: fa_casual_conversation
+description: Casual conversation between German and Persian friends
+german_lang: de
+foreign_lang: fa
+speakers:
+  speaker_1: Sarah
+  speaker_2: مریم
+turns:
+  - speaker_id: speaker_1
+    language: de
+    text: Hallo! Wie geht es dir heute?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: fa
+    text: سلام! خوبم، ممنون. تو چطوری؟
+    expected_translation: Hallo! Mir geht es gut, danke. Wie geht es dir?
+  - speaker_id: speaker_1
+    language: de
+    text: Mir geht's gut. Hast du Lust, heute Abend essen zu gehen?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: fa
+    text: آره، عالیه! کجا بریم؟
+    expected_translation: Ja, toll! Wohin sollen wir gehen?
+  - speaker_id: speaker_1
+    language: de
+    text: Wie wäre es mit dem neuen iranischen Restaurant in der Innenstadt?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: fa
+    text: عالی! من عاشق غذای ایرانی هستم. ساعت هفت خوبه؟
+    expected_translation: Super! Ich liebe iranisches Essen. Ist sieben Uhr gut?
+expected_summary_topics:
+  - dinner plans
+  - Iranian restaurant
+  - evening meetup

@@ -1,0 +1,36 @@
+name: uk_customer_service
+description: Customer service dialogue between German support and Ukrainian customer
+german_lang: de
+foreign_lang: uk
+speakers:
+  speaker_1: Maria
+  speaker_2: Oleksandr
+turns:
+  - speaker_id: speaker_1
+    language: de
+    text: Guten Tag, willkommen bei unserem Kundenservice. Wie kann ich Ihnen helfen?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: uk
+    text: Добрий день, я хотів би дізнатися про статус мого замовлення.
+    expected_translation: Guten Tag, ich möchte den Status meiner Bestellung erfahren.
+  - speaker_id: speaker_1
+    language: de
+    text: Natürlich, können Sie mir bitte Ihre Bestellnummer geben?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: uk
+    text: Так, номер замовлення двадцять три сорок п'ять.
+    expected_translation: Ja, die Bestellnummer ist dreiundzwanzig fünfundvierzig.
+  - speaker_id: speaker_1
+    language: de
+    text: Vielen Dank. Ihr Paket wurde gestern verschickt und sollte morgen ankommen.
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: uk
+    text: Чудово, дякую за інформацію.
+    expected_translation: Wunderbar, danke für die Information.
+expected_summary_topics:
+  - order status
+  - shipping
+  - delivery

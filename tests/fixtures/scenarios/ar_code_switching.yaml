@@ -1,0 +1,36 @@
+name: ar_code_switching
+description: Conversation with code-switching between German and Arabic
+german_lang: de
+foreign_lang: ar
+speakers:
+  speaker_1: Stefan
+  speaker_2: ليلى
+turns:
+  - speaker_id: speaker_1
+    language: de
+    text: Wie läuft dein Deutschkurs?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: ar
+    text: الحمد لله، es läuft sehr gut! أنا أتعلم كثيراً.
+    expected_translation: Gott sei Dank, es läuft sehr gut! Ich lerne viel.
+  - speaker_id: speaker_1
+    language: de
+    text: Das freut mich zu hören. Die deutsche Grammatik ist nicht einfach.
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: ar
+    text: صحيح! Der Dativ macht mich verrückt, لكن أحاول كل يوم.
+    expected_translation: Stimmt! Der Dativ macht mich verrückt, aber ich versuche es jeden Tag.
+  - speaker_id: speaker_1
+    language: de
+    text: Übung macht den Meister!
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: ar
+    text: Genau! إن شاء الله أصير أفضل قريباً.
+    expected_translation: Genau! Hoffentlich werde ich bald besser.
+expected_summary_topics:
+  - German course
+  - language learning
+  - grammar challenges

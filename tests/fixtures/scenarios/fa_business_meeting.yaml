@@ -1,0 +1,37 @@
+name: fa_business_meeting
+description: Business meeting between German and Persian business partners
+german_lang: de
+foreign_lang: fa
+speakers:
+  speaker_1: Frau Schneider
+  speaker_2: آقای رحیمی
+turns:
+  - speaker_id: speaker_1
+    language: de
+    text: Vielen Dank, dass Sie heute gekommen sind. Lassen Sie uns über das Projekt sprechen.
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: fa
+    text: ممنون از دعوتتان. ما آماده‌ایم که همکاری را شروع کنیم.
+    expected_translation: Danke für die Einladung. Wir sind bereit, die Zusammenarbeit zu beginnen.
+  - speaker_id: speaker_1
+    language: de
+    text: Wunderbar. Wie sieht Ihr Zeitplan für die erste Phase aus?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: fa
+    text: ما می‌توانیم فاز اول را تا پایان ماه آینده تمام کنیم.
+    expected_translation: Wir können die erste Phase bis Ende nächsten Monats abschließen.
+  - speaker_id: speaker_1
+    language: de
+    text: Das passt gut in unseren Plan. Wie viele Mitarbeiter werden beteiligt sein?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: fa
+    text: تیم ما شامل پنج مهندس و دو مدیر پروژه خواهد بود.
+    expected_translation: Unser Team wird aus fünf Ingenieuren und zwei Projektmanagern bestehen.
+expected_summary_topics:
+  - project
+  - collaboration
+  - timeline
+  - team composition
