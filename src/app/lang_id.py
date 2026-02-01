@@ -105,7 +105,7 @@ class SpeakerLanguageTracker:
         speaker_id: str,
         audio: np.ndarray | None = None,
         sample_rate: int = 16000,
-    ) -> str:
+    ) -> tuple[str, float]:
         """
         Get the language for a speaker, detecting it if not already known.
 
@@ -115,11 +115,12 @@ class SpeakerLanguageTracker:
             sample_rate: Sample rate of the audio
 
         Returns:
-            Language code (e.g., "en", "de") or "unknown"
+            Tuple of (language_code, confidence)
+            Language code is "en", "de", etc., or "unknown"
         """
         # Return cached language if available
         if speaker_id in self.speaker_languages:
-            return self.speaker_languages[speaker_id]
+            return self.speaker_languages[speaker_id], self.speaker_confidences.get(speaker_id, 1.0)
 
         # Detect language from audio if provided
         if audio is not None and len(audio) > 0:
@@ -129,9 +130,9 @@ class SpeakerLanguageTracker:
                 self.speaker_languages[speaker_id] = lang
                 self.speaker_confidences[speaker_id] = confidence
                 print(f"Detected language for {speaker_id}: {lang} ({confidence:.2f})")
-                return lang
+                return lang, confidence
 
-        return "unknown"
+        return "unknown", 0.0
 
     def set_speaker_language(self, speaker_id: str, language: str, confidence: float = 1.0):
         """Manually set a speaker's language."""
