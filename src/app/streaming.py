@@ -1022,6 +1022,9 @@ async def handle_websocket(websocket: WebSocket):
                         session.translations[segment.id] = {}
                     session.translations[segment.id][tgt_lang] = translation
 
+                    # Mark task as done for queue.join() to work
+                    translation_queue.task_done()
+
                     if running:
                         # Send translation update
                         translation_msg = {
@@ -1039,6 +1042,8 @@ async def handle_websocket(websocket: WebSocket):
                                 await broadcast_to_viewers(entry, translation_msg)
                 except Exception as e:
                     print(f"Translation error for segment {segment.id}: {e}")
+                    # Still mark as done even on error
+                    translation_queue.task_done()
 
             except Exception as e:
                 print(f"MT loop error: {e}")
@@ -1116,9 +1121,14 @@ async def handle_websocket(websocket: WebSocket):
                         # Get all segments including live ones
                         # Use wall-clock time for stability tracking
                         now_sec = time.time() - session.start_time
-                        all_segs, _ = session.segment_tracker.update_from_hypothesis(
+                        all_segs, time_finalized = session.segment_tracker.update_from_hypothesis(
                             [], 0.0, now_sec, "unknown"
                         )
+
+                        # Queue any segments that were just finalized by time
+                        for seg in time_finalized:
+                            print(f"Queuing time-finalized segment {seg.id}: {seg.src[:50]}")
+                            await translation_queue.put(seg)
 
                         # Identify live segments that need finalization
                         live_segs = [s for s in all_segs if not s.final]
@@ -1143,13 +1153,13 @@ async def handle_websocket(websocket: WebSocket):
                                 )
                             )
 
-                            wait_start = time.time()
-                            while not translation_queue.empty() and (time.time() - wait_start) < 10:
-                                await asyncio.sleep(0.2)
-
-                            if not translation_queue.empty():
+                            # Wait for all translations to complete (not just queue empty)
+                            try:
+                                await asyncio.wait_for(translation_queue.join(), timeout=60)
+                            except TimeoutError:
                                 print(
-                                    f"Warning: {translation_queue.qsize()} translations still pending"
+                                    f"Warning: translation queue join timed out, "
+                                    f"{translation_queue.qsize()} items remaining"
                                 )
 
                             # Build segments data with translations
@@ -1160,6 +1170,19 @@ async def handle_websocket(websocket: WebSocket):
                                 segments_data.append(seg_dict)
 
                             foreign_lang = session.foreign_lang or "en"
+
+                            # Send final segments with all translations before summary
+                            await websocket.send_text(
+                                json.dumps(
+                                    {
+                                        "type": "segments",
+                                        "t": session.get_current_time(),
+                                        "src_lang": session.detected_lang or "unknown",
+                                        "foreign_lang": foreign_lang,
+                                        "segments": segments_data,
+                                    }
+                                )
+                            )
 
                             # Send progress update
                             await websocket.send_text(

@@ -157,7 +157,19 @@ async def stream_scenario(
                         for seg in data.get("segments", []):
                             if seg.get("final"):
                                 seg_id = seg.get("id")
-                                if not any(s.get("id") == seg_id for s in results["segments"]):
+                                # Update existing segment or add new one
+                                existing_idx = next(
+                                    (
+                                        i
+                                        for i, s in enumerate(results["segments"])
+                                        if s.get("id") == seg_id
+                                    ),
+                                    None,
+                                )
+                                if existing_idx is not None:
+                                    # Update with newer version (may have more translations)
+                                    results["segments"][existing_idx] = seg
+                                else:
                                     results["segments"].append(seg)
 
                     elif msg_type == "translation":
@@ -192,7 +204,19 @@ async def stream_scenario(
                         for seg in data.get("segments", []):
                             if seg.get("final"):
                                 seg_id = seg.get("id")
-                                if not any(s.get("id") == seg_id for s in results["segments"]):
+                                # Update existing segment or add new one
+                                existing_idx = next(
+                                    (
+                                        i
+                                        for i, s in enumerate(results["segments"])
+                                        if s.get("id") == seg_id
+                                    ),
+                                    None,
+                                )
+                                if existing_idx is not None:
+                                    # Update with newer version (may have more translations)
+                                    results["segments"][existing_idx] = seg
+                                else:
                                     results["segments"].append(seg)
 
                     elif msg_type == "translation":
@@ -249,7 +273,10 @@ def match_segments_to_turns(
             if score > best_score:
                 best_score = score
                 seg_id = seg.get("id")
-                trans = translations.get(seg_id, {})
+                # Check embedded translations first, then fallback to separate translations dict
+                embedded_trans = seg.get("translations", {})
+                separate_trans = translations.get(seg_id, {})
+                trans = embedded_trans if embedded_trans else separate_trans
                 best_match = {
                     "segment": seg,
                     "translation": trans.get("de") if turn.language != "de" else None,

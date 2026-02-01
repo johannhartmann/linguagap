@@ -933,7 +933,7 @@
                 ws = new WebSocket(wsUrl);
 
                 ws.onopen = () => {
-                    setStatus(t('statusRecording'), 'connected');
+                    // Keep "Connecting..." status until config_ack is received
 
                     // Set foreign language from selection if not "auto" or "de"
                     const selectedLang = languageSelect.value;
@@ -963,7 +963,13 @@
                     try {
                         const data = JSON.parse(event.data);
                         console.log('WS message:', data.type, data.segments?.length || 0);
-                        if (data.type === 'segments' && data.segments) {
+                        if (data.type === 'config_ack') {
+                            console.log('Config acknowledged:', data.status);
+                            setStatus(t('statusRecording'), 'connected');
+                        } else if (data.type === 'error') {
+                            console.error('Server error:', data.message);
+                            setStatus(data.message || t('statusConnError'), 'error');
+                        } else if (data.type === 'segments' && data.segments) {
                             console.log('Calling renderSegments with', data.segments.length, 'segments');
                             renderSegments(data.segments, data.foreign_lang);
                             console.log('renderSegments completed');
