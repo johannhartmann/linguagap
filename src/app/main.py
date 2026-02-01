@@ -1,3 +1,26 @@
+"""
+FastAPI application for LinguaGap real-time transcription and translation.
+
+This is the main entry point for the application. It provides:
+    - HTTP endpoints for health checks, metrics, and file upload transcription
+    - WebSocket endpoints for real-time streaming transcription
+    - Static file serving for the web UI
+
+Endpoints:
+    GET  /              - Web interface
+    GET  /health        - Health check
+    GET  /metrics       - Performance metrics (ASR, MT, diarization times)
+    POST /transcribe_translate - File upload transcription
+    WS   /ws            - Real-time streaming WebSocket
+    GET  /viewer/{token} - Mobile viewer page
+    WS   /ws/viewer/{token} - Read-only viewer WebSocket
+
+Startup:
+    All models are warmed up on startup via the lifespan handler to minimize
+    cold-start latency on first request. This includes ASR, MT, summarization,
+    diarization, and language ID models.
+"""
+
 import os
 import tempfile
 from contextlib import asynccontextmanager
@@ -17,6 +40,23 @@ from app.streaming import get_metrics, handle_viewer_websocket, handle_websocket
 
 
 def warmup_models():
+    """
+    Warm up all ML models on startup.
+
+    This runs during application startup to ensure all models are loaded
+    and ready before the first request. Without warmup, the first request
+    would experience significant latency (minutes for large models).
+
+    Models warmed up:
+        - ASR (faster-whisper): ~2-3 GB VRAM
+        - Translation (TranslateGemma 12B): ~8 GB VRAM
+        - Summarization (Qwen3-4B): ~4 GB VRAM
+        - Diarization (pyannote): ~1 GB VRAM
+        - Language ID (SpeechBrain): ~1 GB VRAM
+
+    Total warmup time is typically 5-10 minutes depending on network speed
+    for model downloads and GPU initialization.
+    """
     print("Warming up ASR model...")
     asr_model = get_model()
     silence = np.zeros(16000, dtype=np.float32)

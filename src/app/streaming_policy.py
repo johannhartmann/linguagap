@@ -1,3 +1,30 @@
+"""
+Segment tracking and finalization for streaming transcription.
+
+This module maintains a cumulative transcript that persists across sliding
+ASR windows. It solves a key problem with streaming ASR: segments from
+earlier in the conversation would be lost when the window slides forward.
+
+Key concepts:
+    - Cumulative Transcript: All segments ever detected are kept, even when
+      no longer in the current ASR window
+    - Segment Merging: New hypotheses merge with existing segments based on
+      50%+ time overlap
+    - Time-Based Finalization: Segments finalize when their end time is
+      STABILITY_SEC in the past (not when text stabilizes)
+
+Finalization state machine:
+    1. NEW: Segment detected in ASR window, added to cumulative_segments
+    2. UPDATING: Segment re-detected, text/timing may change
+    3. STABLE: Segment end time is STABILITY_SEC ago
+    4. FINALIZED: Moved to finalized_segments, queued for translation
+
+Why time-based finalization?
+    Text-based stability detection is unreliable - Whisper may refine text
+    even for old audio. Time-based approach ensures segments finalize
+    predictably when they're safely in the past.
+"""
+
 import os
 from dataclasses import dataclass, field
 
@@ -6,6 +33,19 @@ STABILITY_SEC = float(os.getenv("STABILITY_SEC", "1.25"))
 
 @dataclass
 class Segment:
+    """
+    A transcribed speech segment with timing and speaker information.
+
+    Attributes:
+        id: Unique identifier (monotonically increasing)
+        abs_start: Absolute start time in seconds from session start
+        abs_end: Absolute end time in seconds from session start
+        src: Transcribed text in the source language
+        src_lang: ISO language code (e.g., "de", "bg")
+        final: True if segment is finalized and won't change
+        speaker_id: Speaker identifier from diarization (e.g., "SPEAKER_00")
+    """
+
     id: int
     abs_start: float
     abs_end: float
@@ -41,7 +81,21 @@ class SegmentTracker:
     cumulative_segments: list[CumulativeSegment] = field(default_factory=list)
 
     def _calc_overlap_ratio(self, start1: float, end1: float, start2: float, end2: float) -> float:
-        """Calculate overlap ratio between two time ranges."""
+        """
+        Calculate overlap ratio between two time ranges.
+
+        The ratio is: overlap_duration / duration_of_first_range
+
+        This is used for segment matching - if a new hypothesis overlaps >50%
+        with an existing cumulative segment, they're considered the same segment.
+
+        Args:
+            start1, end1: First time range
+            start2, end2: Second time range
+
+        Returns:
+            Overlap ratio from 0.0 (no overlap) to 1.0 (complete overlap)
+        """
         overlap_start = max(start1, start2)
         overlap_end = min(end1, end2)
         overlap_duration = max(0, overlap_end - overlap_start)
@@ -53,7 +107,24 @@ class SegmentTracker:
     def _find_matching_cumulative(
         self, abs_start: float, abs_end: float
     ) -> CumulativeSegment | None:
-        """Find a cumulative segment that overlaps significantly with the given range."""
+        """
+        Find a cumulative segment that overlaps significantly with the given range.
+
+        Uses bidirectional overlap checking - a match is found if either:
+            - >50% of the new range overlaps with existing segment, OR
+            - >50% of existing segment overlaps with new range
+
+        This handles both cases:
+            - New hypothesis slightly shorter than existing (refinement)
+            - New hypothesis slightly longer than existing (extension)
+
+        Args:
+            abs_start: Absolute start time of new hypothesis
+            abs_end: Absolute end time of new hypothesis
+
+        Returns:
+            Matching CumulativeSegment or None if no match found
+        """
         for cs in self.cumulative_segments:
             if cs.segment.final:
                 continue
@@ -129,7 +200,7 @@ class SegmentTracker:
             else:
                 # Create new cumulative segment
                 print(
-                    f"  NEW SEG: [{abs_start:.1f}-{abs_end:.1f}] '{src_text[:30]}' (total: {len(self.cumulative_segments)+1})"
+                    f"  NEW SEG: [{abs_start:.1f}-{abs_end:.1f}] '{src_text[:30]}' (total: {len(self.cumulative_segments) + 1})"
                 )
                 new_segment = Segment(
                     id=self.next_id,

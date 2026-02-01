@@ -8,18 +8,21 @@
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit)](https://github.com/pre-commit/pre-commit)
 [![security: bandit](https://img.shields.io/badge/security-bandit-yellow.svg)](https://github.com/PyCQA/bandit)
 [![Docker](https://img.shields.io/badge/docker-ready-blue.svg?logo=docker)](https://hub.docker.com/)
-[![CUDA 12.8](https://img.shields.io/badge/CUDA-12.8-green.svg?logo=nvidia)](https://developer.nvidia.com/cuda-toolkit)
+[![CUDA 12.9](https://img.shields.io/badge/CUDA-12.9-green.svg?logo=nvidia)](https://developer.nvidia.com/cuda-toolkit)
 
 Real-time speech transcription and translation system using GPU-accelerated ASR and MT models.
 
 ## Features
 
 - **Real-time ASR** - Speech-to-text using faster-whisper (CTranslate2) with GPU acceleration
-- **LLM Translation** - High-quality translation using Qwen3 4B via llama-cpp-python
+- **Speaker Diarization** - Identify who's speaking using pyannote community pipeline
+- **Per-Speaker Language Detection** - SpeechBrain VoxLingua107 detects each speaker's language
+- **LLM Translation** - High-quality translation using TranslateGemma 12B via llama-cpp-python
+- **Bilingual Summarization** - Generate dual-language summaries using Qwen3-4B
 - **WebSocket Streaming** - Low-latency segment-based updates with decoupled ASR/MT
 - **Web Interface** - Browser-based microphone capture and real-time display
 - **Multi-language** - Support for 17+ languages with auto-detection
-- **GPU Optimized** - CUDA 12.8 with optimized inference
+- **GPU Optimized** - CUDA 12.9 with optimized inference for Blackwell GPUs
 
 ## Quick Start
 
@@ -32,7 +35,7 @@ Real-time speech transcription and translation system using GPU-accelerated ASR 
 ### Verify GPU Access
 
 ```bash
-docker run --rm --gpus all nvidia/cuda:12.8.0-runtime-ubuntu24.04 nvidia-smi
+docker run --rm --gpus all nvidia/cuda:12.9.0-runtime-ubuntu24.04 nvidia-smi
 ```
 
 ### Start the Service
@@ -47,28 +50,49 @@ open http://localhost:8000
 
 ## Architecture
 
+The system uses a **diarization-first pipeline** for accurate multilingual transcription:
+
 ```mermaid
 flowchart TB
     subgraph Browser["Web Browser"]
         Mic["🎤 Microphone<br/>Capture"]
         WS_Client["WebSocket<br/>Client"]
-        Display["📺 Display Panel<br/>(Source + DE)"]
+        Display["📺 Display Panel<br/>(Source + Translation)"]
         Mic --> WS_Client
         WS_Client --> Display
     end
 
     subgraph Backend["FastAPI Backend"]
-        ASR["🔊 ASR Loop<br/>(faster-whisper)<br/>Every 0.5s"]
-        MT_Queue["🌐 Translation Queue<br/>(Qwen3 4B)"]
+        subgraph Pipeline["Diarization-First ASR Pipeline"]
+            Diar["👥 Diarization<br/>(pyannote)"]
+            LangID["🗣️ Language ID<br/>(SpeechBrain)"]
+            ASR["🔊 Per-Speaker ASR<br/>(faster-whisper)"]
+            Diar -->|"speaker<br/>segments"| LangID
+            LangID -->|"lang per<br/>speaker"| ASR
+        end
+        MT_Queue["🌐 Translation<br/>(TranslateGemma 12B)"]
+        Summ["📝 Summarization<br/>(Qwen3-4B)"]
         WS_Response["WebSocket Response Stream"]
 
         ASR -->|"finalized<br/>segments"| MT_Queue
         ASR -->|"segments"| WS_Response
         MT_Queue -->|"translation"| WS_Response
+        MT_Queue -.->|"on stop"| Summ
+        Summ -.->|"dual summary"| WS_Response
     end
 
     WS_Client <-->|"PCM16 Audio ↓<br/>JSON Messages ↑"| WS_Response
 ```
+
+### Model Stack
+
+| Component | Model | Purpose |
+|-----------|-------|---------|
+| ASR | faster-whisper-large-v3-turbo | Speech-to-text transcription |
+| Diarization | pyannote-audio 4.x (community-1) | Speaker identification |
+| Language ID | SpeechBrain VoxLingua107 ECAPA-TDNN | Per-speaker language detection |
+| Translation | TranslateGemma 12B (GGUF) | Specialized translation model |
+| Summarization | Qwen3-4B (GGUF) | Bilingual summary generation |
 
 ## Environment Variables
 
@@ -77,8 +101,13 @@ flowchart TB
 | `ASR_MODEL` | `deepdml/faster-whisper-large-v3-turbo-ct2` | Whisper model |
 | `ASR_DEVICE` | `cuda` | ASR device (cuda/cpu) |
 | `ASR_COMPUTE_TYPE` | `int8_float16` | ASR compute type |
-| `MT_MODEL_REPO` | `Qwen/Qwen3-4B-GGUF` | Translation model repo |
-| `MT_MODEL_FILE` | `Qwen3-4B-Q4_K_M.gguf` | Model filename |
+| `DIARIZATION_MODEL` | `pyannote/speaker-diarization-community-1` | Speaker diarization |
+| `DIARIZATION_NUM_SPEAKERS` | `2` | Expected speakers (bilingual) |
+| `LANG_ID_MODEL` | `speechbrain/lang-id-voxlingua107-ecapa` | Language detection |
+| `MT_MODEL_REPO` | `bullerwins/translategemma-12b-it-GGUF` | Translation model repo |
+| `MT_MODEL_FILE` | `translategemma-12b-it-Q4_K_M.gguf` | Translation model file |
+| `SUMM_MODEL_REPO` | `Qwen/Qwen3-4B-GGUF` | Summarization model repo |
+| `SUMM_MODEL_FILE` | `Qwen3-4B-Q4_K_M.gguf` | Summarization model file |
 | `MT_N_GPU_LAYERS` | `-1` | GPU layers (-1 = all) |
 | `WINDOW_SEC` | `8.0` | Transcription window |
 | `TICK_SEC` | `0.5` | Update interval |
@@ -136,7 +165,20 @@ uv run pytest tests/ -v --cov=src/app --cov-report=term-missing
 
 # Run specific test file
 uv run pytest tests/test_streaming_policy.py -v
+
+# Run E2E tests (requires Gemini API key for TTS)
+GOOGLE_API_KEY=xxx uv run pytest tests/test_e2e_pipeline.py -v
 ```
+
+### E2E Testing
+
+End-to-end tests validate the full pipeline using synthetic audio from Gemini TTS:
+
+- **German-Bulgarian dialogue** - Tests bilingual transcription and translation
+- **German-Turkish dialogue** - Tests language switching detection
+- **Pure German** - Tests diarization without translation
+
+Audio fixtures are cached in `tests/fixtures/e2e_audio/` for reproducibility.
 
 ### Docker Development
 
@@ -166,7 +208,7 @@ sudo apt-get install -y nvidia-container-toolkit
 sudo systemctl restart docker
 
 # Verify
-docker run --rm --gpus all nvidia/cuda:12.8.0-runtime-ubuntu24.04 nvidia-smi
+docker run --rm --gpus all nvidia/cuda:12.9.0-runtime-ubuntu24.04 nvidia-smi
 ```
 
 ### Out of GPU Memory

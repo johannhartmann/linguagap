@@ -1,3 +1,19 @@
+"""
+Automatic Speech Recognition using faster-whisper.
+
+Provides a lazy-loaded singleton WhisperModel for GPU-accelerated transcription.
+The model is configured via environment variables and loaded on first use to
+minimize startup time.
+
+Configuration:
+    ASR_MODEL: Model name or path (default: deepdml/faster-whisper-large-v3-turbo-ct2)
+    ASR_DEVICE: cuda or cpu (default: cuda)
+    ASR_COMPUTE_TYPE: Compute type for inference (default: int8_float16)
+
+Note: This module provides the base transcription capability. For streaming
+with diarization, see streaming.py which orchestrates per-speaker ASR.
+"""
+
 import os
 from typing import Any
 
@@ -11,6 +27,15 @@ _model: WhisperModel | None = None
 
 
 def get_model() -> WhisperModel:
+    """
+    Get the faster-whisper model singleton.
+
+    Loads the model on first call and caches it for subsequent calls.
+    Model loading includes downloading from HuggingFace if not cached locally.
+
+    Returns:
+        WhisperModel instance configured per environment variables
+    """
     global _model
     if _model is None:
         _model = WhisperModel(

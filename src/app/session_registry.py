@@ -1,4 +1,21 @@
-"""Session registry for managing WebSocket sessions and viewers."""
+"""
+Session registry for managing WebSocket sessions and viewers.
+
+This module implements a token-based session registry that allows:
+    1. Recording sessions to be shared via URL
+    2. Read-only viewers to connect before recording starts
+    3. Real-time broadcast of updates to all connected viewers
+
+Session lifecycle:
+    1. Client generates a token on page load
+    2. reserve(token) - Creates pending entry (for viewers connecting early)
+    3. activate(token) - Associates session and WebSocket when recording starts
+    4. add_viewer(token) - Adds read-only viewer connections
+    5. unregister(token) - Cleanup when recording ends
+
+The WeakSet for viewers ensures connections are automatically cleaned up
+when WebSocket objects are garbage collected.
+"""
 
 import asyncio
 import secrets

@@ -1,3 +1,29 @@
+"""
+Machine translation and summarization using GGUF models via llama-cpp-python.
+
+This module provides two LLM-based capabilities:
+    1. Translation: TranslateGemma 12B - specialized translation model
+    2. Summarization: Qwen3-4B - general-purpose model for bilingual summaries
+
+Why two models?
+    TranslateGemma is purpose-built for translation and produces high-quality
+    results, but cannot perform summarization. Qwen3-4B handles the more
+    complex task of understanding bilingual conversations and generating
+    structured dual-language summaries.
+
+Model loading:
+    Both models are lazy-loaded singletons, downloaded from HuggingFace Hub
+    on first use. GPU layers are configurable via environment variables.
+
+TranslateGemma prompt format:
+    Uses structured content with source/target language codes:
+    {"type": "text", "source_lang_code": "en", "target_lang_code": "de", "text": "..."}
+
+Qwen3 output handling:
+    Qwen3 uses <think>...</think> blocks for chain-of-thought reasoning.
+    These are stripped from the final output to get clean summaries.
+"""
+
 import os
 import re
 
@@ -40,6 +66,8 @@ def _strip_think_block(text: str) -> str:
 
 # Language name and code mapping for TranslateGemma prompts
 # Format: lang_code -> (full_name, iso_code)
+# The full_name is used for summarization prompts (human-readable)
+# The iso_code is used for TranslateGemma (BCP-47 style codes)
 LANG_INFO = {
     "en": ("English", "en"),
     "de": ("German", "de"),
@@ -116,6 +144,21 @@ def get_summ_llm() -> Llama:
 
 
 def translate_texts(texts: list[str], src_lang: str, tgt_lang: str = "de") -> list[str]:
+    """
+    Translate a list of texts using TranslateGemma.
+
+    TranslateGemma requires a specific message format with structured content
+    containing source/target language codes. This is different from typical
+    instruction-following models.
+
+    Args:
+        texts: List of texts to translate
+        src_lang: Source language code (e.g., "en", "bg")
+        tgt_lang: Target language code (default "de" for German)
+
+    Returns:
+        List of translated texts in the same order as input
+    """
     llm = get_llm()
     _, src_code = LANG_INFO.get(src_lang, (src_lang, src_lang))
     _, tgt_code = LANG_INFO.get(tgt_lang, (tgt_lang, tgt_lang))

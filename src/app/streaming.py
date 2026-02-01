@@ -1,3 +1,30 @@
+"""
+Real-time streaming transcription and translation pipeline.
+
+This module implements the WebSocket streaming handler for real-time bilingual
+conversation transcription. It orchestrates a diarization-first pipeline:
+
+    Audio → Diarization → Per-Speaker Language Detection → ASR → Translation
+
+Architecture:
+    - StreamingSession: Manages audio buffering and session state
+    - asr_loop: Runs every TICK_SEC, processes audio windows
+    - mt_loop: Translates finalized segments asynchronously
+    - handle_websocket: Main WebSocket handler, coordinates both loops
+
+Key design decisions:
+    - Diarization runs FIRST to identify speakers before ASR
+    - Language is detected per-speaker using SpeechBrain (not window-level)
+    - ASR runs per-speaker segment with correct language hint
+    - Segments finalize based on time-stability (not text-stability)
+    - Translation happens asynchronously to avoid blocking ASR updates
+
+Threading model:
+    - ASR/MT run in ThreadPoolExecutor to avoid blocking async event loop
+    - Two async tasks (asr_loop, mt_loop) coordinate via asyncio.Queue
+    - Viewers receive real-time updates via broadcast mechanism
+"""
+
 import asyncio
 import contextlib
 import json
@@ -127,6 +154,24 @@ async def broadcast_to_viewers(entry: SessionEntry, message: dict) -> None:
 
 
 class StreamingSession:
+    """
+    Manages state for a single streaming transcription session.
+
+    Maintains the audio buffer, segment tracking, and per-speaker language
+    detection for a WebSocket connection. Each browser tab creates one session.
+
+    Attributes:
+        sample_rate: Audio sample rate (typically 16000 Hz)
+        src_lang: User-selected source language or "auto" for detection
+        audio_buffer: Rolling buffer of PCM16 audio bytes
+        detected_lang: Currently detected language from ASR
+        foreign_lang: The non-German language in the conversation
+        segment_tracker: Tracks segment finalization state
+        translations: Cached translations keyed by segment_id and language
+        diarizer: Speaker diarization pipeline
+        language_tracker: Per-speaker language detection cache
+    """
+
     def __init__(self, sample_rate: int = 16000, src_lang: str = "auto"):
         self.sample_rate = sample_rate
         self.src_lang = src_lang  # User-selected source language (or "auto")
@@ -480,15 +525,30 @@ def transcribe_speaker_segment(
 
 
 def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
-    """Run ASR with diarization-first approach.
+    """
+    Run ASR with diarization-first approach.
 
-    Pipeline order:
-    1. Run diarization to identify speaker segments
-    2. Detect language per speaker using SpeechBrain
-    3. Transcribe each speaker's audio with their detected language
+    This is the core transcription function called every TICK_SEC. It implements
+    a pipeline that prevents language detection errors in bilingual conversations:
 
-    This prevents German speech from being transcribed as Arabic when
-    the window contains more Arabic audio (wrong window-level language).
+    Pipeline:
+        1. Run diarization to identify speaker segments (SPEAKER_00, SPEAKER_01)
+        2. Detect language per speaker using SpeechBrain on their audio
+        3. Transcribe each speaker's segment with the correct language hint
+
+    Why diarization-first?
+        Window-level language detection fails when a German speaker and Arabic
+        speaker alternate. The window might contain more Arabic audio, causing
+        Whisper to transcribe German speech as Arabic. By detecting language
+        per-speaker, each segment gets the correct language hint.
+
+    Args:
+        session: The streaming session with audio buffer and state
+
+    Returns:
+        Tuple of (all_segments, newly_finalized):
+        - all_segments: Complete transcript (finalized + live segments)
+        - newly_finalized: Segments that just became final (need translation)
     """
     tick_start = time.time()
 
@@ -775,7 +835,20 @@ def run_summarization_pipeline(
     foreign_lang: str,
 ) -> dict:
     """
-    Run summarization pipeline - generates both summaries in a single LLM call.
+    Generate bilingual summaries of the conversation.
+
+    Called when the user stops recording. Uses Qwen3-4B to generate two
+    summaries in a single LLM call:
+        1. Summary in the foreign language
+        2. Same summary translated to German
+
+    Args:
+        segments_data: List of segment dicts with 'src', 'src_lang', 'translations'
+        foreign_lang: ISO code of the non-German language (e.g., "bg", "tr")
+
+    Returns:
+        Dict with 'foreign_summary', 'german_summary', 'foreign_lang',
+        'validation' status, and 'regenerated' flag
     """
     print(f"Starting summarization: {len(segments_data)} segments, foreign_lang={foreign_lang}")
 
@@ -798,6 +871,33 @@ def run_summarization_pipeline(
 
 
 async def handle_websocket(websocket: WebSocket):
+    """
+    Main WebSocket handler for real-time streaming transcription.
+
+    Handles the complete lifecycle of a streaming session:
+        1. Receive config message with session parameters
+        2. Start ASR loop (runs every TICK_SEC, transcribes audio windows)
+        3. Start MT loop (translates finalized segments asynchronously)
+        4. Receive binary audio frames, buffer them
+        5. Handle summary requests when recording stops
+        6. Clean up and notify viewers on disconnect
+
+    Message protocol:
+        Client → Server:
+            - {"type": "config", "sample_rate": 16000, "src_lang": "auto", "token": "..."}
+            - Binary PCM16 audio frames (16kHz mono)
+            - {"type": "request_summary"}
+
+        Server → Client:
+            - {"type": "config_ack", "status": "active"}
+            - {"type": "segments", "segments": [...], "src_lang": "...", "foreign_lang": "..."}
+            - {"type": "translation", "segment_id": N, "tgt_lang": "de", "text": "..."}
+            - {"type": "summary", "foreign_summary": "...", "german_summary": "..."}
+
+    The handler spawns two async tasks that run concurrently:
+        - asr_loop: Processes audio every TICK_SEC, sends segment updates
+        - mt_loop: Consumes translation queue, sends translation updates
+    """
     await websocket.accept()
 
     session: StreamingSession | None = None
