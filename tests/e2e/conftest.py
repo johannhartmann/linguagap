@@ -8,27 +8,13 @@ import os
 from pathlib import Path
 
 import pytest
-
-
-def _load_dotenv():
-    """Load environment variables from .env file if it exists."""
-    env_file = Path(__file__).parent / ".env"
-    if env_file.exists():
-        with open(env_file) as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    key, _, value = line.partition("=")
-                    key = key.strip()
-                    value = value.strip().strip("\"'")
-                    if key and key not in os.environ:
-                        os.environ[key] = value
+from dotenv import load_dotenv
 
 
 def pytest_configure(config):
     """Register custom markers and load .env file."""
     config.addinivalue_line("markers", "e2e: mark test as end-to-end test")
-    _load_dotenv()
+    load_dotenv(Path(__file__).parent / ".env", override=True)
 
 
 @pytest.fixture(scope="session")

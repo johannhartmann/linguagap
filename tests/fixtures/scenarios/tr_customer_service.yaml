@@ -1,36 +1,37 @@
 name: tr_customer_service
-description: Customer service dialogue between German support and Turkish customer
+description: Parent-teacher meeting - integration support discussion
 german_lang: de
 foreign_lang: tr
 speakers:
-  speaker_1: Herr Klein
-  speaker_2: Mehmet
+  speaker_1: Klassenlehrerin
+  speaker_2: Ayşe Hanım
 turns:
   - speaker_id: speaker_1
     language: de
-    text: Guten Tag, wie kann ich Ihnen helfen?
+    text: Guten Abend, schön dass Sie gekommen sind. Ich bin die Lehrerin von Emre.
     expected_translation: null
   - speaker_id: speaker_2
     language: tr
-    text: Merhaba, internet bağlantımda bir sorun var.
-    expected_translation: Hallo, ich habe ein Problem mit meiner Internetverbindung.
+    text: İyi akşamlar. Oğlumun durumu nasıl? Almanca dersleri zor mu?
+    expected_translation: Guten Abend. Wie geht es meinem Sohn? Sind die Deutschstunden schwierig?
   - speaker_id: speaker_1
     language: de
-    text: Das tut mir leid. Seit wann besteht das Problem?
+    text: Emre macht gute Fortschritte. Er braucht noch Unterstützung beim Lesen.
     expected_translation: null
   - speaker_id: speaker_2
     language: tr
-    text: Dünden beri çalışmıyor. Birkaç kez yeniden başlattım ama olmadı.
-    expected_translation: Seit gestern funktioniert es nicht. Ich habe es mehrmals neu gestartet, aber es hat nicht geholfen.
+    text: Anlıyorum. Evde ona nasıl yardım edebilirim?
+    expected_translation: Ich verstehe. Wie kann ich ihm zu Hause helfen?
   - speaker_id: speaker_1
     language: de
-    text: Ich werde einen Techniker zu Ihnen schicken. Wann passt es Ihnen?
+    text: Tägliches Vorlesen hilft sehr. Wir haben auch Nachhilfe am Nachmittag.
     expected_translation: null
   - speaker_id: speaker_2
     language: tr
-    text: Yarın öğleden sonra uygun olur. Çok teşekkür ederim.
-    expected_translation: Morgen Nachmittag wäre gut. Vielen Dank.
+    text: Çok teşekkür ederim. Onu kesinlikle takviye derslerine göndereceğim.
+    expected_translation: Vielen Dank. Ich werde ihn auf jeden Fall zum Förderunterricht schicken.
 expected_summary_topics:
-  - internet problem
-  - technical support
-  - technician appointment
+  - school progress
+  - reading support
+  - tutoring
+  - parental involvement

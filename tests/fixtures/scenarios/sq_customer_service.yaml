@@ -1,36 +1,37 @@
 name: sq_customer_service
-description: Customer service dialogue between German support and Albanian customer
+description: Social welfare office - residence registration
 german_lang: de
 foreign_lang: sq
 speakers:
-  speaker_1: Frau Weber
-  speaker_2: Besnik
+  speaker_1: Sachbearbeiterin
+  speaker_2: Zotëri Hoxha
 turns:
   - speaker_id: speaker_1
     language: de
-    text: Guten Tag, herzlich willkommen. Was kann ich für Sie tun?
+    text: Guten Tag, Sie möchten sich bei der Gemeinde anmelden?
     expected_translation: null
   - speaker_id: speaker_2
     language: sq
-    text: Mirëdita, doja të ktheja këtë produkt.
-    expected_translation: Guten Tag, ich möchte dieses Produkt zurückgeben.
+    text: Po, mirëdita. Sapo kam ardhur nga Shqipëria dhe dua të regjistrohem.
+    expected_translation: Ja, guten Tag. Ich bin gerade aus Albanien gekommen und möchte mich anmelden.
   - speaker_id: speaker_1
     language: de
-    text: Natürlich. Haben Sie den Kassenbon dabei?
+    text: Gut. Haben Sie Ihren Mietvertrag und einen Ausweis dabei?
     expected_translation: null
   - speaker_id: speaker_2
     language: sq
-    text: Po, ja ku është. E bleva javën e kaluar.
-    expected_translation: Ja, hier ist er. Ich habe es letzte Woche gekauft.
+    text: Po, kam kontratën e qirasë dhe pasaportën. Familja ime ka katër anëtarë.
+    expected_translation: Ja, ich habe den Mietvertrag und den Reisepass. Meine Familie hat vier Mitglieder.
   - speaker_id: speaker_1
     language: de
-    text: Alles in Ordnung. Ich kann Ihnen eine Rückerstattung geben.
+    text: Dann brauche ich auch die Ausweise von Ihrer Frau und den Kindern.
     expected_translation: null
   - speaker_id: speaker_2
     language: sq
-    text: Faleminderit shumë për ndihmën tuaj.
-    expected_translation: Vielen Dank für Ihre Hilfe.
+    text: Sigurisht, i kam të gjitha dokumentet këtu. Faleminderit shumë.
+    expected_translation: Natürlich, ich habe alle Dokumente hier. Vielen Dank.
 expected_summary_topics:
-  - product return
-  - receipt
-  - refund
+  - residence registration
+  - arrived from Albania
+  - family of four
+  - rental contract

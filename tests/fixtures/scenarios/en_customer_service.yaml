@@ -1,0 +1,37 @@
+name: en_customer_service
+description: Social welfare office dialogue - residence permit application
+german_lang: de
+foreign_lang: en
+speakers:
+  speaker_1: Sachbearbeiter
+  speaker_2: Client
+turns:
+  - speaker_id: speaker_1
+    language: de
+    text: Guten Tag, bitte nehmen Sie Platz. Worum geht es heute?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: en
+    text: Hello, I need to apply for social benefits. I just arrived three months ago.
+    expected_translation: Hallo, ich muss Sozialleistungen beantragen. Ich bin vor drei Monaten angekommen.
+  - speaker_id: speaker_1
+    language: de
+    text: Haben Sie Ihren Aufenthaltstitel und eine Meldebestätigung dabei?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: en
+    text: Yes, here is my residence permit and the registration from the city.
+    expected_translation: Ja, hier ist meine Aufenthaltserlaubnis und die Anmeldung von der Stadt.
+  - speaker_id: speaker_1
+    language: de
+    text: Gut. Ich brauche noch Ihre Kontoverbindung und einen Nachweis über Ihre Wohnsituation.
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: en
+    text: I have the bank account details here. The rental contract I can bring next week.
+    expected_translation: Die Bankverbindung habe ich hier. Den Mietvertrag kann ich nächste Woche bringen.
+expected_summary_topics:
+  - social benefits application
+  - residence permit
+  - registration
+  - bank details

@@ -14,11 +14,16 @@ import sys
 import time
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
-from tests.e2e.dialogues.templates import DialogueScenario
-from tests.e2e.tts.client import GeminiTTSClient
+# Load .env before importing clients that need API keys (override=True to use .env over existing env vars)
+load_dotenv(Path(__file__).parent.parent / ".env", override=True)
+
+from tests.e2e.dialogues.templates import DialogueScenario  # noqa: E402
+from tests.e2e.tts.client import GeminiTTSClient  # noqa: E402
 
 # Directory containing pre-defined scenario YAML files
 SCENARIOS_DIR = Path(__file__).parent.parent.parent / "fixtures" / "scenarios"

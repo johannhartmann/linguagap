@@ -1,0 +1,37 @@
+name: ku_customer_service
+description: Family doctor consultation - child illness
+german_lang: de
+foreign_lang: ku
+speakers:
+  speaker_1: Kinderarzt
+  speaker_2: Xanim Mustafa
+turns:
+  - speaker_id: speaker_1
+    language: de
+    text: Guten Tag, was fehlt denn dem kleinen Jungen?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: ku
+    text: Silav, kurê min sê rojan e ta ye û serê wî diêşe.
+    expected_translation: Hallo, mein Sohn hat seit drei Tagen Fieber und Kopfschmerzen.
+  - speaker_id: speaker_1
+    language: de
+    text: Hat er auch Husten oder Halsschmerzen? Ich möchte ihn untersuchen.
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: ku
+    text: Erê, hinekî kuxîk jî heye. Ew şevê baş nakeve.
+    expected_translation: Ja, er hat auch etwas Husten. Er schläft nachts nicht gut.
+  - speaker_id: speaker_1
+    language: de
+    text: Es sieht nach einer Erkältung aus. Ich verschreibe Fiebersaft und Nasentropfen.
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: ku
+    text: Gelek spas. Divê ez dîsa werim kontrol bikim?
+    expected_translation: Vielen Dank. Muss ich zur Kontrolle wiederkommen?
+expected_summary_topics:
+  - child illness
+  - fever three days
+  - cough
+  - prescription

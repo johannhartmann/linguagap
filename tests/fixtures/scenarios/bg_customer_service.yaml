@@ -1,0 +1,37 @@
+name: bg_customer_service
+description: County administration - child benefit application
+german_lang: de
+foreign_lang: bg
+speakers:
+  speaker_1: Sachbearbeiterin
+  speaker_2: Мария
+turns:
+  - speaker_id: speaker_1
+    language: de
+    text: Guten Tag, Sie möchten Kindergeld beantragen?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: bg
+    text: Да, здравейте. Имам две деца и работя тук от шест месеца.
+    expected_translation: Ja, guten Tag. Ich habe zwei Kinder und arbeite hier seit sechs Monaten.
+  - speaker_id: speaker_1
+    language: de
+    text: Haben Sie die Geburtsurkunden der Kinder und Ihren Arbeitsvertrag dabei?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: bg
+    text: Да, ето ги. Децата са на пет и осем години.
+    expected_translation: Ja, hier sind sie. Die Kinder sind fünf und acht Jahre alt.
+  - speaker_id: speaker_1
+    language: de
+    text: Sehr gut. Das Kindergeld beträgt zweihundertfünfzig Euro pro Kind monatlich.
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: bg
+    text: Благодаря много. Кога ще получа първото плащане?
+    expected_translation: Vielen Dank. Wann bekomme ich die erste Zahlung?
+expected_summary_topics:
+  - child benefit
+  - two children
+  - birth certificates
+  - employment contract

@@ -1,0 +1,37 @@
+name: es_customer_service
+description: Job center (Agentur für Arbeit) - unemployment registration
+german_lang: de
+foreign_lang: es
+speakers:
+  speaker_1: Arbeitsvermittler
+  speaker_2: Señor García
+turns:
+  - speaker_id: speaker_1
+    language: de
+    text: Guten Tag, Sie haben sich arbeitslos gemeldet. Was ist Ihre berufliche Qualifikation?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: es
+    text: Buenos días. Soy electricista y trabajé cinco años en una empresa de construcción.
+    expected_translation: Guten Tag. Ich bin Elektriker und habe fünf Jahre bei einer Baufirma gearbeitet.
+  - speaker_id: speaker_1
+    language: de
+    text: Verstehe. Haben Sie Ihre Zeugnisse und den Kündigungsschreiben dabei?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: es
+    text: Sí, aquí tengo todos los documentos. La empresa cerró por bancarrota.
+    expected_translation: Ja, hier habe ich alle Unterlagen. Die Firma hat wegen Insolvenz geschlossen.
+  - speaker_id: speaker_1
+    language: de
+    text: Das tut mir leid. Wir haben einige offene Stellen für Elektriker. Ich schicke Ihnen die Liste.
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: es
+    text: Muchas gracias. ¿Cuándo puedo recibir el subsidio de desempleo?
+    expected_translation: Vielen Dank. Wann kann ich das Arbeitslosengeld bekommen?
+expected_summary_topics:
+  - unemployment registration
+  - electrician qualification
+  - company bankruptcy
+  - job placement

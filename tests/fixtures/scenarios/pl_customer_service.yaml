@@ -1,0 +1,37 @@
+name: pl_customer_service
+description: Customer service dialogue between German support and Polish customer
+german_lang: de
+foreign_lang: pl
+speakers:
+  speaker_1: Frau Becker
+  speaker_2: Pani Kowalska
+turns:
+  - speaker_id: speaker_1
+    language: de
+    text: Guten Tag, hier ist die Arztpraxis. Was kann ich für Sie tun?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: pl
+    text: Dzień dobry, chciałabym umówić się na wizytę do lekarza.
+    expected_translation: Guten Tag, ich möchte einen Termin beim Arzt vereinbaren.
+  - speaker_id: speaker_1
+    language: de
+    text: Natürlich. Wann würde es Ihnen passen?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: pl
+    text: Czy jest możliwy termin w przyszłym tygodniu, najlepiej rano?
+    expected_translation: Ist ein Termin nächste Woche möglich, am besten morgens?
+  - speaker_id: speaker_1
+    language: de
+    text: Ja, ich habe einen freien Termin am Dienstag um neun Uhr.
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: pl
+    text: Doskonale, to mi pasuje. Dziękuję bardzo.
+    expected_translation: Ausgezeichnet, das passt mir. Vielen Dank.
+expected_summary_topics:
+  - doctor appointment
+  - next week
+  - morning
+  - Tuesday

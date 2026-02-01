@@ -1,0 +1,37 @@
+name: fr_customer_service
+description: Parent-teacher meeting - school performance discussion
+german_lang: de
+foreign_lang: fr
+speakers:
+  speaker_1: Lehrerin
+  speaker_2: Madame Diallo
+turns:
+  - speaker_id: speaker_1
+    language: de
+    text: Guten Abend, schön dass Sie kommen konnten. Ich bin die Klassenlehrerin von Amadou.
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: fr
+    text: Bonsoir, merci de m'avoir invitée. Comment va mon fils à l'école?
+    expected_translation: Guten Abend, danke für die Einladung. Wie geht es meinem Sohn in der Schule?
+  - speaker_id: speaker_1
+    language: de
+    text: Amadou macht gute Fortschritte in Deutsch, aber in Mathematik braucht er mehr Übung.
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: fr
+    text: Je comprends. Est-ce qu'il y a des cours de soutien après l'école?
+    expected_translation: Ich verstehe. Gibt es Förderunterricht nach der Schule?
+  - speaker_id: speaker_1
+    language: de
+    text: Ja, jeden Dienstag und Donnerstag. Ich empfehle auch tägliches Lesen zu Hause.
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: fr
+    text: D'accord, nous allons pratiquer ensemble à la maison. Merci pour vos conseils.
+    expected_translation: In Ordnung, wir werden zu Hause zusammen üben. Danke für Ihre Ratschläge.
+expected_summary_topics:
+  - school performance
+  - German progress
+  - math support needed
+  - tutoring recommendation

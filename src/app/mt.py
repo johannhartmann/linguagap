@@ -107,6 +107,7 @@ def get_summ_llm() -> Llama:
             model_path=model_path,
             n_gpu_layers=SUMM_N_GPU_LAYERS,
             n_ctx=SUMM_N_CTX,
+            n_batch=512,
             verbose=False,
             use_mmap=False,
         )
@@ -153,58 +154,81 @@ def translate_texts(texts: list[str], src_lang: str, tgt_lang: str = "de") -> li
     return results
 
 
-def summarize_conversation(segments: list[dict], _foreign_lang: str, target_lang: str) -> str:
+def summarize_bilingual(segments: list[dict], foreign_lang: str) -> tuple[str, str]:
     """
-    Summarize conversation segments in the target language.
+    Generate both foreign and German summaries in a single LLM call.
 
     Args:
         segments: List of segment dicts with 'src', 'src_lang', and 'translations'
-        _foreign_lang: The non-German language code (unused, kept for API compatibility)
-        target_lang: Language to generate summary in ('de' or foreign_lang)
+        foreign_lang: The non-German language code
 
     Returns:
-        Summary text in target_lang
+        Tuple of (foreign_summary, german_summary)
     """
     llm = get_summ_llm()
-    target_name = LANG_NAMES.get(target_lang, target_lang)
+    foreign_name = LANG_NAMES.get(foreign_lang, foreign_lang)
 
-    # Build conversation text with speaker labels
+    # Build conversation with original text (each line in its original language)
     conversation_lines = []
     for seg in segments:
         speaker = "German speaker" if seg["src_lang"] == "de" else "Foreign speaker"
-        # Get text in target language
-        if seg["src_lang"] == target_lang:
-            text = seg["src"]
-        else:
-            translations = seg.get("translations", {})
-            text = translations.get(target_lang, seg["src"])
-        conversation_lines.append(f"{speaker}: {text}")
+        lang_label = "German" if seg["src_lang"] == "de" else foreign_name
+        conversation_lines.append(f"{speaker} ({lang_label}): {seg['src']}")
 
     conversation_text = "\n".join(conversation_lines)
 
-    prompt = (
-        f"Summarize this dialogue between two speakers in {target_name}. "
-        f"Include what BOTH the German speaker and the Foreign speaker said. "
-        f"Write 2-4 sentences covering the main topics from both sides."
-        f"\n\nConversation:\n{conversation_text}\n\nSummary:"
-    )
+    prompt = f"""Summarize this bilingual dialogue. Generate TWO summaries:
 
-    messages = [
-        {
-            "role": "user",
-            "content": prompt,
-        },
-    ]
+1. A summary in {foreign_name} (2-3 sentences)
+2. The same summary translated to German (2-3 sentences)
+
+Both summaries must cover what BOTH speakers said.
+
+Conversation:
+{conversation_text}
+
+Respond in this exact format:
+{foreign_name.upper()}: [summary in {foreign_name}]
+GERMAN: [same summary in German]"""
+
+    messages = [{"role": "user", "content": prompt}]
 
     output = llm.create_chat_completion(
         messages=messages,
-        max_tokens=4096,  # Qwen3 thinking blocks can be long, need room for think + summary
+        max_tokens=2048,
         temperature=0.5,
         top_p=0.9,
     )
 
-    response = output["choices"][0]["message"]["content"].strip()
-    return _strip_think_block(response)
+    response = _strip_think_block(output["choices"][0]["message"]["content"].strip())
+
+    # Parse the response
+    foreign_summary = ""
+    german_summary = ""
+
+    lines = response.split("\n")
+    current_section = None
+
+    for line in lines:
+        line_upper = line.upper()
+        if line_upper.startswith(foreign_name.upper() + ":"):
+            current_section = "foreign"
+            foreign_summary = line.split(":", 1)[1].strip() if ":" in line else ""
+        elif line_upper.startswith("GERMAN:") or line_upper.startswith("DEUTSCH:"):
+            current_section = "german"
+            german_summary = line.split(":", 1)[1].strip() if ":" in line else ""
+        elif current_section == "foreign" and line.strip():
+            foreign_summary += " " + line.strip()
+        elif current_section == "german" and line.strip():
+            german_summary += " " + line.strip()
+
+    # Fallback if parsing failed
+    if not foreign_summary or not german_summary:
+        # Just use the whole response as both
+        foreign_summary = foreign_summary or response
+        german_summary = german_summary or response
+
+    return foreign_summary.strip(), german_summary.strip()
 
 
 def validate_summary_alignment(

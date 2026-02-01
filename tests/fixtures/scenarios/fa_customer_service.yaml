@@ -1,36 +1,37 @@
 name: fa_customer_service
-description: Customer service dialogue between German support and Persian customer
+description: Integration course registration - language school enrollment
 german_lang: de
 foreign_lang: fa
 speakers:
-  speaker_1: Herr Fischer
-  speaker_2: آرش
+  speaker_1: Sprachschul-Mitarbeiterin
+  speaker_2: آقای رضایی
 turns:
   - speaker_id: speaker_1
     language: de
-    text: Guten Tag, wie kann ich Ihnen behilflich sein?
+    text: Guten Tag, Sie möchten sich für einen Integrationskurs anmelden?
     expected_translation: null
   - speaker_id: speaker_2
     language: fa
-    text: سلام، من می‌خواهم یک حساب بانکی باز کنم.
-    expected_translation: Hallo, ich möchte ein Bankkonto eröffnen.
+    text: سلام، بله. من می‌خواهم زبان آلمانی یاد بگیرم برای کار.
+    expected_translation: Hallo, ja. Ich möchte Deutsch lernen für die Arbeit.
   - speaker_id: speaker_1
     language: de
-    text: Sehr gerne. Haben Sie Ihren Ausweis dabei?
+    text: Sehr gut. Haben Sie bereits Vorkenntnisse in Deutsch?
     expected_translation: null
   - speaker_id: speaker_2
     language: fa
-    text: بله، پاسپورت و اجازه اقامتم را آوردم.
-    expected_translation: Ja, ich habe meinen Reisepass und meine Aufenthaltserlaubnis mitgebracht.
+    text: کمی بلدم، چند کلمه ساده. دو ماه است که در آلمان هستم.
+    expected_translation: Ich kann ein bisschen, einige einfache Wörter. Ich bin seit zwei Monaten in Deutschland.
   - speaker_id: speaker_1
     language: de
-    text: Perfekt. Möchten Sie ein Girokonto oder ein Sparkonto?
+    text: Gut, dann fangen Sie mit dem Anfängerkurs an. Der Unterricht ist montags bis freitags.
     expected_translation: null
   - speaker_id: speaker_2
     language: fa
-    text: یک حساب جاری لطفاً. ممنون از کمکتان.
-    expected_translation: Ein Girokonto bitte. Danke für Ihre Hilfe.
+    text: خیلی ممنون. چقدر هزینه دارد؟ آیا کمک مالی هم هست؟
+    expected_translation: Vielen Dank. Wie viel kostet es? Gibt es auch finanzielle Unterstützung?
 expected_summary_topics:
-  - bank account
-  - identification
-  - checking account
+  - integration course
+  - German language learning
+  - beginner level
+  - financial support question

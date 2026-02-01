@@ -1,0 +1,37 @@
+name: ru_customer_service
+description: Social welfare office - refugee support services
+german_lang: de
+foreign_lang: ru
+speakers:
+  speaker_1: Sozialarbeiter
+  speaker_2: Господин Иванов
+turns:
+  - speaker_id: speaker_1
+    language: de
+    text: Guten Tag, ich bin Ihr Sozialarbeiter. Wie kann ich Ihnen heute helfen?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: ru
+    text: Здравствуйте. Мне нужна помощь с оформлением пособия на проживание.
+    expected_translation: Guten Tag. Ich brauche Hilfe bei der Beantragung von Wohngeld.
+  - speaker_id: speaker_1
+    language: de
+    text: Natürlich. Seit wann wohnen Sie in Deutschland und wie groß ist Ihre Familie?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: ru
+    text: Мы приехали четыре месяца назад. Нас трое - я, жена и сын.
+    expected_translation: Wir sind vor vier Monaten gekommen. Wir sind zu dritt - ich, meine Frau und mein Sohn.
+  - speaker_id: speaker_1
+    language: de
+    text: Gut. Ich brauche Ihre Aufenthaltsgenehmigung und die Meldebescheinigung.
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: ru
+    text: Вот все документы. Когда мы получим ответ по заявлению?
+    expected_translation: Hier sind alle Dokumente. Wann bekommen wir eine Antwort auf den Antrag?
+expected_summary_topics:
+  - housing assistance
+  - family of three
+  - arrived four months ago
+  - residence permit

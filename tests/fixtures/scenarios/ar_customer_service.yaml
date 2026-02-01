@@ -1,36 +1,37 @@
 name: ar_customer_service
-description: Customer service dialogue between German support and Arabic customer
+description: Health department - vaccination appointment for children
 german_lang: de
 foreign_lang: ar
 speakers:
-  speaker_1: Frau Bauer
-  speaker_2: أحمد
+  speaker_1: Gesundheitsamt-Mitarbeiterin
+  speaker_2: السيدة محمد
 turns:
   - speaker_id: speaker_1
     language: de
-    text: Guten Tag, willkommen in unserer Filiale. Wie kann ich Ihnen helfen?
+    text: Guten Tag, Sie möchten einen Impftermin für Ihre Kinder vereinbaren?
     expected_translation: null
   - speaker_id: speaker_2
     language: ar
-    text: مرحباً، أريد أن أسأل عن تأمين السيارات.
-    expected_translation: Hallo, ich möchte mich über die Kfz-Versicherung erkundigen.
+    text: نعم، مرحباً. عندي طفلان يحتاجان للتطعيمات المدرسية.
+    expected_translation: Ja, hallo. Ich habe zwei Kinder, die Schulimpfungen brauchen.
   - speaker_id: speaker_1
     language: de
-    text: Gerne. Haben Sie bereits ein Fahrzeug oder planen Sie einen Kauf?
+    text: Gut. Wie alt sind die Kinder und haben Sie den Impfpass dabei?
     expected_translation: null
   - speaker_id: speaker_2
     language: ar
-    text: اشتريت سيارة جديدة الأسبوع الماضي.
-    expected_translation: Ich habe letzte Woche ein neues Auto gekauft.
+    text: ابني عمره ست سنوات وابنتي عمرها أربع سنوات. نعم، معي دفتر التطعيمات.
+    expected_translation: Mein Sohn ist sechs Jahre alt und meine Tochter ist vier Jahre alt. Ja, ich habe den Impfpass dabei.
   - speaker_id: speaker_1
     language: de
-    text: Herzlichen Glückwunsch! Ich kann Ihnen verschiedene Tarife anbieten.
+    text: Sehr gut. Der nächste freie Termin ist am Mittwoch um zehn Uhr.
     expected_translation: null
   - speaker_id: speaker_2
     language: ar
-    text: شكراً جزيلاً. أريد تغطية شاملة من فضلك.
-    expected_translation: Vielen Dank. Ich möchte eine Vollkasko-Versicherung bitte.
+    text: ممتاز، هذا يناسبنا. شكراً جزيلاً لكم.
+    expected_translation: Ausgezeichnet, das passt uns. Vielen Dank.
 expected_summary_topics:
-  - car insurance
-  - new car
-  - coverage options
+  - vaccination appointment
+  - two children
+  - school immunizations
+  - Wednesday appointment

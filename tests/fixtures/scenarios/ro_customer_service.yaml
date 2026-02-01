@@ -1,0 +1,37 @@
+name: ro_customer_service
+description: Kindergarten registration - enrollment discussion
+german_lang: de
+foreign_lang: ro
+speakers:
+  speaker_1: Erzieherin
+  speaker_2: Doamna Popescu
+turns:
+  - speaker_id: speaker_1
+    language: de
+    text: Guten Tag, Sie möchten Ihr Kind für den Kindergarten anmelden?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: ro
+    text: Da, bună ziua. Fiica mea are trei ani și căutăm un loc de grădiniță.
+    expected_translation: Ja, guten Tag. Meine Tochter ist drei Jahre alt und wir suchen einen Kindergartenplatz.
+  - speaker_id: speaker_1
+    language: de
+    text: Wunderbar. Wir haben ab September noch Plätze frei. Haben Sie die Geburtsurkunde dabei?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: ro
+    text: Da, am adus certificatul de naștere și cartea de identitate.
+    expected_translation: Ja, ich habe die Geburtsurkunde und den Ausweis mitgebracht.
+  - speaker_id: speaker_1
+    language: de
+    text: Sehr gut. Die Betreuungszeiten sind von acht bis sechzehn Uhr. Passt das für Sie?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: ro
+    text: Perfect, asta ne convine. Mulțumesc foarte mult pentru ajutor.
+    expected_translation: Perfekt, das passt uns. Vielen Dank für Ihre Hilfe.
+expected_summary_topics:
+  - kindergarten registration
+  - three year old daughter
+  - September availability
+  - birth certificate

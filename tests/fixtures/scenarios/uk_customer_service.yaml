@@ -1,36 +1,37 @@
 name: uk_customer_service
-description: Customer service dialogue between German support and Ukrainian customer
+description: Social welfare office - refugee assistance application
 german_lang: de
 foreign_lang: uk
 speakers:
-  speaker_1: Maria
-  speaker_2: Oleksandr
+  speaker_1: Sozialarbeiterin
+  speaker_2: Пані Коваленко
 turns:
   - speaker_id: speaker_1
     language: de
-    text: Guten Tag, willkommen bei unserem Kundenservice. Wie kann ich Ihnen helfen?
+    text: Guten Tag, Sie sind als Geflüchtete aus der Ukraine hier?
     expected_translation: null
   - speaker_id: speaker_2
     language: uk
-    text: Добрий день, я хотів би дізнатися про статус мого замовлення.
-    expected_translation: Guten Tag, ich möchte den Status meiner Bestellung erfahren.
+    text: Так, добрий день. Ми приїхали два тижні тому з Харкова.
+    expected_translation: Ja, guten Tag. Wir sind vor zwei Wochen aus Charkiw gekommen.
   - speaker_id: speaker_1
     language: de
-    text: Natürlich, können Sie mir bitte Ihre Bestellnummer geben?
+    text: Willkommen. Wie viele Personen gehören zu Ihrer Familie?
     expected_translation: null
   - speaker_id: speaker_2
     language: uk
-    text: Так, номер замовлення двадцять три сорок п'ять.
-    expected_translation: Ja, die Bestellnummer ist dreiundzwanzig fünfundvierzig.
+    text: Нас троє - я, моя мама і моя донька, їй вісім років.
+    expected_translation: Wir sind zu dritt - ich, meine Mutter und meine Tochter, sie ist acht Jahre alt.
   - speaker_id: speaker_1
     language: de
-    text: Vielen Dank. Ihr Paket wurde gestern verschickt und sollte morgen ankommen.
+    text: Für Ihre Tochter können wir einen Schulplatz organisieren. Haben Sie die Geburtsurkunde?
     expected_translation: null
   - speaker_id: speaker_2
     language: uk
-    text: Чудово, дякую за інформацію.
-    expected_translation: Wunderbar, danke für die Information.
+    text: Так, я маю всі документи. Дякую вам за допомогу.
+    expected_translation: Ja, ich habe alle Dokumente. Danke für Ihre Hilfe.
 expected_summary_topics:
-  - order status
-  - shipping
-  - delivery
+  - refugee from Ukraine
+  - arrived from Kharkiv
+  - family of three
+  - school placement for daughter

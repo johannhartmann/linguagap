@@ -1,0 +1,37 @@
+name: hu_customer_service
+description: School enrollment office - primary school registration
+german_lang: de
+foreign_lang: hu
+speakers:
+  speaker_1: Schulsekretärin
+  speaker_2: Kovács úr
+turns:
+  - speaker_id: speaker_1
+    language: de
+    text: Guten Tag, Sie möchten Ihr Kind für die erste Klasse anmelden?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: hu
+    text: Igen, jó napot. A fiam hatéves és szeptemberben kezdené az iskolát.
+    expected_translation: Ja, guten Tag. Mein Sohn ist sechs Jahre alt und würde im September mit der Schule beginnen.
+  - speaker_id: speaker_1
+    language: de
+    text: Sehr gut. Haben Sie den Impfpass und die Schuleingangsuntersuchung dabei?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: hu
+    text: Igen, itt vannak a papírok. Beszél a gyerek németül?
+    expected_translation: Ja, hier sind die Unterlagen. Muss das Kind Deutsch sprechen?
+  - speaker_id: speaker_1
+    language: de
+    text: Wir haben Deutschförderung für Kinder mit anderen Muttersprachen. Das ist kostenlos.
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: hu
+    text: Nagyszerű, ez nagyon segít. Köszönöm a tájékoztatást.
+    expected_translation: Großartig, das hilft sehr. Danke für die Information.
+expected_summary_topics:
+  - school enrollment
+  - six year old son
+  - vaccination record
+  - German language support

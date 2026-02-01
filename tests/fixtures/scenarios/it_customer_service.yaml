@@ -1,0 +1,37 @@
+name: it_customer_service
+description: Family doctor consultation - health complaints
+german_lang: de
+foreign_lang: it
+speakers:
+  speaker_1: Hausarzt
+  speaker_2: Signora Ferraro
+turns:
+  - speaker_id: speaker_1
+    language: de
+    text: Guten Tag, Frau Ferraro. Was führt Sie heute zu mir?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: it
+    text: Buongiorno dottore. Ho mal di testa da tre giorni e mi sento molto stanca.
+    expected_translation: Guten Tag Herr Doktor. Ich habe seit drei Tagen Kopfschmerzen und fühle mich sehr müde.
+  - speaker_id: speaker_1
+    language: de
+    text: Haben Sie auch Fieber oder andere Beschwerden?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: it
+    text: Sì, ho avuto un po' di febbre ieri sera, circa trentotto gradi.
+    expected_translation: Ja, ich hatte gestern Abend etwas Fieber, etwa achtunddreißig Grad.
+  - speaker_id: speaker_1
+    language: de
+    text: Ich schreibe Ihnen ein Rezept. Nehmen Sie die Tabletten dreimal täglich nach dem Essen.
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: it
+    text: Va bene, grazie dottore. Devo tornare per un controllo?
+    expected_translation: In Ordnung, danke Herr Doktor. Muss ich zur Kontrolle wiederkommen?
+expected_summary_topics:
+  - headache
+  - fatigue
+  - fever
+  - prescription

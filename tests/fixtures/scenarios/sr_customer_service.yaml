@@ -1,0 +1,37 @@
+name: sr_customer_service
+description: Housing office - apartment search assistance
+german_lang: de
+foreign_lang: sr
+speakers:
+  speaker_1: Wohnungsberater
+  speaker_2: Gospodin Jovanovic
+turns:
+  - speaker_id: speaker_1
+    language: de
+    text: Guten Tag, Sie suchen eine Wohnung? Wie groß soll sie sein?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: sr
+    text: Dobar dan. Trazimo stan sa tri sobe za petoclanu porodicu.
+    expected_translation: Guten Tag. Wir suchen eine Dreizimmerwohnung für eine fünfköpfige Familie.
+  - speaker_id: speaker_1
+    language: de
+    text: Verstehe. In welchem Stadtteil möchten Sie wohnen und was ist Ihr Budget?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: sr
+    text: Blize centru ako je moguce. Mozemo da platimo do sedamsto evra mesecno.
+    expected_translation: Näher am Zentrum wenn möglich. Wir können bis zu siebenhundert Euro monatlich zahlen.
+  - speaker_id: speaker_1
+    language: de
+    text: Ich habe zwei passende Angebote. Möchten Sie morgen Besichtigungstermine?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: sr
+    text: Da, to bi bilo odlicno. Hvala vam puno na pomoci.
+    expected_translation: Ja, das wäre ausgezeichnet. Vielen Dank für Ihre Hilfe.
+expected_summary_topics:
+  - apartment search
+  - three rooms
+  - family of five
+  - seven hundred euro budget

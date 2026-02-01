@@ -1,0 +1,37 @@
+name: hr_customer_service
+description: Social welfare office - housing assistance application
+german_lang: de
+foreign_lang: hr
+speakers:
+  speaker_1: Sachbearbeiter
+  speaker_2: Marko
+turns:
+  - speaker_id: speaker_1
+    language: de
+    text: Guten Tag, Sie haben einen Antrag auf Wohngeld gestellt?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: hr
+    text: Da, dobar dan. Moja obitelj ima četiri člana i stanarina je previsoka za naše prihode.
+    expected_translation: Ja, guten Tag. Meine Familie hat vier Mitglieder und die Miete ist zu hoch für unser Einkommen.
+  - speaker_id: speaker_1
+    language: de
+    text: Ich verstehe. Wie hoch ist Ihre monatliche Miete und Ihr Gesamteinkommen?
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: hr
+    text: Plaćamo osamsto eura mjesečno, a zajedno zarađujemo oko tisuću petsto eura.
+    expected_translation: Wir zahlen achthundert Euro monatlich, und zusammen verdienen wir etwa eintausendfünfhundert Euro.
+  - speaker_id: speaker_1
+    language: de
+    text: Sie haben Anspruch auf Wohngeld. Bringen Sie bitte noch die Lohnabrechnungen.
+    expected_translation: null
+  - speaker_id: speaker_2
+    language: hr
+    text: Hvala vam puno. Mogu donijeti papire sutra.
+    expected_translation: Vielen Dank. Ich kann die Unterlagen morgen bringen.
+expected_summary_topics:
+  - housing benefit
+  - family of four
+  - rent too high
+  - income verification
