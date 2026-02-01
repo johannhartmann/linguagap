@@ -38,12 +38,12 @@ resources:
     cpu: "8"
     nvidia.com/gpu: "1"
 
-# Probes - 27B model takes ~25min to load on Blackwell GPU
+# Probes - models cached on PVC, 3min delay sufficient
 livenessProbe:
   httpGet:
     path: /health
     port: http
-  initialDelaySeconds: 1800
+  initialDelaySeconds: 180
   periodSeconds: 60
   timeoutSeconds: 30
   failureThreshold: 10
@@ -52,7 +52,7 @@ readinessProbe:
   httpGet:
     path: /health
     port: http
-  initialDelaySeconds: 1800
+  initialDelaySeconds: 180
   periodSeconds: 30
   timeoutSeconds: 30
   failureThreshold: 20
