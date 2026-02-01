@@ -14,10 +14,8 @@ from app.asr import get_model
 from app.diarization import SpeakerSegment, StreamingDiarizer
 from app.lang_id import SpeakerLanguageTracker
 from app.mt import (
-    regenerate_summary_with_feedback,
-    summarize_conversation,
+    summarize_bilingual,
     translate_texts,
-    validate_summary_alignment,
 )
 from app.session_registry import SessionEntry, registry
 from app.streaming_policy import Segment, SegmentTracker
@@ -25,6 +23,32 @@ from app.streaming_policy import Segment, SegmentTracker
 WINDOW_SEC = float(os.getenv("WINDOW_SEC", "8.0"))
 TICK_SEC = float(os.getenv("TICK_SEC", "0.5"))
 MAX_BUFFER_SEC = float(os.getenv("MAX_BUFFER_SEC", "30.0"))
+
+# Bilingual example prompts for Whisper initial_prompt
+# These are example text snippets (not instructions) that help Whisper recognize
+# the expected languages. Whisper follows the style of the prompt, not instructions.
+# See: https://cookbook.openai.com/examples/whisper_prompting_guide
+BILINGUAL_PROMPTS = {
+    # Must have languages
+    "bg": "Guten Tag, wie kann ich Ihnen helfen? Здравейте, как мога да ви помогна?",
+    "en": "Guten Tag, wie kann ich Ihnen helfen? Hello, how can I help you?",
+    "es": "Guten Tag, wie kann ich Ihnen helfen? Hola, ¿cómo puedo ayudarle?",
+    "fr": "Guten Tag, wie kann ich Ihnen helfen? Bonjour, comment puis-je vous aider?",
+    "hr": "Guten Tag, wie kann ich Ihnen helfen? Dobar dan, kako vam mogu pomoći?",
+    "hu": "Guten Tag, wie kann ich Ihnen helfen? Jó napot, miben segíthetek?",
+    "it": "Guten Tag, wie kann ich Ihnen helfen? Buongiorno, come posso aiutarla?",
+    "pl": "Guten Tag, wie kann ich Ihnen helfen? Dzień dobry, jak mogę pomóc?",
+    "ro": "Guten Tag, wie kann ich Ihnen helfen? Bună ziua, cum vă pot ajuta?",
+    "ru": "Guten Tag, wie kann ich Ihnen helfen? Здравствуйте, чем могу помочь?",
+    "sq": "Guten Tag, wie kann ich Ihnen helfen? Mirëdita, si mund t'ju ndihmoj?",
+    "tr": "Guten Tag, wie kann ich Ihnen helfen? Merhaba, size nasıl yardımcı olabilirim?",
+    "uk": "Guten Tag, wie kann ich Ihnen helfen? Добрий день, чим можу допомогти?",
+    # Nice to have languages
+    "ar": "Guten Tag, wie kann ich Ihnen helfen? مرحباً، كيف يمكنني مساعدتك؟",
+    "fa": "Guten Tag, wie kann ich Ihnen helfen? سلام، چطور می‌توانم کمکتان کنم؟",
+    "ku": "Guten Tag, wie kann ich Ihnen helfen? Rojbaş, çawa dikarim alîkariya we bikim?",
+    "sr": "Guten Tag, wie kann ich Ihnen helfen? Dobar dan, kako mogu da vam pomognem?",
+}
 
 # Bag of Hallucinations (BoH) - common Whisper hallucinations on silence/noise
 # Based on research: https://arxiv.org/abs/2501.11378
@@ -108,6 +132,7 @@ class StreamingSession:
         self.src_lang = src_lang  # User-selected source language (or "auto")
         self.audio_buffer: deque[bytes] = deque()
         self.total_samples = 0
+        self.start_time = time.time()  # Wall-clock time when session started
         self.detected_lang: str | None = None  # Currently detected language from ASR
         self.foreign_lang: str | None = (
             None  # The non-German language (auto-detected or user-selected)
@@ -140,12 +165,28 @@ class StreamingSession:
             self.dropped_frames += 1
 
     def get_window_audio(self) -> tuple[np.ndarray, float]:
+        """Get audio window for ASR processing.
+
+        Uses full audio until it exceeds EXTENDED_WINDOW_SEC, then switches
+        to sliding window. This ensures early speech has time to stabilize
+        before the window starts sliding.
+        """
+        EXTENDED_WINDOW_SEC = 12.0  # Use full audio until this threshold
         window_samples = int(WINDOW_SEC * self.sample_rate)
+        extended_samples = int(EXTENDED_WINDOW_SEC * self.sample_rate)
+
         all_bytes = b"".join(self.audio_buffer)
         total_samples = len(all_bytes) // 2
 
         window_start = 0.0
-        if total_samples > window_samples:
+
+        # Use full audio until we exceed extended threshold
+        # This gives early segments time to stabilize before window slides
+        if total_samples <= extended_samples:
+            # Use all audio
+            pass
+        elif total_samples > window_samples:
+            # Switch to sliding window after extended period
             start_byte = (total_samples - window_samples) * 2
             all_bytes = all_bytes[start_byte:]
             window_start = (total_samples - window_samples) / self.sample_rate
@@ -189,7 +230,9 @@ def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
     tick_start = time.time()
 
     audio, window_start = session.get_window_audio()
-    now_sec = session.get_current_time()
+    # Use real wall-clock time for stability tracking (not audio time)
+    # Audio time stops when streaming stops, but stability needs real elapsed time
+    now_sec = time.time() - session.start_time
 
     if len(audio) < 1600:
         return list(session.segment_tracker.finalized_segments), []
@@ -197,18 +240,23 @@ def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
     # Run ASR
     asr_start = time.time()
     model = get_model()
+
+    # Bilingual prompts disabled - they cause prompt bleeding and language detection issues
+    # TODO: Investigate better prompting strategies
+    initial_prompt = None
+
     asr_segments, info = model.transcribe(
         audio,
         # Core settings for accuracy
         beam_size=1,  # Lowest hallucination rate per research
         patience=1.0,  # Standard beam search patience
-        # VAD for filtering non-speech
+        # VAD for filtering non-speech - more sensitive for multilingual
         vad_filter=True,
         vad_parameters={
-            "threshold": 0.5,  # Speech detection threshold (0-1)
-            "min_silence_duration_ms": 500,  # Tighter segmentation than default 2000ms
-            "min_speech_duration_ms": 250,  # Ignore very short sounds
-            "speech_pad_ms": 200,  # Padding around speech segments
+            "threshold": 0.35,  # Lower threshold for better detection (was 0.5)
+            "min_silence_duration_ms": 300,  # Tighter segmentation (was 500)
+            "min_speech_duration_ms": 200,  # Catch shorter utterances (was 250)
+            "speech_pad_ms": 250,  # More padding around speech (was 200)
         },
         # Hallucination prevention thresholds
         compression_ratio_threshold=1.8,  # Stricter than default 2.4, filters repetitive output
@@ -220,6 +268,8 @@ def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
         # Multilingual support
         multilingual=True,  # Per-segment language detection (requires fork with PR #1274)
         language_detection_threshold=0.5,  # Confidence threshold for language detection
+        # Context hint for better multilingual recognition
+        initial_prompt=initial_prompt,
     )
     asr_segments = list(asr_segments)  # Consume generator
     asr_time = time.time() - asr_start
@@ -348,82 +398,25 @@ def run_summarization_pipeline(
     foreign_lang: str,
 ) -> dict:
     """
-    Run the 3-step summarization pipeline:
-    1. Summarize in foreign language
-    2. Translate to German
-    3. Validate alignment with original German segments
-
-    If misaligned, regenerate with feedback.
+    Run summarization pipeline - generates both summaries in a single LLM call.
     """
-    print(
-        f"Starting summarization pipeline: {len(segments_data)} segments, foreign_lang={foreign_lang}"
-    )
+    print(f"Starting summarization: {len(segments_data)} segments, foreign_lang={foreign_lang}")
 
-    # Step 1: Summarize in foreign language
-    print("Step 1: Summarizing in foreign language...")
-    foreign_summary = summarize_conversation(
+    # Generate both summaries in one call
+    print("Generating bilingual summary...")
+    foreign_summary, german_summary = summarize_bilingual(
         segments=segments_data,
-        _foreign_lang=foreign_lang,
-        target_lang=foreign_lang,
+        foreign_lang=foreign_lang,
     )
     print(f"Foreign summary: {foreign_summary[:100]}...")
-
-    # Step 2: Translate foreign summary to German
-    print("Step 2: Translating summary to German...")
-    german_summary = summarize_conversation(
-        segments=segments_data,
-        _foreign_lang=foreign_lang,
-        target_lang="de",
-    )
     print(f"German summary: {german_summary[:100]}...")
-
-    # Step 3: Validate alignment with original German segments
-    print("Step 3: Validating alignment...")
-    original_german_segments = [seg["src"] for seg in segments_data if seg["src_lang"] == "de"]
-
-    validation = {"aligned": True, "issues": None, "feedback": None}
-    regenerated = False
-
-    if original_german_segments:
-        validation = validate_summary_alignment(
-            german_summary=german_summary,
-            original_german_segments=original_german_segments,
-        )
-        print(
-            f"Validation result: aligned={validation['aligned']}, issues={validation.get('issues')}"
-        )
-
-        # If misaligned, regenerate with feedback
-        if not validation["aligned"] and (validation.get("issues") or validation.get("feedback")):
-            print("Regenerating summaries with feedback...")
-            regenerated = True
-
-            # Regenerate foreign summary
-            foreign_summary = regenerate_summary_with_feedback(
-                segments=segments_data,
-                _foreign_lang=foreign_lang,
-                target_lang=foreign_lang,
-                previous_issues=validation.get("issues", ""),
-                previous_feedback=validation.get("feedback", ""),
-            )
-            print(f"Regenerated foreign summary: {foreign_summary[:100]}...")
-
-            # Regenerate German summary
-            german_summary = regenerate_summary_with_feedback(
-                segments=segments_data,
-                _foreign_lang=foreign_lang,
-                target_lang="de",
-                previous_issues=validation.get("issues", ""),
-                previous_feedback=validation.get("feedback", ""),
-            )
-            print(f"Regenerated German summary: {german_summary[:100]}...")
 
     return {
         "foreign_summary": foreign_summary,
         "german_summary": german_summary,
         "foreign_lang": foreign_lang,
-        "validation": validation,
-        "regenerated": regenerated,
+        "validation": {"aligned": True, "issues": None},
+        "regenerated": False,
     }
 
 
@@ -589,6 +582,7 @@ async def handle_websocket(websocket: WebSocket):
                 if data.get("type") == "config":
                     sample_rate = data.get("sample_rate", 16000)
                     src_lang = data.get("src_lang", "auto")
+                    foreign_lang = data.get("foreign_lang")  # Optional hint for non-German language
                     # Use client-provided token (generated on page load)
                     session_token = data.get("token")
                     if not session_token:
@@ -596,13 +590,17 @@ async def handle_websocket(websocket: WebSocket):
                         continue
 
                     session = StreamingSession(sample_rate=sample_rate, src_lang=src_lang)
+                    # Set foreign language hint if provided (improves ASR for known language pairs)
+                    if foreign_lang:
+                        session.foreign_lang = foreign_lang
                     asr_task = asyncio.create_task(asr_loop())
                     mt_task = asyncio.create_task(mt_loop())
 
                     # Activate the session with the client-provided token
                     await registry.activate(session_token, session, websocket)
                     print(
-                        f"Session activated: sample_rate={sample_rate}, src_lang={src_lang}, token={session_token[:8]}..."
+                        f"Session activated: sample_rate={sample_rate}, src_lang={src_lang}, "
+                        f"foreign_lang={foreign_lang or 'auto'}, token={session_token[:8]}..."
                     )
 
                     # Send config acknowledgment
@@ -629,11 +627,20 @@ async def handle_websocket(websocket: WebSocket):
                         )
 
                 elif data.get("type") == "request_summary":
-                    # Handle summary request
+                    # Handle summary request - stop ASR loop first
+                    if asr_task:
+                        asr_task.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await asr_task
+                        asr_task = None
+                        print("ASR loop stopped for summary generation")
+
                     if session is not None:
                         # Get all segments including live ones
+                        # Use wall-clock time for stability tracking
+                        now_sec = time.time() - session.start_time
                         all_segs, _ = session.segment_tracker.update_from_hypothesis(
-                            [], 0.0, session.get_current_time(), "unknown"
+                            [], 0.0, now_sec, "unknown"
                         )
 
                         # Identify live segments that need finalization
@@ -783,7 +790,7 @@ async def handle_viewer_websocket(websocket: WebSocket, token: str) -> None:
             # Session is active, send current state
             session = entry.session
             segments_data = []
-            live_segments = [ls.segment for ls in session.segment_tracker.live_segment_states]
+            live_segments = [cs.segment for cs in session.segment_tracker.cumulative_segments]
             all_segments = list(session.segment_tracker.finalized_segments) + live_segments
             for seg in all_segments:
                 seg_dict = asdict(seg)

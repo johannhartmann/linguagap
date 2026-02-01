@@ -2,8 +2,6 @@ import os
 from dataclasses import dataclass, field
 
 STABILITY_SEC = float(os.getenv("STABILITY_SEC", "1.25"))
-# How many ticks a live segment can be missing before being dropped
-LIVE_SEGMENT_GRACE_TICKS = int(os.getenv("LIVE_SEGMENT_GRACE_TICKS", "3"))
 
 
 @dataclass
@@ -14,33 +12,70 @@ class Segment:
     src: str
     src_lang: str
     final: bool
-    speaker_id: str | None = None  # Speaker identifier from diarization
+    speaker_id: str | None = None
 
 
 @dataclass
-class LiveSegmentState:
-    """Track state of a live (non-finalized) segment."""
+class CumulativeSegment:
+    """A segment in the cumulative transcript with update tracking."""
 
     segment: Segment
-    missing_ticks: int = 0  # How many ticks since last seen
+    last_updated: float  # Timestamp when this segment was last seen/updated
+    stable_since: float | None = None  # Timestamp when text became stable (for finalization)
 
 
 @dataclass
 class SegmentTracker:
+    """
+    Maintains a cumulative transcript that persists across sliding windows.
+
+    Key behavior:
+    - All detected segments are kept in cumulative_segments (never lost)
+    - Segments merge based on time overlap when re-detected
+    - Segments finalize when stable for STABILITY_SEC
+    - Finalized segments are moved to finalized_segments list
+    """
+
     next_id: int = 0
     finalized_segments: list[Segment] = field(default_factory=list)
-    finalized_end_time: float = 0.0
-    # Persistent live segments: keyed by a rough time bucket for matching
-    live_segment_states: list[LiveSegmentState] = field(default_factory=list)
+    cumulative_segments: list[CumulativeSegment] = field(default_factory=list)
 
-    def _segments_overlap(self, seg1_start: float, seg1_end: float, seg2: Segment) -> bool:
-        """Check if two segments overlap significantly."""
-        overlap_start = max(seg1_start, seg2.abs_start)
-        overlap_end = min(seg1_end, seg2.abs_end)
+    def _calc_overlap_ratio(self, start1: float, end1: float, start2: float, end2: float) -> float:
+        """Calculate overlap ratio between two time ranges."""
+        overlap_start = max(start1, start2)
+        overlap_end = min(end1, end2)
         overlap_duration = max(0, overlap_end - overlap_start)
-        seg1_duration = seg1_end - seg1_start
-        # Consider overlapping if > 50% of the new segment overlaps
-        return overlap_duration > seg1_duration * 0.5 if seg1_duration > 0 else False
+        duration1 = end1 - start1
+        if duration1 <= 0:
+            return 0.0
+        return overlap_duration / duration1
+
+    def _find_matching_cumulative(
+        self, abs_start: float, abs_end: float
+    ) -> CumulativeSegment | None:
+        """Find a cumulative segment that overlaps significantly with the given range."""
+        for cs in self.cumulative_segments:
+            if cs.segment.final:
+                continue
+            # Check both directions of overlap
+            overlap1 = self._calc_overlap_ratio(
+                abs_start, abs_end, cs.segment.abs_start, cs.segment.abs_end
+            )
+            overlap2 = self._calc_overlap_ratio(
+                cs.segment.abs_start, cs.segment.abs_end, abs_start, abs_end
+            )
+            # Match if either direction has >50% overlap
+            if overlap1 > 0.5 or overlap2 > 0.5:
+                return cs
+        return None
+
+    def _overlaps_finalized(self, abs_start: float, abs_end: float) -> bool:
+        """Check if a time range overlaps significantly with any finalized segment."""
+        for seg in self.finalized_segments:
+            overlap = self._calc_overlap_ratio(abs_start, abs_end, seg.abs_start, seg.abs_end)
+            if overlap > 0.5:
+                return True
+        return False
 
     def update_from_hypothesis(
         self,
@@ -52,154 +87,125 @@ class SegmentTracker:
         """
         Process hypothesis segments and return (all_segments, newly_finalized).
 
-        Returns:
-            all_segments: Complete list of finalized + live segments
-            newly_finalized: Segments that just became final (need translation)
+        This maintains a cumulative transcript - segments are never lost.
         """
-        stability_threshold = now_sec - STABILITY_SEC
-
         newly_finalized = []
-        seen_live_indices: set[int] = set()
 
+        # Process each hypothesis segment
         for seg in hyp_segments:
             abs_start = window_start + seg["start"]
             abs_end = window_start + seg["end"]
             src_text = seg["text"].strip()
 
-            # Skip if segment is MOSTLY within already-finalized time range (>50% overlap)
-            # - Too strict (abs_start check): skips new speech that starts near finalized boundary
-            # - Too loose (abs_end check): causes duplicates from re-detected old speech
-            segment_duration = abs_end - abs_start
-            if segment_duration > 0:
-                overlap_with_finalized = max(0, min(abs_end, self.finalized_end_time) - abs_start)
-                overlap_ratio = overlap_with_finalized / segment_duration
-                if overlap_ratio > 0.5:
-                    print(
-                        f"  SKIP: [{abs_start:.1f}-{abs_end:.1f}] overlap={overlap_ratio:.1%} with finalized_end={self.finalized_end_time:.1f}"
-                    )
-                    continue
-                else:
-                    print(
-                        f"  KEEP: [{abs_start:.1f}-{abs_end:.1f}] overlap={overlap_ratio:.1%} with finalized_end={self.finalized_end_time:.1f}"
-                    )
-
-            if not src_text:
+            if not src_text or len(src_text) < 2:
                 continue
 
-            is_final = abs_end <= stability_threshold
+            # Skip if overlaps with already finalized segment
+            if self._overlaps_finalized(abs_start, abs_end):
+                continue
 
-            # Get speaker_id and per-segment language from hypothesis if available
+            seg_lang = seg.get("lang", src_lang)
             speaker_id = seg.get("speaker_id")
-            seg_lang = seg.get("lang", src_lang)  # Use per-segment lang or fallback
 
-            if is_final:
-                # Finalize this segment
-                segment = Segment(
+            # Try to find matching cumulative segment
+            match = self._find_matching_cumulative(abs_start, abs_end)
+
+            if match:
+                # Update existing cumulative segment
+                text_changed = match.segment.src != src_text
+                match.segment.abs_start = min(match.segment.abs_start, abs_start)
+                match.segment.abs_end = max(match.segment.abs_end, abs_end)
+                match.segment.src = src_text
+                match.segment.src_lang = seg_lang
+                if speaker_id:
+                    match.segment.speaker_id = speaker_id
+
+                match.last_updated = now_sec
+                if text_changed:
+                    match.stable_since = None  # Reset stability tracking
+                elif match.stable_since is None:
+                    # Text is same as before - mark when it became stable
+                    match.stable_since = now_sec
+            else:
+                # Create new cumulative segment
+                print(
+                    f"  NEW SEG: [{abs_start:.1f}-{abs_end:.1f}] '{src_text[:30]}' (total: {len(self.cumulative_segments)+1})"
+                )
+                new_segment = Segment(
                     id=self.next_id,
                     abs_start=abs_start,
                     abs_end=abs_end,
                     src=src_text,
                     src_lang=seg_lang,
-                    final=True,
+                    final=False,
                     speaker_id=speaker_id,
                 )
-                self.finalized_segments.append(segment)
-                newly_finalized.append(segment)
-                self.finalized_end_time = abs_end
+                self.cumulative_segments.append(
+                    CumulativeSegment(
+                        segment=new_segment,
+                        last_updated=now_sec,
+                        stable_since=None,
+                    )
+                )
                 self.next_id += 1
 
-                # Remove any live segments that overlap with the finalized segment
-                self.live_segment_states = [
-                    ls
-                    for ls in self.live_segment_states
-                    if not self._segments_overlap(ls.segment.abs_start, ls.segment.abs_end, segment)
-                ]
+        # Check for segments that should be finalized
+        # Use time-based finalization: segment is final if its end time is STABILITY_SEC ago
+        stability_threshold = now_sec - STABILITY_SEC
+        still_live = []
+
+        for cs in self.cumulative_segments:
+            if cs.segment.final:
+                continue
+
+            # Finalize if segment ended STABILITY_SEC ago (time-based, not text-based)
+            if cs.segment.abs_end <= stability_threshold:
+                cs.segment.final = True
+                self.finalized_segments.append(cs.segment)
+                newly_finalized.append(cs.segment)
+                print(
+                    f"  FINALIZED (time): [{cs.segment.abs_start:.1f}-{cs.segment.abs_end:.1f}] "
+                    f"{cs.segment.src[:50]}"
+                )
             else:
-                # Try to match with existing live segment
-                matched = False
-                for i, ls in enumerate(self.live_segment_states):
-                    if self._segments_overlap(abs_start, abs_end, ls.segment):
-                        # Update existing live segment
-                        ls.segment.abs_start = abs_start
-                        ls.segment.abs_end = abs_end
-                        ls.segment.src = src_text
-                        ls.segment.src_lang = seg_lang
-                        if speaker_id is not None:
-                            ls.segment.speaker_id = speaker_id
-                        ls.missing_ticks = 0
-                        seen_live_indices.add(i)
-                        matched = True
-                        break
+                still_live.append(cs)
 
-                if not matched:
-                    # Create new live segment
-                    new_segment = Segment(
-                        id=self.next_id,
-                        abs_start=abs_start,
-                        abs_end=abs_end,
-                        src=src_text,
-                        src_lang=seg_lang,
-                        final=False,
-                        speaker_id=speaker_id,
-                    )
-                    self.live_segment_states.append(LiveSegmentState(segment=new_segment))
-                    seen_live_indices.add(len(self.live_segment_states) - 1)
-                    self.next_id += 1
+        self.cumulative_segments = still_live
 
-        # Increment missing count for unseen live segments
-        # Finalize segments that fell behind the window, drop truly stale ones
-        updated_live_states = []
-        for i, ls in enumerate(self.live_segment_states):
-            if i not in seen_live_indices:
-                ls.missing_ticks += 1
+        # Sort finalized segments by start time
+        self.finalized_segments.sort(key=lambda s: s.abs_start)
 
-                # If segment is now entirely behind the window, finalize it
-                # (it fell out of the sliding window but is valid speech)
-                if ls.segment.abs_end < window_start:
-                    print(
-                        f"  FINALIZE (behind window): [{ls.segment.abs_start:.1f}-{ls.segment.abs_end:.1f}] "
-                        f"{ls.segment.src[:50]}"
-                    )
-                    ls.segment.final = True
-                    self.finalized_segments.append(ls.segment)
-                    newly_finalized.append(ls.segment)
-                    self.finalized_end_time = max(self.finalized_end_time, ls.segment.abs_end)
-                    continue  # Don't keep in live_segment_states
+        # Build result: finalized + live segments (sorted by time)
+        live_segments = [cs.segment for cs in self.cumulative_segments]
+        all_segments = self.finalized_segments + sorted(live_segments, key=lambda s: s.abs_start)
+        return all_segments, newly_finalized
 
-            if ls.missing_ticks <= LIVE_SEGMENT_GRACE_TICKS:
-                updated_live_states.append(ls)
-        self.live_segment_states = updated_live_states
-
-        # Build result: finalized + current live segments
-        live_segments = [ls.segment for ls in self.live_segment_states]
-        return self.finalized_segments + live_segments, newly_finalized
-
-    def force_finalize_all(self, live_segments: list[Segment]) -> list[Segment]:
+    def force_finalize_all(self, _live_segments: list[Segment]) -> list[Segment]:
         """
         Force-finalize any remaining live segments.
         Call this when recording stops to ensure all segments get translated.
-
-        Args:
-            live_segments: List of live (non-final) segments to finalize
-
-        Returns:
-            List of newly finalized segments
         """
         newly_finalized = []
-        for seg in live_segments:
-            if seg.final:
+
+        for cs in self.cumulative_segments:
+            if cs.segment.final:
                 continue
-            finalized_seg = Segment(
-                id=self.next_id,
-                abs_start=seg.abs_start,
-                abs_end=seg.abs_end,
-                src=seg.src,
-                src_lang=seg.src_lang,
-                final=True,
-                speaker_id=seg.speaker_id,
+            cs.segment.final = True
+            self.finalized_segments.append(cs.segment)
+            newly_finalized.append(cs.segment)
+            print(
+                f"  FORCE-FINALIZED: [{cs.segment.abs_start:.1f}-{cs.segment.abs_end:.1f}] "
+                f"{cs.segment.src[:50]}"
             )
-            self.finalized_segments.append(finalized_seg)
-            newly_finalized.append(finalized_seg)
-            self.finalized_end_time = max(self.finalized_end_time, seg.abs_end)
-            self.next_id += 1
+
+        self.cumulative_segments = []
+        self.finalized_segments.sort(key=lambda s: s.abs_start)
+
         return newly_finalized
+
+    # Legacy property for compatibility
+    @property
+    def finalized_end_time(self) -> float:
+        if not self.finalized_segments:
+            return 0.0
+        return max(s.abs_end for s in self.finalized_segments)

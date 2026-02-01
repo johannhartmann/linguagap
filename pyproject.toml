@@ -57,6 +57,7 @@ dev = [
     # E2E test dependencies
     "google-genai>=1.0.0",  # Gemini TTS + dialogue gen + LLM-as-judge
     "pyyaml>=6.0",  # YAML dialogue templates
+    "python-dotenv>=1.0.0",  # Load .env files
 ]
 
 [tool.pytest.ini_options]
@@ -120,7 +121,7 @@ python-version = "3.12"
 [tool.ty.rules]
 unresolved-import = "ignore"
 invalid-argument-type = "ignore"  # llama-cpp-python complex types
-not-subscriptable = "ignore"  # llama-cpp-python return types
+non-subscriptable = "ignore"  # llama-cpp-python return types
 possibly-missing-attribute = "ignore"  # llama-cpp-python nullable fields
 
 [tool.uv.sources]
