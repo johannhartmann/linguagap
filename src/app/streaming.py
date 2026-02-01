@@ -261,6 +261,119 @@ def extract_speaker_audio(
     return np.array([], dtype=audio.dtype)
 
 
+# Whisper supported language codes
+# Languages not in this set will use multilingual mode
+WHISPER_LANGUAGES = frozenset(
+    [
+        "af",
+        "am",
+        "ar",
+        "as",
+        "az",
+        "ba",
+        "be",
+        "bg",
+        "bn",
+        "bo",
+        "br",
+        "bs",
+        "ca",
+        "cs",
+        "cy",
+        "da",
+        "de",
+        "el",
+        "en",
+        "es",
+        "et",
+        "eu",
+        "fa",
+        "fi",
+        "fo",
+        "fr",
+        "gl",
+        "gu",
+        "ha",
+        "haw",
+        "he",
+        "hi",
+        "hr",
+        "ht",
+        "hu",
+        "hy",
+        "id",
+        "is",
+        "it",
+        "ja",
+        "jw",
+        "ka",
+        "kk",
+        "km",
+        "kn",
+        "ko",
+        "la",
+        "lb",
+        "ln",
+        "lo",
+        "lt",
+        "lv",
+        "mg",
+        "mi",
+        "mk",
+        "ml",
+        "mn",
+        "mr",
+        "ms",
+        "mt",
+        "my",
+        "ne",
+        "nl",
+        "nn",
+        "no",
+        "oc",
+        "pa",
+        "pl",
+        "ps",
+        "pt",
+        "ro",
+        "ru",
+        "sa",
+        "sd",
+        "si",
+        "sk",
+        "sl",
+        "sn",
+        "so",
+        "sq",
+        "sr",
+        "su",
+        "sv",
+        "sw",
+        "ta",
+        "te",
+        "tg",
+        "th",
+        "tk",
+        "tl",
+        "tr",
+        "tt",
+        "uk",
+        "ur",
+        "uz",
+        "vi",
+        "yi",
+        "yo",
+        "zh",
+        "yue",
+    ]
+)
+
+# Map unsupported languages to closest supported alternatives
+LANGUAGE_FALLBACKS = {
+    "ku": None,  # Kurdish - no close match, use multilingual
+}
+
+
 def transcribe_speaker_segment(
     model,
     audio: np.ndarray,
@@ -306,10 +419,20 @@ def transcribe_speaker_segment(
 
     segment_audio = audio[start_sample:end_sample]
 
-    # Transcribe with explicit language (or multilingual if unknown)
+    # Handle unsupported languages - use fallback or multilingual mode
+    whisper_lang = language
+    original_lang = language  # Keep original for segment tagging
+    if language and language != "unknown" and language not in WHISPER_LANGUAGES:
+        # Check for fallback mapping
+        whisper_lang = LANGUAGE_FALLBACKS.get(language)
+        if whisper_lang is None:
+            print(f"  Language {language} not supported by Whisper, using multilingual")
+
+    # Transcribe with explicit language (or multilingual if unknown/unsupported)
+    use_multilingual = whisper_lang is None or whisper_lang == "unknown"
     segments, info = model.transcribe(
         segment_audio,
-        language=language if language and language != "unknown" else None,
+        language=whisper_lang if not use_multilingual else None,
         beam_size=1,
         patience=1.0,
         vad_filter=True,
@@ -325,7 +448,7 @@ def transcribe_speaker_segment(
         condition_on_previous_text=False,
         word_timestamps=True,
         hallucination_silence_threshold=1.5,
-        multilingual=(language is None or language == "unknown"),
+        multilingual=use_multilingual,
         language_detection_threshold=0.5,
     )
 
@@ -346,7 +469,10 @@ def transcribe_speaker_segment(
                 "end": seg_end,
                 "text": text,
                 "speaker_id": diar_seg.speaker_id,
-                "lang": language if language and language != "unknown" else info.language,
+                # Use original language (user's intent) even if Whisper used multilingual
+                "lang": original_lang
+                if original_lang and original_lang != "unknown"
+                else info.language,
             }
         )
 
@@ -396,6 +522,43 @@ def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
     speaker_languages: dict[str, tuple[str, float]] = {}  # speaker_id -> (lang, confidence)
     unique_speakers = {seg.speaker_id for seg in diar_segments}
 
+    # Language confusion groups - SpeechBrain often confuses these similar languages
+    # If user selected a language and detection returns a confused one, use user's choice
+    LANGUAGE_CONFUSION_GROUPS = [
+        {"bg", "sl", "mk"},  # Bulgarian, Slovenian, Macedonian (South Slavic)
+        {"sr", "bs", "hr"},  # Serbian, Bosnian, Croatian (mutually intelligible)
+        {"ku", "fa", "ps"},  # Kurdish, Farsi, Pashto (Iranian languages)
+        {"uk", "ru", "be"},  # Ukrainian, Russian, Belarusian (East Slavic)
+        {"cs", "sk"},  # Czech, Slovak
+        {"no", "da", "sv"},  # Norwegian, Danish, Swedish (Scandinavian)
+        {"id", "ms"},  # Indonesian, Malay
+    ]
+
+    def correct_language_confusion(detected: str, user_hint: str | None, confidence: float) -> str:
+        """Correct language detection if user hint is in same confusion group."""
+        if not user_hint or detected == user_hint:
+            return detected
+
+        # Check confusion groups (similar languages that SpeechBrain confuses)
+        for group in LANGUAGE_CONFUSION_GROUPS:
+            if detected in group and user_hint in group:
+                print(f"    Correcting {detected} → {user_hint} (user hint, confusion group)")
+                return user_hint
+
+        # If detected as non-German but user specified a different foreign language,
+        # trust the user's hint (SpeechBrain often misidentifies rare languages)
+        if detected not in ("de", "unknown") and user_hint not in ("de", "unknown"):
+            print(f"    Correcting {detected} → {user_hint} (user hint, foreign speaker)")
+            return user_hint
+
+        # If detected as German with low confidence for a foreign language hint,
+        # the speaker might actually be speaking the foreign language
+        if detected == "de" and confidence < 0.9 and user_hint not in ("de", "unknown"):
+            print(f"    Correcting {detected} → {user_hint} (user hint, low confidence de)")
+            return user_hint
+
+        return detected
+
     for speaker_id in unique_speakers:
         # Extract all audio for this speaker
         speaker_audio = extract_speaker_audio(audio, diar_segments, speaker_id, window_start)
@@ -405,9 +568,17 @@ def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
             continue
 
         # Use SpeechBrain language detection on raw audio
-        lang, confidence = session.language_tracker.get_speaker_language(
+        detected_lang, confidence = session.language_tracker.get_speaker_language(
             speaker_id, speaker_audio, 16000
         )
+
+        # Always apply correction for confused languages (even for cached values)
+        lang = detected_lang
+        corrected = correct_language_confusion(lang, session.foreign_lang, confidence)
+        if corrected != lang:
+            lang = corrected
+            # Update the cached language in tracker with corrected value
+            session.language_tracker.set_speaker_language(speaker_id, lang, confidence)
 
         speaker_languages[speaker_id] = (lang, confidence)
         print(f"  {speaker_id} → {lang} (confidence={confidence:.2f})")
