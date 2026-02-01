@@ -318,9 +318,8 @@
                 <option value="">Default Microphone</option>
             </select>
             <select id="languageSelect">
-                <option value="auto">Auto-detect</option>
+                <option value="" disabled selected>-- Select Language --</option>
                 <option value="en">English</option>
-                <option value="de">German</option>
                 <option value="fr">French</option>
                 <option value="es">Spanish</option>
                 <option value="it">Italian</option>
@@ -328,7 +327,6 @@
                 <option value="ro">Romanian</option>
                 <option value="hr">Croatian</option>
                 <option value="bg">Bulgarian</option>
-                <option value="sq">Albanian</option>
                 <option value="tr">Turkish</option>
                 <option value="ru">Russian</option>
                 <option value="uk">Ukrainian</option>
@@ -391,7 +389,8 @@
                 title: 'Echtzeit-Sprachübersetzung',
                 subtitle: 'Echtzeit-Transkription & Übersetzung',
                 defaultMic: 'Standard-Mikrofon',
-                autoDetect: 'Automatisch',
+                selectLanguage: '-- Sprache wählen --',
+                selectLanguageFirst: 'Bitte wählen Sie zuerst eine Sprache aus',
                 startRecording: 'Aufnahme starten',
                 stopRecording: 'Aufnahme stoppen',
                 clear: 'Löschen',
@@ -431,7 +430,8 @@
                 title: 'Real-time Speech Translation',
                 subtitle: 'Real-time Speech Transcription & Translation',
                 defaultMic: 'Default Microphone',
-                autoDetect: 'Auto-detect',
+                selectLanguage: '-- Select Language --',
+                selectLanguageFirst: 'Please select a language first',
                 startRecording: 'Start Recording',
                 stopRecording: 'Stop Recording',
                 clear: 'Clear',
@@ -594,8 +594,8 @@
             const defaultMicOption = audioInputSelect?.querySelector('option[value=""]');
             if (defaultMicOption) defaultMicOption.textContent = t('defaultMic');
 
-            const autoDetectOption = languageSelect?.querySelector('option[value="auto"]');
-            if (autoDetectOption) autoDetectOption.textContent = t('autoDetect');
+            const selectLanguageOption = languageSelect?.querySelector('option[value=""]');
+            if (selectLanguageOption) selectLanguageOption.textContent = t('selectLanguage');
 
             if (startBtn) startBtn.textContent = isRecording ? t('stopRecording') : t('startRecording');
             if (clearBtn) clearBtn.textContent = t('clear');
@@ -1098,10 +1098,28 @@
             }
         }
 
+        // Disable start button until language is selected
+        function updateStartButtonState() {
+            const hasLanguage = languageSelect.value !== '';
+            startBtn.disabled = !hasLanguage && !isRecording;
+            if (!hasLanguage && !isRecording) {
+                startBtn.title = t('selectLanguageFirst');
+            } else {
+                startBtn.title = '';
+            }
+        }
+
+        languageSelect.addEventListener('change', updateStartButtonState);
+        updateStartButtonState(); // Initial state
+
         startBtn.addEventListener('click', () => {
             if (isRecording) {
                 stopRecording();
             } else {
+                if (!languageSelect.value) {
+                    alert(t('selectLanguageFirst'));
+                    return;
+                }
                 startRecording();
             }
         });
