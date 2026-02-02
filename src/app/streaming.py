@@ -226,7 +226,9 @@ def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
                 session.language_tracker.set_speaker_language(speaker_id, segment_lang, confidence)
             elif cached_conf > 0:
                 # Use cached language if it has better confidence
-                segment_lang = session.language_tracker.speaker_languages.get(speaker_id, segment_lang)
+                segment_lang = session.language_tracker.speaker_languages.get(
+                    speaker_id, segment_lang
+                )
 
         # Fall back to Whisper only if SpeechBrain confidence is very low
         if confidence < 0.3 and segment_lang == "unknown":
@@ -547,7 +549,11 @@ async def handle_websocket(websocket: WebSocket):
 
                 elif data.get("type") == "request_summary":
                     # Handle summary request
+                    print(f"Received request_summary message, session={session is not None}")
                     if session is not None:
+                        print(
+                            f"  finalized_segments={len(session.segment_tracker.finalized_segments)}"
+                        )
                         # Get all segments including live ones
                         all_segs, _ = session.segment_tracker.update_from_hypothesis(
                             [], 0.0, session.get_current_time(), "unknown"
