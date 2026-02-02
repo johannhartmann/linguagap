@@ -33,8 +33,12 @@ dependencies = [
     # PyTorch 2.8+ required for Blackwell GPUs (sm_120), needs CUDA 12.9 + cuDNN 9.8+
     "torch>=2.8.0",
     "torchaudio>=2.8.0",
-    "pyannote.audio>=3.1.0",
+    "pyannote.audio>=4.0.0", # 4.x required for PyTorch 2.6+ (uses torchcodec instead of torchaudio)
     "speechbrain>=1.0.0",
+    "google-genai>=1.61.0",
+    "pyyaml>=6.0.3",
+    "python-dotenv>=1.2.1",
+    "omegaconf>=2.3.0",
 ]
 
 [project.urls]
