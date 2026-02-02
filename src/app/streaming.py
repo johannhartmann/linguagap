@@ -38,13 +38,13 @@ import numpy as np
 from fastapi import WebSocket
 
 from app.asr import get_model
-from app.diarization import SpeakerSegment, StreamingDiarizer
-from app.lang_id import SpeakerLanguageTracker
+from app.lang_id import SpeakerLanguageTracker, detect_language_from_audio
 from app.mt import (
     summarize_bilingual,
     translate_texts,
 )
 from app.session_registry import SessionEntry, registry
+from app.speaker_tracker import SpeakerSegment, SpeakerTracker
 from app.streaming_policy import Segment, SegmentTracker
 
 WINDOW_SEC = float(os.getenv("WINDOW_SEC", "8.0"))
@@ -185,9 +185,9 @@ class StreamingSession:
         self.segment_tracker = SegmentTracker()
         self.dropped_frames = 0
         self.translations: dict[int, dict[str, str]] = {}  # segment_id -> {lang -> translation}
-        # Speaker diarization and language tracking
-        self.diarizer = StreamingDiarizer(sample_rate=sample_rate)
-        self.language_tracker = SpeakerLanguageTracker()
+        # Speaker tracking (embedding-based) and language tracking
+        self.speaker_tracker = SpeakerTracker(sample_rate=sample_rate)
+        self.language_tracker = SpeakerLanguageTracker()  # Kept for compatibility
         self.last_diar_segments: list[SpeakerSegment] = []  # Cache for merging with ASR
 
     def add_audio(self, pcm16_bytes: bytes):
@@ -210,34 +210,22 @@ class StreamingSession:
             self.dropped_frames += 1
 
     def get_window_audio(self) -> tuple[np.ndarray, float]:
-        """Get audio window for ASR processing.
+        """Get audio for ASR processing.
 
-        Uses full audio until it exceeds EXTENDED_WINDOW_SEC, then switches
-        to sliding window. This ensures early speech has time to stabilize
-        before the window starts sliding.
+        Returns the full audio buffer to ensure complete coverage. Previous
+        sliding window logic caused gaps when audio arrived faster than
+        real-time (e.g., test scenarios with pre-recorded audio).
+
+        Performance note: The diarization-first pipeline runs ASR only on
+        individual speaker segments, not the full audio, so processing time
+        scales with speech duration rather than total buffer duration.
+
+        Buffer size is capped at MAX_BUFFER_SEC (default 30s) by
+        _enforce_max_buffer(), which trims oldest audio when exceeded.
         """
-        EXTENDED_WINDOW_SEC = 12.0  # Use full audio until this threshold
-        window_samples = int(WINDOW_SEC * self.sample_rate)
-        extended_samples = int(EXTENDED_WINDOW_SEC * self.sample_rate)
-
         all_bytes = b"".join(self.audio_buffer)
-        total_samples = len(all_bytes) // 2
-
-        window_start = 0.0
-
-        # Use full audio until we exceed extended threshold
-        # This gives early segments time to stabilize before window slides
-        if total_samples <= extended_samples:
-            # Use all audio
-            pass
-        elif total_samples > window_samples:
-            # Switch to sliding window after extended period
-            start_byte = (total_samples - window_samples) * 2
-            all_bytes = all_bytes[start_byte:]
-            window_start = (total_samples - window_samples) / self.sample_rate
-
         samples = np.frombuffer(all_bytes, dtype=np.int16).astype(np.float32) / 32768.0
-        return samples, window_start
+        return samples, 0.0
 
     def get_current_time(self) -> float:
         return self.total_samples / self.sample_rate
@@ -247,26 +235,28 @@ class StreamingSession:
         return len(all_bytes) / 2 / self.sample_rate
 
 
-def run_diarization(
+def run_speaker_detection(
     session: StreamingSession,
     audio: np.ndarray,
     window_start: float,
 ) -> list[SpeakerSegment]:
-    """Run speaker diarization on audio window."""
-    diar_start = time.time()
+    """Run speaker detection using embedding-based tracking."""
+    detect_start = time.time()
     try:
-        diar_segments = session.diarizer.process_audio(audio, window_start)
-        diar_time = time.time() - diar_start
-        _metrics["diar_times"].append(diar_time)
+        speaker_segments = session.speaker_tracker.process_audio(audio, window_start)
+        detect_time = time.time() - detect_start
+        _metrics["diar_times"].append(detect_time)
 
-        if diar_segments:
-            print(f"Diarization: {len(diar_segments)} speaker segments in {diar_time * 1000:.1f}ms")
-            for seg in diar_segments[:3]:
+        if speaker_segments:
+            print(
+                f"Speaker detection: {len(speaker_segments)} segments in {detect_time * 1000:.1f}ms"
+            )
+            for seg in speaker_segments[:3]:
                 print(f"  - [{seg.start:.2f}-{seg.end:.2f}] {seg.speaker_id}")
 
-        return diar_segments
+        return speaker_segments
     except Exception as e:
-        print(f"Diarization error: {e}")
+        print(f"Speaker detection error: {e}")
         return []
 
 
@@ -565,18 +555,18 @@ def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
     audio_max = float(np.max(np.abs(audio)))
     print(f"Pipeline: audio_len={len(audio)}, rms={audio_rms:.4f}, max={audio_max:.4f}")
 
-    # STEP 1: Run diarization FIRST to identify speaker segments
-    diar_start = time.time()
-    diar_segments = run_diarization(session, audio, window_start)
+    # STEP 1: Run speaker detection to identify speaker segments (embedding-based)
+    detect_start = time.time()
+    diar_segments = run_speaker_detection(session, audio, window_start)
     session.last_diar_segments = diar_segments
-    diar_time = time.time() - diar_start
+    detect_time = time.time() - detect_start
 
     if not diar_segments:
-        # Fallback: no diarization, run full-window ASR with multilingual
-        print("No diarization segments, falling back to full-window ASR")
+        # Fallback: no speaker segments, run full-window ASR with multilingual
+        print("No speaker segments, falling back to full-window ASR")
         return _run_asr_fallback(model, session, audio, window_start, now_sec)
 
-    print(f"Diarization: {len(diar_segments)} segments in {diar_time * 1000:.1f}ms")
+    print(f"Speaker detection: {len(diar_segments)} segments in {detect_time * 1000:.1f}ms")
 
     # STEP 2: Detect language per speaker from raw audio (BEFORE ASR)
     speaker_languages: dict[str, tuple[str, float]] = {}  # speaker_id -> (lang, confidence)
@@ -786,8 +776,6 @@ def _run_asr_fallback(
         seg_start_sample = int(seg.start * 16000)
         seg_end_sample = int(seg.end * 16000)
         segment_audio = audio[seg_start_sample : min(seg_end_sample, len(audio))]
-
-        from app.lang_id import detect_language_from_audio
 
         speechbrain_lang, confidence = detect_language_from_audio(segment_audio, 16000)
         segment_lang = speechbrain_lang if speechbrain_lang != "unknown" else info.language
@@ -1238,6 +1226,11 @@ async def handle_websocket(websocket: WebSocket):
                                     }
                                 )
                             )
+
+                        # Stop ASR/MT loops after summary is sent
+                        running = False
+                        print("Summary sent, stopping ASR/MT loops")
+                        await websocket.close()
 
             elif "bytes" in message:
                 if session is not None:

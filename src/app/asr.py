@@ -38,11 +38,14 @@ def get_model() -> WhisperModel:
     """
     global _model
     if _model is None:
+        print(f"  Loading WhisperModel: {ASR_MODEL}")
+        print(f"  Device: {ASR_DEVICE}, Compute type: {ASR_COMPUTE_TYPE}")
         _model = WhisperModel(
             ASR_MODEL,
             device=ASR_DEVICE,
             compute_type=ASR_COMPUTE_TYPE,
         )
+        print("  WhisperModel loaded")
     return _model
 
 

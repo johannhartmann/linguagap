@@ -32,10 +32,10 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.asr import get_model, transcribe_wav_path
-from app.diarization import warmup_diarization
 from app.lang_id import warmup_lang_id
 from app.mt import get_llm, get_summ_llm, translate_texts
 from app.scripts.asr_smoke import generate_silence_wav
+from app.speaker_tracker import warmup_speaker_model
 from app.streaming import get_metrics, handle_viewer_websocket, handle_websocket
 
 
@@ -51,14 +51,20 @@ def warmup_models():
         - ASR (faster-whisper): ~2-3 GB VRAM
         - Translation (TranslateGemma 12B): ~8 GB VRAM
         - Summarization (Qwen3-4B): ~4 GB VRAM
-        - Diarization (pyannote): ~1 GB VRAM
+        - Speaker embeddings (SpeechBrain ECAPA): ~1 GB VRAM
         - Language ID (SpeechBrain): ~1 GB VRAM
 
     Total warmup time is typically 5-10 minutes depending on network speed
     for model downloads and GPU initialization.
     """
+    # Load SpeechBrain models FIRST - they use CUDNN which must initialize
+    # before llama-cpp-python's cuBLAS takes over CUDA context
+    warmup_speaker_model()
+    warmup_lang_id()
+
     print("Warming up ASR model...")
     asr_model = get_model()
+    print("  Running test transcription...")
     silence = np.zeros(16000, dtype=np.float32)
     list(asr_model.transcribe(silence))
     print("ASR model ready")
@@ -71,10 +77,6 @@ def warmup_models():
     print("Warming up summarization model...")
     get_summ_llm()
     print("Summarization model ready")
-
-    # Warm up diarization and language ID models
-    warmup_diarization()
-    warmup_lang_id()
 
 
 @asynccontextmanager

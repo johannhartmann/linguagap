@@ -148,6 +148,47 @@ class SegmentTracker:
                 return True
         return False
 
+    def _find_mergeable_segment(
+        self,
+        abs_start: float,
+        speaker_id: str | None,
+        src_lang: str,
+    ) -> CumulativeSegment | None:
+        """
+        Find a segment that should be merged with a new segment.
+
+        Merging happens when:
+        - Same speaker_id (both non-None)
+        - Same language
+        - Small gap or slight overlap between existing segment end and new start
+
+        This handles the case where a speaker pauses mid-sentence, causing
+        diarization to create separate segments that should be one turn.
+        """
+        MAX_MERGE_GAP_SEC = 2.0
+        MAX_MERGE_OVERLAP_SEC = 0.5  # Allow small overlap
+
+        if speaker_id is None:
+            return None
+
+        for cs in self.cumulative_segments:
+            if cs.segment.final:
+                continue
+            if cs.segment.speaker_id != speaker_id:
+                continue
+            if cs.segment.src_lang != src_lang:
+                continue
+
+            # Check if new segment starts shortly after (or slightly overlaps) this one
+            # gap > 0: new segment starts after existing ends (gap)
+            # gap < 0: new segment starts before existing ends (overlap)
+            # gap = 0: segments are adjacent
+            gap = abs_start - cs.segment.abs_end
+            if -MAX_MERGE_OVERLAP_SEC <= gap < MAX_MERGE_GAP_SEC:
+                return cs
+
+        return None
+
     def update_from_hypothesis(
         self,
         hyp_segments: list[dict],
@@ -178,25 +219,54 @@ class SegmentTracker:
             seg_lang = seg.get("lang", src_lang)
             speaker_id = seg.get("speaker_id")
 
-            # Try to find matching cumulative segment
+            # Try to find matching cumulative segment (by time overlap)
             match = self._find_matching_cumulative(abs_start, abs_end)
+            is_merge = False
+
+            # If no overlap match, check for mergeable segment (same speaker, small gap)
+            if not match:
+                match = self._find_mergeable_segment(abs_start, speaker_id, seg_lang)
+                if match:
+                    is_merge = True
 
             if match:
-                # Update existing cumulative segment
-                text_changed = match.segment.src != src_text
-                match.segment.abs_start = min(match.segment.abs_start, abs_start)
-                match.segment.abs_end = max(match.segment.abs_end, abs_end)
-                match.segment.src = src_text
-                match.segment.src_lang = seg_lang
-                if speaker_id:
-                    match.segment.speaker_id = speaker_id
+                if is_merge:
+                    # Merge: append text and extend end time (same speaker continuation)
+                    old_text = match.segment.src
+                    match.segment.src = old_text + " " + src_text
+                    match.segment.abs_end = abs_end
+                    match.last_updated = now_sec
+                    match.stable_since = None  # Reset stability since text changed
+                    print(
+                        f"  MERGED: [{match.segment.abs_start:.1f}-{abs_end:.1f}] "
+                        f"'{old_text[:20]}...' + '{src_text[:20]}...'"
+                    )
+                else:
+                    # Update existing cumulative segment (overlap case)
+                    # Don't replace if new text is much shorter (would lose merged content)
+                    old_len = len(match.segment.src)
+                    new_len = len(src_text)
+                    if new_len < old_len * 0.7:
+                        # New text is significantly shorter - keep existing, just update times
+                        match.segment.abs_start = min(match.segment.abs_start, abs_start)
+                        match.segment.abs_end = max(match.segment.abs_end, abs_end)
+                        match.last_updated = now_sec
+                    else:
+                        # Normal update - replace text
+                        text_changed = match.segment.src != src_text
+                        match.segment.abs_start = min(match.segment.abs_start, abs_start)
+                        match.segment.abs_end = max(match.segment.abs_end, abs_end)
+                        match.segment.src = src_text
+                        match.segment.src_lang = seg_lang
+                        if speaker_id:
+                            match.segment.speaker_id = speaker_id
 
-                match.last_updated = now_sec
-                if text_changed:
-                    match.stable_since = None  # Reset stability tracking
-                elif match.stable_since is None:
-                    # Text is same as before - mark when it became stable
-                    match.stable_since = now_sec
+                        match.last_updated = now_sec
+                        if text_changed:
+                            match.stable_since = None  # Reset stability tracking
+                        elif match.stable_since is None:
+                            # Text is same as before - mark when it became stable
+                            match.stable_since = now_sec
             else:
                 # Create new cumulative segment
                 print(
