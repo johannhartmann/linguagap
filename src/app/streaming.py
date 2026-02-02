@@ -655,6 +655,10 @@ async def handle_websocket(websocket: WebSocket):
                                 )
                             )
 
+                        # Stop ASR/MT loops after summary is sent
+                        running = False
+                        print("Summary sent, stopping ASR/MT loops")
+
             elif "bytes" in message:
                 if session is not None:
                     audio_bytes = message["bytes"]

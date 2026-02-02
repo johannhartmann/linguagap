@@ -15,13 +15,20 @@ SUMM_MODEL_FILE = os.getenv("SUMM_MODEL_FILE", "Qwen3-4B-Q4_K_M.gguf")
 SUMM_N_GPU_LAYERS = int(os.getenv("SUMM_N_GPU_LAYERS", "-1"))
 SUMM_N_CTX = int(os.getenv("SUMM_N_CTX", "4096"))
 
-# Regex to strip Qwen3 <think>...</think> blocks from responses
-_THINK_PATTERN = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
+# Regex patterns to strip Qwen3 <think>...</think> blocks from responses
+# Pattern 1: Complete think blocks with closing tag
+_THINK_COMPLETE = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
+# Pattern 2: Incomplete think blocks (truncated output without closing tag)
+_THINK_INCOMPLETE = re.compile(r"<think>.*$", re.DOTALL)
 
 
 def _strip_think_block(text: str) -> str:
-    """Strip Qwen3 thinking blocks from model output."""
-    return _THINK_PATTERN.sub("", text).strip()
+    """Strip Qwen3 thinking blocks from model output (complete or truncated)."""
+    # First strip complete think blocks
+    result = _THINK_COMPLETE.sub("", text)
+    # Then strip any incomplete think block at the end
+    result = _THINK_INCOMPLETE.sub("", result)
+    return result.strip()
 
 
 # Language name and code mapping for TranslateGemma prompts
@@ -171,7 +178,7 @@ def summarize_conversation(segments: list[dict], _foreign_lang: str, target_lang
     prompt = (
         f"Summarize this dialogue between two speakers in {target_name}. "
         f"Include what BOTH the German speaker and the Foreign speaker said. "
-        f"Write 2-4 sentences covering the main topics from both sides."
+        f"Write 2-4 sentences covering the main topics from both sides. /no_think"
         f"\n\nConversation:\n{conversation_text}\n\nSummary:"
     )
 
@@ -218,7 +225,7 @@ def validate_summary_alignment(
         "Respond in this exact format:\n"
         "ALIGNED: yes or no\n"
         "ISSUES: description of issues (or 'none')\n"
-        "FEEDBACK: specific suggestions for improvement (or 'none')"
+        "FEEDBACK: specific suggestions for improvement (or 'none') /no_think"
         f"\n\n\nOriginal German segments:\n{original_text}\n\n"
         f"German summary to validate:\n{german_summary}"
     )
@@ -309,7 +316,7 @@ def regenerate_summary_with_feedback(
     prompt = (
         f"Summarize this dialogue between two speakers in {target_name}. "
         f"Include what BOTH the German speaker and the Foreign speaker said. "
-        f"Write 2-4 sentences covering the main topics from both sides.{feedback_section}"
+        f"Write 2-4 sentences covering the main topics from both sides.{feedback_section} /no_think"
         f"\n\nConversation:\n{conversation_text}\n\nSummary:"
     )
 
