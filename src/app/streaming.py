@@ -925,7 +925,7 @@ async def handle_websocket(websocket: WebSocket):
                                 # User explicitly selected a foreign language
                                 if session.src_lang != "de":
                                     session.foreign_lang = session.src_lang
-                            elif session.detected_lang != "de":
+                            elif session.detected_lang not in ("de", "unknown", None):
                                 # Auto-detect: first non-German speech sets the foreign language
                                 session.foreign_lang = session.detected_lang
                                 print(f"Auto-detected foreign language: {session.foreign_lang}")
@@ -1000,8 +1000,11 @@ async def handle_websocket(websocket: WebSocket):
 
                 try:
                     # Determine translation direction: German → foreign, foreign → German
-                    # Default to English if foreign language not yet detected
-                    tgt_lang = (session.foreign_lang or "en") if seg_src_lang == "de" else "de"
+                    # Default to English if foreign language not yet detected or invalid
+                    foreign = session.foreign_lang
+                    if not foreign or foreign == "unknown":
+                        foreign = "en"
+                    tgt_lang = foreign if seg_src_lang == "de" else "de"
 
                     print(
                         f"Translating segment {segment.id} ({seg_src_lang}→{tgt_lang}): {segment.src[:50]}"
