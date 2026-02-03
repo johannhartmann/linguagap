@@ -31,9 +31,10 @@ SPEAKER_DEVICE = os.getenv("SPEAKER_DEVICE", "cuda")
 SPEAKER_ENABLED = os.getenv("SPEAKER_ENABLED", "true").lower() == "true"
 
 # Similarity threshold for matching speakers
-# ECAPA embeddings for same speaker typically have similarity > 0.75
-# Using 0.5 to be more lenient and avoid over-segmentation
-SPEAKER_SIMILARITY_THRESHOLD = float(os.getenv("SPEAKER_SIMILARITY_THRESHOLD", "0.5"))
+# ECAPA embeddings for same speaker typically have similarity > 0.75 for long audio
+# But for short TTS segments (1-2s), same-speaker similarity can be 0.5-0.65
+# Different speakers show 0.07-0.17 similarity, so 0.3 gives good separation
+SPEAKER_SIMILARITY_THRESHOLD = float(os.getenv("SPEAKER_SIMILARITY_THRESHOLD", "0.3"))
 
 # Maximum number of speakers expected (for bilingual conversations)
 MAX_SPEAKERS = int(os.getenv("MAX_SPEAKERS", "2"))

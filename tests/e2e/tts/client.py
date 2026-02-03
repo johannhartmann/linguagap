@@ -41,10 +41,10 @@ class GeminiTTSClient:
         scenario: DialogueScenario,
         use_cache: bool = True,
     ) -> Path:
-        """Synthesize audio for an entire dialogue using multi-speaker TTS.
+        """Synthesize audio for an entire dialogue using per-turn TTS.
 
-        Uses Gemini's multi-speaker voice config which produces more distinctive
-        voice characteristics than per-turn synthesis.
+        Uses per-turn synthesis to ensure each turn gets the correct language
+        detection. Multi-speaker mode can confuse languages in bilingual dialogues.
 
         Args:
             scenario: DialogueScenario containing all turns
@@ -56,9 +56,9 @@ class GeminiTTSClient:
         # Build voices dict
         voices = {speaker_id: get_voice_for_speaker(speaker_id) for speaker_id in scenario.speakers}
 
-        # Use multi-speaker synthesis with SSML break tags for diarization
+        # Use per-turn synthesis with concatenation for correct language handling
         pause_sec = 0.7  # Natural conversational pause
-        synthesis_method = f"multi_ssml_break_{pause_sec}s"
+        synthesis_method = f"per_turn_concat_{pause_sec}s"
         cache_key = compute_cache_key(scenario.to_yaml(), voices, synthesis_method)
 
         # Check cache
@@ -68,12 +68,17 @@ class GeminiTTSClient:
                 print(f"Using cached audio: {cached}")
                 return cached
 
-        # Build multi-speaker prompt with pause markers between turns
-        prompt = self._build_dialogue_prompt(scenario, pause_between_turns=pause_sec)
         print(f"  Synthesizing dialogue with {len(scenario.turns)} turns (pause={pause_sec}s)...")
 
-        # Use multi-speaker TTS
-        audio = self._generate_audio(prompt, voices, scenario.speakers)
+        # Synthesize each turn separately to ensure correct language detection
+        wav_parts = []
+        for i, turn in enumerate(scenario.turns):
+            print(f"    Turn {i + 1}/{len(scenario.turns)}: {turn.language} - {turn.text[:30]}...")
+            turn_audio = self.synthesize_turn(turn)
+            wav_parts.append(turn_audio)
+
+        # Concatenate with silence between turns
+        audio = self._concatenate_with_silence(wav_parts, pause_sec)
 
         # Save to cache
         cache_path = save_to_cache(cache_key, audio)

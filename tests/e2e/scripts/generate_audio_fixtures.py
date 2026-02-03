@@ -97,7 +97,7 @@ def main():
             from tests.e2e.tts.voices import get_voice_for_speaker
 
             # Must match synthesis_method used in GeminiTTSClient.synthesize_dialogue
-            synthesis_method = "multi_ssml_break_0.7s"
+            synthesis_method = "per_turn_concat_0.7s"
             voices = {sid: get_voice_for_speaker(sid) for sid in scenario.speakers}
             cache_key = compute_cache_key(scenario.to_yaml(), voices, synthesis_method)
             existing = get_cached_audio(cache_key)
