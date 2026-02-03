@@ -215,3 +215,133 @@ class StreamingClient:
             src_lang="auto",
             request_summary=request_summary,
         )
+
+    async def stream_audio_with_foreign_hint(
+        self,
+        audio_path: str | Path,
+        foreign_lang: str,
+        request_summary: bool = True,
+        timeout_sec: float = 120.0,
+    ) -> StreamingResult:
+        """Stream an audio file with a foreign language hint.
+
+        This method provides a foreign_lang hint to the pipeline, which can
+        improve language detection accuracy for known bilingual conversations.
+
+        Args:
+            audio_path: Path to WAV audio file
+            foreign_lang: Foreign language code (e.g., "fa", "ku", "ru")
+            request_summary: Whether to request a summary at the end
+            timeout_sec: Maximum time to wait for processing
+
+        Returns:
+            StreamingResult with collected data
+        """
+        import websockets
+
+        result = StreamingResult()
+
+        # Read audio file
+        audio_path = Path(audio_path)
+        with wave.open(str(audio_path), "rb") as wav:
+            file_sample_rate = wav.getframerate()
+            n_frames = wav.getnframes()
+            audio_data = wav.readframes(n_frames)
+            result.duration_sec = n_frames / file_sample_rate
+
+        # Calculate frame parameters
+        frame_duration_ms = 100
+        samples_per_frame = int(self.sample_rate * frame_duration_ms / 1000)
+        bytes_per_frame = samples_per_frame * 2  # 16-bit audio
+
+        # Generate session token
+        session_token = str(uuid.uuid4())
+
+        async with websockets.connect(self.ws_url) as ws:
+            # Send config with foreign language hint
+            config = {
+                "type": "config",
+                "sample_rate": self.sample_rate,
+                "src_lang": "auto",
+                "foreign_lang": foreign_lang,  # Hint for language detection
+                "token": session_token,
+            }
+            await ws.send(json.dumps(config))
+
+            # Wait for config ack
+            try:
+                ack = await asyncio.wait_for(ws.recv(), timeout=10.0)
+                ack_data = json.loads(ack)
+                if ack_data.get("type") != "config_ack":
+                    result.errors.append(f"Unexpected config response: {ack_data}")
+            except TimeoutError:
+                result.errors.append("Timeout waiting for config acknowledgment")
+                return result
+
+            # Start receiver task
+            receive_done = asyncio.Event()
+
+            async def receive_messages():
+                try:
+                    async for message in ws:
+                        data = json.loads(message)
+                        msg_type = data.get("type")
+
+                        if msg_type == "segments":
+                            result.segments = data.get("segments", [])
+                        elif msg_type == "translation":
+                            seg_id = data.get("segment_id")
+                            tgt_lang = data.get("tgt_lang")
+                            text = data.get("text")
+                            if seg_id is not None:
+                                if seg_id not in result.translations:
+                                    result.translations[seg_id] = {}
+                                result.translations[seg_id][tgt_lang] = text
+                        elif msg_type == "summary":
+                            result.summary = data
+                            receive_done.set()
+                        elif msg_type == "summary_error":
+                            result.errors.append(f"Summary error: {data.get('error')}")
+                            receive_done.set()
+                        elif msg_type == "error":
+                            result.errors.append(data.get("message", str(data)))
+
+                except Exception as e:
+                    if "ConnectionClosed" not in str(type(e)):
+                        result.errors.append(f"Receive error: {e}")
+
+            receiver = asyncio.create_task(receive_messages())
+
+            # Stream audio frames
+            frame_delay = (frame_duration_ms / 1000) * self.realtime_factor
+            offset = 0
+
+            while offset < len(audio_data):
+                frame = audio_data[offset : offset + bytes_per_frame]
+                if len(frame) < bytes_per_frame:
+                    # Pad last frame with silence
+                    frame = frame + b"\x00" * (bytes_per_frame - len(frame))
+
+                await ws.send(frame)
+                offset += bytes_per_frame
+                await asyncio.sleep(frame_delay)
+
+            # Wait for processing to complete
+            await asyncio.sleep(2.0)
+
+            # Request summary if desired
+            if request_summary:
+                await ws.send(json.dumps({"type": "request_summary"}))
+
+                # Wait for summary with timeout
+                try:
+                    await asyncio.wait_for(receive_done.wait(), timeout=timeout_sec)
+                except TimeoutError:
+                    result.errors.append("Timeout waiting for summary")
+
+            # Clean up
+            receiver.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await receiver
+
+        return result

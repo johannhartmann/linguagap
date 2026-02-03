@@ -164,8 +164,12 @@ class SegmentTracker:
 
         This handles the case where a speaker pauses mid-sentence, causing
         diarization to create separate segments that should be one turn.
+
+        Note: MAX_MERGE_GAP_SEC was reduced from 2.0s to 0.8s to prevent
+        cross-turn merging in bilingual dialogues where speaker turns
+        may have short pauses between them.
         """
-        MAX_MERGE_GAP_SEC = 2.0
+        MAX_MERGE_GAP_SEC = 0.8  # Reduced from 2.0 to prevent cross-turn merging
         MAX_MERGE_OVERLAP_SEC = 0.5  # Allow small overlap
 
         if speaker_id is None:

@@ -350,6 +350,16 @@ class SpeakerTracker:
                 print(f"  Set {speaker_id} language: {language} ({confidence:.2f})")
                 return
 
+    def reset(self) -> None:
+        """Reset speaker tracking state.
+
+        Clears all known speakers and resets the speaker index counter.
+        Useful for session boundaries or when starting a new dialogue context.
+        """
+        self.known_speakers.clear()
+        self.next_speaker_idx = 0
+        print("  Speaker tracker reset")
+
 
 def warmup_speaker_model():
     """Warm up speaker embedding model."""

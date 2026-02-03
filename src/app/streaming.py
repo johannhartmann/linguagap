@@ -463,6 +463,10 @@ def transcribe_speaker_segment(
         if whisper_lang is None:
             print(f"  Language {language} not supported by Whisper, using multilingual")
 
+    # Get initial prompt for bilingual context (helps ASR recognize language patterns)
+    # Uses the foreign language as key since German is always present
+    initial_prompt = BILINGUAL_PROMPTS.get(original_lang) if original_lang else None
+
     # Transcribe with explicit language (or multilingual if unknown/unsupported)
     use_multilingual = whisper_lang is None or whisper_lang == "unknown"
     segments, info = model.transcribe(
@@ -485,6 +489,7 @@ def transcribe_speaker_segment(
         hallucination_silence_threshold=1.5,
         multilingual=use_multilingual,
         language_detection_threshold=0.5,
+        initial_prompt=initial_prompt,  # Bilingual context prompt
     )
 
     results = []
@@ -658,7 +663,8 @@ def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
             continue
 
         # Use detected language if confident, otherwise let Whisper decide
-        use_lang = lang if confidence > 0.7 and lang != "unknown" else None
+        # Threshold lowered from 0.7 to 0.5 to use more detected languages
+        use_lang = lang if confidence > 0.5 and lang != "unknown" else None
 
         # Transcribe this speaker segment
         seg_results = transcribe_speaker_segment(model, audio, use_lang, diar_seg, window_start)

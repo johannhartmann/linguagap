@@ -143,6 +143,15 @@ class SpeakerLanguageTracker:
         """Get all speaker -> language mappings."""
         return self.speaker_languages.copy()
 
+    def clear_cache(self) -> None:
+        """Clear all cached language detections.
+
+        Useful for session boundaries or when starting a new dialogue context.
+        """
+        self.speaker_languages.clear()
+        self.speaker_confidences.clear()
+        print("  Language tracker cache cleared")
+
 
 def warmup_lang_id():
     """Warm up language ID model to reduce first-inference latency."""

@@ -85,6 +85,7 @@ LANG_INFO = {
     "hu": ("Hungarian", "hu"),
     "ar": ("Arabic", "ar"),
     "fa": ("Persian", "fa"),
+    "ku": ("Kurdish", "ku"),  # Added for bilingual support
     "sr": ("Serbian", "sr"),
     "zh": ("Chinese", "zh-Hans"),
     "ja": ("Japanese", "ja"),
