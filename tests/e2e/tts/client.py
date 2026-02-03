@@ -40,20 +40,15 @@ class GeminiTTSClient:
         self,
         scenario: DialogueScenario,
         use_cache: bool = True,
-        inter_turn_silence_sec: float = 0.7,
     ) -> Path:
-        """Synthesize audio for an entire dialogue with natural breaks.
+        """Synthesize audio for an entire dialogue using multi-speaker TTS.
 
-        Uses per-turn synthesis with silence gaps between turns to ensure
-        proper VAD/diarization separation.
+        Uses Gemini's multi-speaker voice config which produces more distinctive
+        voice characteristics than per-turn synthesis.
 
         Args:
             scenario: DialogueScenario containing all turns
             use_cache: Whether to use cached audio if available
-            inter_turn_silence_sec: Silence duration between turns (default 0.7s)
-                - > 0.3s: VAD detects speech boundary
-                - > 0.5s: Pre-ASR won't merge same-speaker segments
-                - 0.5-0.8s: Natural conversational pause range
 
         Returns:
             Path to the generated WAV file (16kHz mono)
@@ -61,9 +56,9 @@ class GeminiTTSClient:
         # Build voices dict
         voices = {speaker_id: get_voice_for_speaker(speaker_id) for speaker_id in scenario.speakers}
 
-        # Include synthesis method in cache key for differentiation
-        synthesis_method = f"per_turn_{inter_turn_silence_sec}s"
-        cache_key = compute_cache_key(scenario.to_yaml(), voices, synthesis_method)
+        # Use multi-speaker synthesis for better voice distinction
+        # Use default cache key (synthesis_method="multi") for compatibility
+        cache_key = compute_cache_key(scenario.to_yaml(), voices)
 
         # Check cache
         if use_cache:
@@ -72,20 +67,35 @@ class GeminiTTSClient:
                 print(f"Using cached audio: {cached}")
                 return cached
 
-        # Synthesize each turn separately
-        audio_parts = []
-        for i, turn in enumerate(scenario.turns):
-            print(f"  Synthesizing turn {i + 1}/{len(scenario.turns)}: {turn.text[:40]}...")
-            turn_audio = self.synthesize_turn(turn)
-            audio_parts.append(turn_audio)
+        # Build multi-speaker prompt with pause hints
+        prompt = self._build_dialogue_prompt(scenario)
+        print(f"  Synthesizing dialogue with {len(scenario.turns)} turns...")
 
-        # Concatenate with natural silence gaps
-        combined = self._concatenate_with_silence(audio_parts, inter_turn_silence_sec)
+        # Use multi-speaker TTS
+        audio = self._generate_audio(prompt, voices, scenario.speakers)
 
         # Save to cache
-        cache_path = save_to_cache(cache_key, combined)
+        cache_path = save_to_cache(cache_key, audio)
         print(f"Saved audio to cache: {cache_path}")
         return cache_path
+
+    def _build_dialogue_prompt(self, scenario: DialogueScenario) -> str:
+        """Build multi-speaker prompt.
+
+        Uses Gemini's multi-speaker format where speaker name is followed by text.
+        The model handles prosody and turn-taking naturally.
+
+        Args:
+            scenario: DialogueScenario to convert
+
+        Returns:
+            Formatted prompt for multi-speaker TTS
+        """
+        lines = []
+        for turn in scenario.turns:
+            speaker_name = scenario.speakers.get(turn.speaker_id, turn.speaker_id)
+            lines.append(f"{speaker_name}: {turn.text}")
+        return "\n".join(lines)
 
     def _concatenate_with_silence(
         self,

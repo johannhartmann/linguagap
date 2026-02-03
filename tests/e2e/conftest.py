@@ -115,16 +115,16 @@ def dialogue_generator(gemini_api_key):
 
 @pytest.fixture
 def sample_scenario():
-    """Create a simple test scenario for unit testing fixtures.
+    """Create a realistic test scenario for E2E testing.
 
     Returns:
-        DialogueScenario with minimal content
+        DialogueScenario with 6 turns for realistic diarization/ASR testing
     """
     from tests.e2e.dialogues.templates import DialogueScenario, DialogueTurn
 
     return DialogueScenario(
         name="test_scenario",
-        description="A simple test scenario",
+        description="Customer service dialogue about order inquiry",
         german_lang="de",
         foreign_lang="en",
         speakers={
@@ -135,14 +135,36 @@ def sample_scenario():
             DialogueTurn(
                 speaker_id="speaker_1",
                 language="de",
-                text="Guten Tag, wie kann ich Ihnen helfen?",
+                text="Guten Tag, hier ist der Kundenservice. Wie kann ich Ihnen heute helfen?",
             ),
             DialogueTurn(
                 speaker_id="speaker_2",
                 language="en",
-                text="Hello, I need help with my order.",
-                expected_translation="Hallo, ich brauche Hilfe mit meiner Bestellung.",
+                text="Hello, I placed an order last week but I haven't received any updates.",
+                expected_translation="Hallo, ich habe letzte Woche eine Bestellung aufgegeben, aber ich habe keine Updates erhalten.",
+            ),
+            DialogueTurn(
+                speaker_id="speaker_1",
+                language="de",
+                text="Das tut mir leid zu hören. Können Sie mir bitte Ihre Bestellnummer geben?",
+            ),
+            DialogueTurn(
+                speaker_id="speaker_2",
+                language="en",
+                text="Yes, the order number is twelve thirty-four fifty-six. I ordered a laptop.",
+                expected_translation="Ja, die Bestellnummer ist zwölf vierunddreißig sechsundfünfzig. Ich habe einen Laptop bestellt.",
+            ),
+            DialogueTurn(
+                speaker_id="speaker_1",
+                language="de",
+                text="Ich sehe die Bestellung. Das Paket wurde gestern versendet und sollte morgen ankommen.",
+            ),
+            DialogueTurn(
+                speaker_id="speaker_2",
+                language="en",
+                text="That's great news! Thank you so much for your help.",
+                expected_translation="Das sind tolle Neuigkeiten! Vielen Dank für Ihre Hilfe.",
             ),
         ],
-        expected_summary_topics=["greeting", "order help"],
+        expected_summary_topics=["order inquiry", "shipping status", "laptop order"],
     )
