@@ -160,6 +160,14 @@ def translate_texts(texts: list[str], src_lang: str, tgt_lang: str = "de") -> li
     Returns:
         List of translated texts in the same order as input
     """
+    # Check for unsupported languages - fallback to English for unknown codes
+    if src_lang not in LANG_INFO:
+        print(f"Warning: Unsupported source language '{src_lang}', falling back to 'en'")
+        src_lang = "en"
+    if tgt_lang not in LANG_INFO:
+        print(f"Warning: Unsupported target language '{tgt_lang}', falling back to 'en'")
+        tgt_lang = "en"
+
     llm = get_llm()
     _, src_code = LANG_INFO.get(src_lang, (src_lang, src_lang))
     _, tgt_code = LANG_INFO.get(tgt_lang, (tgt_lang, tgt_lang))
@@ -209,6 +217,11 @@ def summarize_bilingual(segments: list[dict], foreign_lang: str) -> tuple[str, s
     Returns:
         Tuple of (foreign_summary, german_summary)
     """
+    # Fallback for unsupported languages
+    if foreign_lang not in LANG_NAMES:
+        print(f"Warning: Unsupported language '{foreign_lang}' for summary, using 'English'")
+        foreign_lang = "en"
+
     llm = get_summ_llm()
     foreign_name = LANG_NAMES.get(foreign_lang, foreign_lang)
 
