@@ -1,7 +1,7 @@
 # LinguaGap Development Makefile
 # ================================
 
-.PHONY: help dev backend test test-one lint format typecheck security check all clean logs
+.PHONY: help dev backend test test-one lint format typecheck security check all clean logs docker-build docker-push docker
 
 # Default target
 help:
@@ -24,6 +24,12 @@ help:
 	@echo "  make typecheck    - Run ty type checker"
 	@echo "  make security     - Run bandit security scan"
 	@echo "  make check        - Run all checks (lint, format, typecheck, security)"
+	@echo ""
+	@echo "Docker:"
+	@echo "  make docker       - Build and push Docker image"
+	@echo "  make docker-build - Build Docker image"
+	@echo "  make docker-push  - Push Docker image to ghcr.io"
+	@echo "  make docker-run   - Run Docker container locally"
 	@echo ""
 	@echo "Other:"
 	@echo "  make clean        - Clean up generated files"
@@ -133,6 +139,43 @@ smoke-pipeline:
 	PYTHONPATH=src uv run python -m app.scripts.pipeline_smoke
 
 smoke: smoke-asr smoke-mt smoke-pipeline
+
+# ============================================================================
+# Docker
+# ============================================================================
+
+DOCKER_REGISTRY := ghcr.io
+DOCKER_IMAGE := $(DOCKER_REGISTRY)/johannhartmann/linguagap
+DOCKER_TAG ?= latest
+
+docker: docker-build docker-push
+
+docker-build:
+	@echo "Building Docker image: $(DOCKER_IMAGE):$(DOCKER_TAG)"
+	docker build -t $(DOCKER_IMAGE):$(DOCKER_TAG) .
+
+docker-push:
+	@echo "Pushing Docker image: $(DOCKER_IMAGE):$(DOCKER_TAG)"
+	docker push $(DOCKER_IMAGE):$(DOCKER_TAG)
+
+docker-run:
+	@echo "Running Docker container..."
+	docker run --rm -it --gpus all \
+		-p 8000:8000 \
+		-e HF_TOKEN \
+		-v $(HOME)/.cache/huggingface:/data/hf \
+		$(DOCKER_IMAGE):$(DOCKER_TAG)
+
+# Build with custom tag (usage: make docker-tag T=v1.0.0)
+docker-tag:
+ifndef T
+	@echo "Usage: make docker-tag T=<tag>"
+	@echo "Example: make docker-tag T=v1.0.0"
+	@exit 1
+endif
+	@echo "Building and pushing: $(DOCKER_IMAGE):$(T)"
+	docker build -t $(DOCKER_IMAGE):$(T) .
+	docker push $(DOCKER_IMAGE):$(T)
 
 # ============================================================================
 # Utilities
