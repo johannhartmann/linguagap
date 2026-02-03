@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Evaluate E2E scenarios with transcription, translation, and summary quality scores.
 
+Reports are always generated in tests/reports/ with timestamped filenames:
+- evaluation_YYYYMMDD_HHMMSS.json (detailed JSON with all metrics)
+- evaluation_YYYYMMDD_HHMMSS.md (markdown debug report)
+
 Usage:
     # Evaluate all customer_service scenarios
     uv run python tests/e2e/scripts/evaluate_scenarios.py
@@ -14,8 +18,8 @@ Usage:
     # Skip TTS generation (use existing cache only)
     uv run python tests/e2e/scripts/evaluate_scenarios.py --no-generate
 
-    # Output JSON report
-    uv run python tests/e2e/scripts/evaluate_scenarios.py --output report.json
+    # Override report paths
+    uv run python tests/e2e/scripts/evaluate_scenarios.py -o custom.json -m custom.md
 
 Environment:
     GEMINI_API_KEY: Required for TTS generation and LLM-as-Judge evaluation
@@ -882,8 +886,12 @@ async def main():
     parser.add_argument(
         "--no-generate", action="store_true", help="Skip TTS generation, use cache only"
     )
-    parser.add_argument("--output", "-o", help="Output JSON report to file")
-    parser.add_argument("--markdown", "-m", help="Output detailed markdown report to file")
+    parser.add_argument(
+        "--output", "-o", help="Override JSON report path (default: tests/reports/)"
+    )
+    parser.add_argument(
+        "--markdown", "-m", help="Override markdown report path (default: tests/reports/)"
+    )
     parser.add_argument("--ws-url", default=WS_URL, help="WebSocket URL")
     args = parser.parse_args()
 
@@ -1004,50 +1012,59 @@ async def main():
     # Print report
     print_evaluation_report(evaluations)
 
-    # Save JSON report if requested
-    if args.output:
-        report_data = {
-            "evaluations": [
-                {
-                    "name": e.name,
-                    "description": e.description,
-                    "foreign_lang": e.foreign_lang,
-                    "avg_transcription_score": e.avg_transcription_score,
-                    "avg_translation_score": e.avg_translation_score,
-                    "summary_score": e.summary_score,
-                    "summary_reasoning": e.summary_reasoning,
-                    "overall_score": e.overall_score,
-                    "errors": e.errors,
-                    "summary": results_map.get(e.name, {}).get("summary"),
-                    "turns": [
-                        {
-                            "speaker_id": t.speaker_id,
-                            "language": t.language,
-                            "expected_text": t.expected_text,
-                            "actual_text": t.actual_text,
-                            "transcription_score": t.transcription_score,
-                            "cer": t.cer_value,
-                            "expected_translation": t.expected_translation,
-                            "actual_translation": t.actual_translation,
-                            "translation_score": t.translation_score,
-                            "bleu": t.bleu_value,
-                        }
-                        for t in e.turns
-                    ],
-                }
-                for e in evaluations
-            ],
-        }
-        with open(args.output, "w") as f:
-            json.dump(report_data, f, indent=2, ensure_ascii=False)
-        print(f"\nJSON report saved to: {args.output}")
+    # Generate report filenames with timestamp
+    from datetime import datetime
 
-    # Save markdown report if requested
-    if args.markdown:
-        md_report = generate_markdown_report(evaluations, results_map)
-        with open(args.markdown, "w", encoding="utf-8") as f:
-            f.write(md_report)
-        print(f"Markdown report saved to: {args.markdown}")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    reports_dir = Path(__file__).parent.parent.parent / "reports"
+    reports_dir.mkdir(exist_ok=True)
+
+    json_path = args.output or reports_dir / f"evaluation_{timestamp}.json"
+    md_path = args.markdown or reports_dir / f"evaluation_{timestamp}.md"
+
+    # Save JSON report
+    report_data = {
+        "timestamp": datetime.now().isoformat(),
+        "evaluations": [
+            {
+                "name": e.name,
+                "description": e.description,
+                "foreign_lang": e.foreign_lang,
+                "avg_transcription_score": e.avg_transcription_score,
+                "avg_translation_score": e.avg_translation_score,
+                "summary_score": e.summary_score,
+                "summary_reasoning": e.summary_reasoning,
+                "overall_score": e.overall_score,
+                "errors": e.errors,
+                "summary": results_map.get(e.name, {}).get("summary"),
+                "turns": [
+                    {
+                        "speaker_id": t.speaker_id,
+                        "language": t.language,
+                        "expected_text": t.expected_text,
+                        "actual_text": t.actual_text,
+                        "transcription_score": t.transcription_score,
+                        "cer": t.cer_value,
+                        "expected_translation": t.expected_translation,
+                        "actual_translation": t.actual_translation,
+                        "translation_score": t.translation_score,
+                        "bleu": t.bleu_value,
+                    }
+                    for t in e.turns
+                ],
+            }
+            for e in evaluations
+        ],
+    }
+    with open(json_path, "w") as f:
+        json.dump(report_data, f, indent=2, ensure_ascii=False)
+    print(f"\nJSON report saved to: {json_path}")
+
+    # Save markdown report
+    md_report = generate_markdown_report(evaluations, results_map)
+    with open(md_path, "w", encoding="utf-8") as f:
+        f.write(md_report)
+    print(f"Markdown report saved to: {md_path}")
 
 
 if __name__ == "__main__":
