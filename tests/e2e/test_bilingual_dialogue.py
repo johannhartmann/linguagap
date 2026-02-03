@@ -368,7 +368,6 @@ class TestFullSuite:
                     # Synthesize and stream
                     audio_path = tts_client.synthesize_dialogue(scenario)
                     result = await streaming_client.stream_dialogue(
-                        scenario=scenario,
                         audio_path=audio_path,
                         request_summary=True,
                     )
