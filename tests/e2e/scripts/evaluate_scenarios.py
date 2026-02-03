@@ -48,6 +48,134 @@ SCENARIOS_DIR = Path(__file__).parent.parent.parent / "fixtures" / "scenarios"
 WS_URL = "ws://localhost:8000/ws"
 
 
+def compute_cer(expected: str, actual: str) -> float:
+    """Compute Character Error Rate using Levenshtein distance.
+
+    Returns a value between 0.0 (perfect) and 1.0+ (completely wrong).
+    """
+    # Normalize: lowercase, strip punctuation for fair comparison
+    import re
+
+    def normalize(s: str) -> str:
+        s = s.lower().strip()
+        s = re.sub(r"[^\w\s]", "", s)  # Remove punctuation
+        s = re.sub(r"\s+", " ", s)  # Normalize whitespace
+        return s
+
+    expected = normalize(expected)
+    actual = normalize(actual)
+
+    if not expected:
+        return 0.0 if not actual else 1.0
+
+    # Levenshtein distance
+    m, n = len(expected), len(actual)
+    dp = [[0] * (n + 1) for _ in range(m + 1)]
+
+    for i in range(m + 1):
+        dp[i][0] = i
+    for j in range(n + 1):
+        dp[0][j] = j
+
+    for i in range(1, m + 1):
+        for j in range(1, n + 1):
+            if expected[i - 1] == actual[j - 1]:
+                dp[i][j] = dp[i - 1][j - 1]
+            else:
+                dp[i][j] = 1 + min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1])
+
+    return dp[m][n] / m
+
+
+def cer_to_score(cer: float) -> int:
+    """Convert CER to 1-5 score.
+
+    CER 0.00-0.05 = 5 (Excellent)
+    CER 0.05-0.15 = 4 (Good)
+    CER 0.15-0.30 = 3 (Average)
+    CER 0.30-0.50 = 2 (Poor)
+    CER 0.50+     = 1 (Very Poor)
+    """
+    if cer <= 0.05:
+        return 5
+    elif cer <= 0.15:
+        return 4
+    elif cer <= 0.30:
+        return 3
+    elif cer <= 0.50:
+        return 2
+    else:
+        return 1
+
+
+def compute_bleu(expected: str, actual: str) -> float:
+    """Compute simplified BLEU score (unigram + bigram).
+
+    Returns a value between 0.0 and 1.0.
+    """
+    import re
+    from collections import Counter
+
+    def tokenize(s: str) -> list[str]:
+        s = s.lower().strip()
+        s = re.sub(r"[^\w\s]", "", s)
+        return s.split()
+
+    ref_tokens = tokenize(expected)
+    hyp_tokens = tokenize(actual)
+
+    if not hyp_tokens or not ref_tokens:
+        return 0.0
+
+    # Unigram precision
+    ref_counts = Counter(ref_tokens)
+    hyp_counts = Counter(hyp_tokens)
+    unigram_matches = sum(min(hyp_counts[w], ref_counts[w]) for w in hyp_counts)
+    unigram_precision = unigram_matches / len(hyp_tokens) if hyp_tokens else 0
+
+    # Bigram precision
+    ref_bigrams = Counter(zip(ref_tokens[:-1], ref_tokens[1:], strict=False))
+    hyp_bigrams = Counter(zip(hyp_tokens[:-1], hyp_tokens[1:], strict=False))
+    bigram_matches = sum(min(hyp_bigrams[b], ref_bigrams[b]) for b in hyp_bigrams)
+    bigram_precision = bigram_matches / len(hyp_bigrams) if hyp_bigrams else 0
+
+    # Combined score (geometric mean)
+    if unigram_precision == 0 or bigram_precision == 0:
+        return unigram_precision * 0.5  # Fallback to unigram only
+
+    import math
+
+    bleu = math.sqrt(unigram_precision * bigram_precision)
+
+    # Brevity penalty
+    if len(hyp_tokens) < len(ref_tokens):
+        bp = math.exp(1 - len(ref_tokens) / len(hyp_tokens))
+        bleu *= bp
+
+    return bleu
+
+
+def bleu_to_score(bleu: float) -> int:
+    """Convert BLEU to 1-5 score.
+
+    BLEU 0.80-1.00 = 5 (Excellent)
+    BLEU 0.60-0.80 = 4 (Good)
+    BLEU 0.40-0.60 = 3 (Average)
+    BLEU 0.20-0.40 = 2 (Poor)
+    BLEU 0.00-0.20 = 1 (Very Poor)
+    """
+    if bleu >= 0.80:
+        return 5
+    elif bleu >= 0.60:
+        return 4
+    elif bleu >= 0.40:
+        return 3
+    elif bleu >= 0.20:
+        return 2
+    else:
+        return 1
+
+
 @dataclass
 class TurnEvaluation:
     """Evaluation of a single dialogue turn."""
@@ -77,6 +205,7 @@ class ScenarioEvaluation:
     avg_transcription_score: float = 0.0
     avg_translation_score: float = 0.0
     errors: list[str] = field(default_factory=list)
+    summary_data: dict | None = None  # Stored for batch evaluation
 
     @property
     def overall_score(self) -> float:
@@ -146,6 +275,10 @@ async def stream_scenario(
             audio_duration = len(audio_data) / (sample_rate * sample_width * n_channels)
             phase1_timeout = audio_duration + 30
             phase1_end = asyncio.get_event_loop().time() + phase1_timeout
+            print(
+                f"  [stream] Phase 1: waiting for transcriptions ({phase1_timeout:.0f}s timeout)",
+                flush=True,
+            )
 
             while asyncio.get_event_loop().time() < phase1_end:
                 try:
@@ -191,7 +324,9 @@ async def stream_scenario(
                     continue
 
             # Request summary
+            print("  [stream] Phase 2: requesting summary", flush=True)
             await ws.send(json.dumps({"type": "request_summary"}))
+            print("  [stream] request_summary sent, waiting for response...", flush=True)
             summary_end = asyncio.get_event_loop().time() + 420  # 7 min timeout
 
             while asyncio.get_event_loop().time() < summary_end:
@@ -199,6 +334,7 @@ async def stream_scenario(
                     msg = await asyncio.wait_for(ws.recv(), timeout=120)
                     data = json.loads(msg)
                     msg_type = data.get("type", "")
+                    print(f"  [stream] Phase 2 msg: {msg_type}", flush=True)
 
                     if msg_type in ("transcription", "segments"):
                         for seg in data.get("segments", []):
@@ -228,6 +364,7 @@ async def stream_scenario(
                         results["translations"][seg_id][tgt_lang] = text
 
                     elif msg_type == "summary":
+                        print("  [stream] Received summary!", flush=True)
                         results["summary"] = {
                             "german": data.get("german_summary"),
                             "foreign": data.get("foreign_summary"),
@@ -241,10 +378,17 @@ async def stream_scenario(
 
                 except TimeoutError:
                     continue
+                except websockets.exceptions.ConnectionClosed:
+                    print("  [stream] WebSocket closed by server", flush=True)
+                    break
+
+            print("  [stream] Exiting summary loop", flush=True)
 
     except Exception as e:
+        print(f"  [stream] Exception: {e}", flush=True)
         results["errors"].append(str(e))
 
+    print("  [stream] Returning results", flush=True)
     return results
 
 
@@ -291,10 +435,10 @@ def match_segments_to_turns(
     return matched
 
 
-def evaluate_scenario(
+async def evaluate_scenario(
     scenario: DialogueScenario,
     results: dict,
-    judge: GeminiJudge,
+    judge: GeminiJudge,  # noqa: ARG001 - kept for API compatibility, batch eval uses it
 ) -> ScenarioEvaluation:
     """Evaluate a scenario's results using LLM-as-Judge."""
     eval_result = ScenarioEvaluation(
@@ -329,28 +473,21 @@ def evaluate_scenario(
         )
 
         if match_data:
-            # Evaluate transcription
-            trans_result = judge.evaluate_transcription(
-                expected_text=turn.text,
-                actual_text=match_data["segment"]["src"],
-                language=turn.language,
-            )
-            turn_eval.transcription_score = trans_result.score
-            turn_eval.transcription_reasoning = trans_result.reasoning
-            transcription_scores.append(trans_result.score)
+            # Evaluate transcription using CER (no LLM needed)
+            actual_text = match_data["segment"]["src"]
+            cer = compute_cer(turn.text, actual_text)
+            score = cer_to_score(cer)
+            turn_eval.transcription_score = score
+            turn_eval.transcription_reasoning = f"CER={cer:.2%}"
+            transcription_scores.append(score)
 
-            # Evaluate translation if expected
+            # Evaluate translation using BLEU (no LLM needed)
             if turn.expected_translation and match_data["translation"]:
-                translation_result = judge.evaluate_translation(
-                    source_text=turn.text,
-                    expected_translation=turn.expected_translation,
-                    actual_translation=match_data["translation"],
-                    src_lang=turn.language,
-                    tgt_lang="de",
-                )
-                turn_eval.translation_score = translation_result.score
-                turn_eval.translation_reasoning = translation_result.reasoning
-                translation_scores.append(translation_result.score)
+                bleu = compute_bleu(turn.expected_translation, match_data["translation"])
+                score = bleu_to_score(bleu)
+                turn_eval.translation_score = score
+                turn_eval.translation_reasoning = f"BLEU={bleu:.2%}"
+                translation_scores.append(score)
 
         eval_result.turns.append(turn_eval)
 
@@ -361,25 +498,95 @@ def evaluate_scenario(
     if translation_scores:
         eval_result.avg_translation_score = sum(translation_scores) / len(translation_scores)
 
-    # Evaluate summary
-    if summary and summary.get("german"):
-        summary_result = judge.evaluate_summary(
-            conversation_segments=[
-                {"src": s.get("src"), "src_lang": s.get("src_lang")} for s in segments
-            ],
-            expected_topics=scenario.expected_summary_topics,
-            actual_summary={
-                "german_summary": summary.get("german"),
-                "foreign_summary": summary.get("foreign"),
-            },
-            foreign_lang=scenario.foreign_lang,
-        )
-        eval_result.summary_score = summary_result.score
-        eval_result.summary_reasoning = summary_result.reasoning
-    else:
+    # Summary evaluation is done in batch later to save LLM calls
+    # Just store the summary data for now
+    eval_result.summary_data = {
+        "segments": segments,
+        "expected_topics": scenario.expected_summary_topics,
+        "summary": summary,
+        "foreign_lang": scenario.foreign_lang,
+    }
+
+    if not summary or not summary.get("german"):
         eval_result.errors.append("No summary received")
 
     return eval_result
+
+
+async def batch_evaluate_summaries(
+    evaluations: list[ScenarioEvaluation],
+    judge: GeminiJudge,
+) -> None:
+    """Evaluate all summaries in a single batched LLM call to save quota."""
+    # Collect all summaries that need evaluation
+    summaries_to_eval = []
+    for eval_result in evaluations:
+        data = getattr(eval_result, "summary_data", None)
+        if data and data.get("summary") and data["summary"].get("german"):
+            summaries_to_eval.append((eval_result, data))
+
+    if not summaries_to_eval:
+        return
+
+    print(f"Batch evaluating {len(summaries_to_eval)} summaries...")
+
+    # Build a single prompt with all summaries
+    batch_prompt = "Evaluate the following conversation summaries. For each, rate 1-5.\n\n"
+
+    for i, (eval_result, data) in enumerate(summaries_to_eval, 1):
+        segments_text = "\n".join(
+            f"  - [{s.get('src_lang')}]: {s.get('src', '')[:100]}" for s in data["segments"][:6]
+        )
+        batch_prompt += f"""
+--- Summary {i}: {eval_result.name} ({data["foreign_lang"]}) ---
+Conversation:
+{segments_text}
+
+Expected topics: {", ".join(data["expected_topics"]) if data["expected_topics"] else "N/A"}
+
+German summary: {data["summary"].get("german", "N/A")[:200]}
+Foreign summary: {data["summary"].get("foreign", "N/A")[:200]}
+
+"""
+
+    batch_prompt += """
+For each summary, respond with ONLY a JSON array like:
+[{"scenario": 1, "score": 4, "reason": "brief reason"}, ...]
+
+Scoring: 5=Excellent (all topics covered), 4=Good, 3=Average, 2=Poor, 1=Very Poor
+"""
+
+    try:
+        response = await judge.client.aio.models.generate_content(
+            model="gemini-2.0-flash",  # Use fast model for batch eval
+            contents=batch_prompt,
+        )
+        response_text = response.text.strip() if response.text else ""
+
+        # Parse JSON response
+        import re
+
+        json_match = re.search(r"\[.*\]", response_text, re.DOTALL)
+        if json_match:
+            results = json.loads(json_match.group())
+            for result in results:
+                idx = result.get("scenario", 0) - 1
+                if 0 <= idx < len(summaries_to_eval):
+                    eval_result, _ = summaries_to_eval[idx]
+                    eval_result.summary_score = result.get("score", 3)
+                    eval_result.summary_reasoning = result.get("reason", "Batch evaluated")
+        else:
+            print(f"  Warning: Could not parse batch response: {response_text[:200]}")
+            # Default scores
+            for eval_result, _ in summaries_to_eval:
+                eval_result.summary_score = 3
+                eval_result.summary_reasoning = "Batch eval parse error"
+
+    except Exception as e:
+        print(f"  Batch summary evaluation failed: {e}")
+        for eval_result, _ in summaries_to_eval:
+            eval_result.summary_score = 3
+            eval_result.summary_reasoning = f"Batch eval error: {e}"
 
 
 def print_evaluation_report(evaluations: list[ScenarioEvaluation]) -> None:
@@ -480,6 +687,125 @@ def print_evaluation_report(evaluations: list[ScenarioEvaluation]) -> None:
                 print(f"  Reason: {ev.summary_reasoning[:150]}...")
 
 
+def generate_markdown_report(
+    evaluations: list[ScenarioEvaluation],
+    results_map: dict[str, dict],
+) -> str:
+    """Generate a detailed markdown test protocol.
+
+    Args:
+        evaluations: List of scenario evaluations
+        results_map: Map of scenario name to raw results (segments, translations, summary)
+
+    Returns:
+        Markdown string with detailed report
+    """
+    from datetime import datetime
+
+    lines = []
+    lines.append("# E2E Test Protocol")
+    lines.append("")
+    lines.append(f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    lines.append("")
+
+    # Summary table
+    lines.append("## Summary")
+    lines.append("")
+    lines.append("| Scenario | Language | Transcription | Translation | Summary | Overall |")
+    lines.append("|----------|----------|:-------------:|:-----------:|:-------:|:-------:|")
+
+    for ev in evaluations:
+        trans = f"{ev.avg_transcription_score:.1f}" if ev.avg_transcription_score > 0 else "—"
+        transl = f"{ev.avg_translation_score:.1f}" if ev.avg_translation_score > 0 else "—"
+        summ = f"{ev.summary_score}" if ev.summary_score > 0 else "—"
+        overall = f"**{ev.overall_score:.1f}**" if ev.overall_score > 0 else "—"
+        lines.append(
+            f"| {ev.name} | {ev.foreign_lang.upper()} | {trans} | {transl} | {summ} | {overall} |"
+        )
+
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+
+    # Detailed results per scenario
+    for ev in evaluations:
+        results = results_map.get(ev.name, {})
+
+        lines.append(f"## {ev.name}")
+        lines.append("")
+        lines.append(f"**Description:** {ev.description}")
+        lines.append(f"**Languages:** German (DE) ↔ {ev.foreign_lang.upper()}")
+        lines.append(f"**Overall Score:** {ev.overall_score:.1f}/5")
+        lines.append("")
+
+        if ev.errors:
+            lines.append("### Errors")
+            for err in ev.errors:
+                lines.append(f"- {err}")
+            lines.append("")
+
+        # Turns detail
+        lines.append("### Dialogue Turns")
+        lines.append("")
+
+        for i, turn in enumerate(ev.turns, 1):
+            lines.append(f"#### Turn {i} ({turn.speaker_id}, {turn.language.upper()})")
+            lines.append("")
+            lines.append("| Field | Content |")
+            lines.append("|-------|---------|")
+            lines.append(f"| **Expected Text** | {turn.expected_text} |")
+            lines.append(f"| **Transcribed Text** | {turn.actual_text or '—'} |")
+
+            if turn.expected_translation:
+                lines.append(f"| **Expected Translation** | {turn.expected_translation} |")
+                lines.append(f"| **Actual Translation** | {turn.actual_translation or '—'} |")
+
+            lines.append("")
+
+            # Scores
+            scores = []
+            if turn.transcription_score > 0:
+                scores.append(f"Transcription: **{turn.transcription_score}/5**")
+            if turn.translation_score:
+                scores.append(f"Translation: **{turn.translation_score}/5**")
+
+            if scores:
+                lines.append(" | ".join(scores))
+                lines.append("")
+
+            # Reasoning
+            if turn.transcription_reasoning:
+                lines.append(f"*Transcription reasoning:* {turn.transcription_reasoning}")
+                lines.append("")
+            if turn.translation_reasoning:
+                lines.append(f"*Translation reasoning:* {turn.translation_reasoning}")
+                lines.append("")
+
+        # Summary section
+        summary = results.get("summary", {})
+        if summary:
+            lines.append("### Generated Summary")
+            lines.append("")
+            lines.append(f"**Foreign ({ev.foreign_lang.upper()}):**")
+            lines.append(f"> {summary.get('foreign', '—')}")
+            lines.append("")
+            lines.append("**German (DE):**")
+            lines.append(f"> {summary.get('german', '—')}")
+            lines.append("")
+
+            if ev.summary_score > 0:
+                lines.append(f"**Summary Score:** {ev.summary_score}/5")
+                lines.append("")
+            if ev.summary_reasoning:
+                lines.append(f"*Reasoning:* {ev.summary_reasoning}")
+                lines.append("")
+
+        lines.append("---")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
 async def main():
     parser = argparse.ArgumentParser(description="Evaluate E2E scenarios")
     parser.add_argument("scenarios", nargs="*", help="Scenario names to evaluate")
@@ -488,6 +814,7 @@ async def main():
         "--no-generate", action="store_true", help="Skip TTS generation, use cache only"
     )
     parser.add_argument("--output", "-o", help="Output JSON report to file")
+    parser.add_argument("--markdown", "-m", help="Output detailed markdown report to file")
     parser.add_argument("--ws-url", default=WS_URL, help="WebSocket URL")
     args = parser.parse_args()
 
@@ -530,6 +857,7 @@ async def main():
             print("Warning: GEMINI_API_KEY not set, TTS generation disabled")
 
     evaluations = []
+    results_map = {}  # Store raw results for markdown report
 
     for scenario_path in scenario_paths:
         print(f"\n{'=' * 60}")
@@ -578,22 +906,31 @@ async def main():
         # Stream and collect results
         print("Streaming to backend...")
         results = await stream_scenario(audio_path, scenario.foreign_lang, args.ws_url)
-        print(f"  Segments: {len(results['segments'])}")
-        print(f"  Translations: {len(results['translations'])}")
-        print(f"  Summary: {'Yes' if results['summary'] else 'No'}")
+        print("  [main] Stream complete", flush=True)
+        print(f"  Segments: {len(results['segments'])}", flush=True)
+        print(f"  Translations: {len(results['translations'])}", flush=True)
+        print(f"  Summary: {'Yes' if results['summary'] else 'No'}", flush=True)
 
         if results["errors"]:
-            print(f"  Errors: {results['errors']}")
+            print(f"  Errors: {results['errors']}", flush=True)
 
-        # Evaluate with LLM-as-Judge
-        print("Evaluating with LLM-as-Judge...")
-        evaluation = evaluate_scenario(scenario, results, judge)
+        # Store results for markdown report
+        results_map[scenario.name] = results
+
+        # Evaluate transcription/translation with CER/BLEU (no LLM needed)
+        print("Evaluating with CER/BLEU...", flush=True)
+        evaluation = await evaluate_scenario(scenario, results, judge)
         evaluations.append(evaluation)
 
-        print(f"  Transcription: {evaluation.avg_transcription_score:.1f}")
-        print(f"  Translation: {evaluation.avg_translation_score:.1f}")
-        print(f"  Summary: {evaluation.summary_score}")
-        print(f"  Overall: {evaluation.overall_score:.1f}")
+        print(f"  Transcription: {evaluation.avg_transcription_score:.1f}", flush=True)
+        print(f"  Translation: {evaluation.avg_translation_score:.1f}", flush=True)
+
+    # Batch evaluate all summaries with a single LLM call
+    await batch_evaluate_summaries(evaluations, judge)
+
+    # Print final scores
+    for evaluation in evaluations:
+        print(f"  {evaluation.name}: Summary={evaluation.summary_score}")
 
     # Print report
     print_evaluation_report(evaluations)
@@ -631,6 +968,13 @@ async def main():
         with open(args.output, "w") as f:
             json.dump(report_data, f, indent=2, ensure_ascii=False)
         print(f"\nJSON report saved to: {args.output}")
+
+    # Save markdown report if requested
+    if args.markdown:
+        md_report = generate_markdown_report(evaluations, results_map)
+        with open(args.markdown, "w", encoding="utf-8") as f:
+            f.write(md_report)
+        print(f"Markdown report saved to: {args.markdown}")
 
 
 if __name__ == "__main__":

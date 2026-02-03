@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from tests.e2e.evaluation.rubrics import get_rubric
 
 # Gemini model for evaluation
-JUDGE_MODEL = "gemini-2.0-flash"
+JUDGE_MODEL = "gemini-3-pro-preview"
 
 
 @dataclass
@@ -73,10 +73,15 @@ class GeminiJudge:
             raise ValueError("GEMINI_API_KEY environment variable not set")
 
         from google import genai
+        from google.genai import types
 
-        self.client = genai.Client(api_key=self.api_key)
+        # Set explicit timeout to avoid hanging (known SDK issue)
+        self.client = genai.Client(
+            api_key=self.api_key,
+            http_options=types.HttpOptions(timeout=120_000),  # 120s timeout
+        )
 
-    def evaluate_transcription(
+    async def evaluate_transcription(
         self,
         expected_text: str,
         actual_text: str,
@@ -104,9 +109,9 @@ Language: {language}
 {actual_text}
 ```
 """
-        return self._evaluate("transcription", context)
+        return await self._evaluate("transcription", context)
 
-    def evaluate_translation(
+    async def evaluate_translation(
         self,
         source_text: str,
         expected_translation: str,
@@ -144,9 +149,9 @@ Language: {tgt_lang}
 {actual_translation}
 ```
 """
-        return self._evaluate("translation", context)
+        return await self._evaluate("translation", context)
 
-    def evaluate_summary(
+    async def evaluate_summary(
         self,
         conversation_segments: list[dict],
         expected_topics: list[str],
@@ -189,9 +194,9 @@ Foreign ({foreign_lang}):
 {actual_summary.get("foreign_summary", "N/A")}
 ```
 """
-        return self._evaluate("summary", context)
+        return await self._evaluate("summary", context)
 
-    def evaluate_language_detection(
+    async def evaluate_language_detection(
         self,
         expected_segments: list[dict],
         actual_segments: list[dict],
@@ -220,9 +225,9 @@ Foreign ({foreign_lang}):
 ## Actual Language Labels (from system)
 {chr(10).join(actual_langs)}
 """
-        return self._evaluate("language_detection", context)
+        return await self._evaluate("language_detection", context)
 
-    def evaluate_speaker_diarization(
+    async def evaluate_speaker_diarization(
         self,
         expected_speakers: list[str],
         actual_speakers: list[str],
@@ -247,9 +252,9 @@ Speaker sequence: {expected_speakers}
 Speakers detected: {len(set(actual_speakers))}
 Speaker sequence: {actual_speakers}
 """
-        return self._evaluate("speaker_diarization", context)
+        return await self._evaluate("speaker_diarization", context)
 
-    def _evaluate(self, eval_type: str, context: str) -> EvaluationResult:
+    async def _evaluate(self, eval_type: str, context: str) -> EvaluationResult:
         """Run evaluation with the judge.
 
         Args:
@@ -266,7 +271,7 @@ Speaker sequence: {actual_speakers}
             context=context,
         )
 
-        response = self.client.models.generate_content(
+        response = await self.client.aio.models.generate_content(
             model=JUDGE_MODEL,
             contents=prompt,
         )
