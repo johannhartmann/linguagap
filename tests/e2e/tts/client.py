@@ -56,9 +56,9 @@ class GeminiTTSClient:
         # Build voices dict
         voices = {speaker_id: get_voice_for_speaker(speaker_id) for speaker_id in scenario.speakers}
 
-        # Use multi-speaker synthesis with pause markers for better diarization
+        # Use multi-speaker synthesis with SSML break tags for diarization
         pause_sec = 0.7  # Natural conversational pause
-        synthesis_method = f"multi_pause_{pause_sec}s"
+        synthesis_method = f"multi_ssml_break_{pause_sec}s"
         cache_key = compute_cache_key(scenario.to_yaml(), voices, synthesis_method)
 
         # Check cache
@@ -87,7 +87,7 @@ class GeminiTTSClient:
     ) -> str:
         """Build multi-speaker prompt with pauses between turns.
 
-        Uses Gemini's multi-speaker format with SSML-style pause tags
+        Uses Gemini's multi-speaker format with SSML break tags
         to ensure proper silence gaps for VAD/diarization.
 
         Args:
@@ -98,15 +98,16 @@ class GeminiTTSClient:
                 - 0.5-0.8s: Natural conversational pause range
 
         Returns:
-            Formatted prompt for multi-speaker TTS with pause markers
+            Formatted prompt for multi-speaker TTS with SSML break tags
         """
         lines = []
         for i, turn in enumerate(scenario.turns):
             speaker_name = scenario.speakers.get(turn.speaker_id, turn.speaker_id)
-            lines.append(f"{speaker_name}: {turn.text}")
-            # Add pause after each turn except the last
+            # Add SSML break tag after text for pause (except last turn)
             if i < len(scenario.turns) - 1:
-                lines.append(f"[PAUSE={pause_between_turns}s]")
+                lines.append(f'{speaker_name}: {turn.text} <break time="{pause_between_turns}s"/>')
+            else:
+                lines.append(f"{speaker_name}: {turn.text}")
         return "\n".join(lines)
 
     def _concatenate_with_silence(

@@ -10,11 +10,22 @@ Usage:
 
 import os
 import re
+import socket
 import sys
 import time
 from pathlib import Path
 
-from dotenv import load_dotenv
+# Force IPv4 to avoid IPv6 connectivity issues with Google APIs
+_original_getaddrinfo = socket.getaddrinfo
+
+
+def _ipv4_only_getaddrinfo(host, port, _family=0, type=0, proto=0, flags=0):  # noqa: A002
+    return _original_getaddrinfo(host, port, socket.AF_INET, type, proto, flags)
+
+
+socket.getaddrinfo = _ipv4_only_getaddrinfo
+
+from dotenv import load_dotenv  # noqa: E402
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -29,9 +40,9 @@ from tests.e2e.tts.client import GeminiTTSClient  # noqa: E402
 SCENARIOS_DIR = Path(__file__).parent.parent.parent / "fixtures" / "scenarios"
 AUDIO_DIR = Path(__file__).parent.parent.parent / "fixtures" / "e2e_audio"
 
-# Rate limiting: Gemini TTS free tier allows 3 requests/minute
-REQUESTS_PER_MINUTE = 3
-DELAY_BETWEEN_REQUESTS = 60 / REQUESTS_PER_MINUTE + 1  # ~21 seconds
+# Rate limiting: Paid tier has much higher limits, use minimal delay
+REQUESTS_PER_MINUTE = 60  # Paid tier allows many more
+DELAY_BETWEEN_REQUESTS = 1  # 1 second between requests
 
 
 def extract_retry_delay(error_msg: str) -> int:
@@ -85,8 +96,10 @@ def main():
             from tests.e2e.tts.cache import compute_cache_key, get_cached_audio
             from tests.e2e.tts.voices import get_voice_for_speaker
 
+            # Must match synthesis_method used in GeminiTTSClient.synthesize_dialogue
+            synthesis_method = "multi_ssml_break_0.7s"
             voices = {sid: get_voice_for_speaker(sid) for sid in scenario.speakers}
-            cache_key = compute_cache_key(scenario.to_yaml(), voices)
+            cache_key = compute_cache_key(scenario.to_yaml(), voices, synthesis_method)
             existing = get_cached_audio(cache_key)
 
             if existing:
@@ -132,7 +145,9 @@ def main():
                     next_voices = {
                         sid: get_voice_for_speaker(sid) for sid in next_scenario.speakers
                     }
-                    next_key = compute_cache_key(next_scenario.to_yaml(), next_voices)
+                    next_key = compute_cache_key(
+                        next_scenario.to_yaml(), next_voices, synthesis_method
+                    )
                     if not get_cached_audio(next_key):
                         # Next file needs API call, apply rate limit
                         print(
