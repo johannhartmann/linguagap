@@ -40,14 +40,20 @@ class GeminiTTSClient:
         self,
         scenario: DialogueScenario,
         use_cache: bool = True,
+        inter_turn_silence_sec: float = 0.7,
     ) -> Path:
-        """Synthesize audio for an entire dialogue.
+        """Synthesize audio for an entire dialogue with natural breaks.
 
-        Uses Gemini's multi-speaker TTS to generate natural dialogue audio.
+        Uses per-turn synthesis with silence gaps between turns to ensure
+        proper VAD/diarization separation.
 
         Args:
             scenario: DialogueScenario containing all turns
             use_cache: Whether to use cached audio if available
+            inter_turn_silence_sec: Silence duration between turns (default 0.7s)
+                - > 0.3s: VAD detects speech boundary
+                - > 0.5s: Pre-ASR won't merge same-speaker segments
+                - 0.5-0.8s: Natural conversational pause range
 
         Returns:
             Path to the generated WAV file (16kHz mono)
@@ -55,33 +61,80 @@ class GeminiTTSClient:
         # Build voices dict
         voices = {speaker_id: get_voice_for_speaker(speaker_id) for speaker_id in scenario.speakers}
 
+        # Include synthesis method in cache key for differentiation
+        synthesis_method = f"per_turn_{inter_turn_silence_sec}s"
+        cache_key = compute_cache_key(scenario.to_yaml(), voices, synthesis_method)
+
         # Check cache
         if use_cache:
-            cache_key = compute_cache_key(scenario.to_yaml(), voices)
             cached = get_cached_audio(cache_key)
             if cached:
                 print(f"Using cached audio: {cached}")
                 return cached
-        else:
-            cache_key = compute_cache_key(scenario.to_yaml(), voices)
 
-        # Build multi-speaker prompt
-        # Format: "Speaker: text" for each turn
-        prompt_parts = []
-        for turn in scenario.turns:
-            # Use speaker name from scenario
-            speaker_name = scenario.speakers.get(turn.speaker_id, turn.speaker_id)
-            prompt_parts.append(f"{speaker_name}: {turn.text}")
+        # Synthesize each turn separately
+        audio_parts = []
+        for i, turn in enumerate(scenario.turns):
+            print(f"  Synthesizing turn {i + 1}/{len(scenario.turns)}: {turn.text[:40]}...")
+            turn_audio = self.synthesize_turn(turn)
+            audio_parts.append(turn_audio)
 
-        prompt = "\n".join(prompt_parts)
-
-        # Generate audio with multi-speaker config
-        audio_data = self._generate_audio(prompt, voices, scenario.speakers)
+        # Concatenate with natural silence gaps
+        combined = self._concatenate_with_silence(audio_parts, inter_turn_silence_sec)
 
         # Save to cache
-        cache_path = save_to_cache(cache_key, audio_data)
+        cache_path = save_to_cache(cache_key, combined)
         print(f"Saved audio to cache: {cache_path}")
         return cache_path
+
+    def _concatenate_with_silence(
+        self,
+        wav_parts: list[bytes],
+        silence_sec: float,
+        sample_rate: int = 16000,
+    ) -> bytes:
+        """Concatenate WAV audio parts with silence gaps between turns.
+
+        Args:
+            wav_parts: List of WAV audio bytes for each turn
+            silence_sec: Silence duration between turns in seconds
+            sample_rate: Target sample rate (default 16kHz)
+
+        Returns:
+            Combined WAV audio bytes
+        """
+        # Generate silence (16-bit PCM, mono)
+        silence_samples = int(silence_sec * sample_rate)
+        silence_pcm = b"\x00\x00" * silence_samples
+
+        # Extract PCM from each WAV and concatenate
+        all_pcm = []
+        for i, wav_bytes in enumerate(wav_parts):
+            buffer = io.BytesIO(wav_bytes)
+            with wave.open(buffer, "rb") as wav:
+                pcm = wav.readframes(wav.getnframes())
+                wav_rate = wav.getframerate()
+
+            # Resample if needed
+            if wav_rate != sample_rate:
+                pcm = self._resample_pcm(pcm, wav_rate, sample_rate)
+
+            all_pcm.append(pcm)
+
+            # Add silence after each turn (except the last)
+            if i < len(wav_parts) - 1:
+                all_pcm.append(silence_pcm)
+
+        # Create output WAV
+        combined_pcm = b"".join(all_pcm)
+        out_buffer = io.BytesIO()
+        with wave.open(out_buffer, "wb") as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(sample_rate)
+            wav.writeframes(combined_pcm)
+
+        return out_buffer.getvalue()
 
     def synthesize_turn(
         self,

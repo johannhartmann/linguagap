@@ -23,19 +23,21 @@ def get_cache_dir() -> Path:
 def compute_cache_key(
     dialogue_yaml: str,
     voices: dict[str, str],
+    synthesis_method: str = "multi",
 ) -> str:
     """Compute cache key for a dialogue.
 
     Args:
         dialogue_yaml: YAML string of the dialogue scenario
         voices: Dict mapping speaker IDs to voice names
+        synthesis_method: Synthesis method identifier (e.g., "multi", "per_turn_0.7s")
 
     Returns:
-        SHA256 hash string
+        SHA256 hash string (first 16 chars)
     """
     # Create a stable string representation
     voices_str = ",".join(f"{k}={v}" for k, v in sorted(voices.items()))
-    content = f"{dialogue_yaml}|{voices_str}"
+    content = f"{dialogue_yaml}|{voices_str}|{synthesis_method}"
     return hashlib.sha256(content.encode()).hexdigest()[:16]
 
 
