@@ -40,6 +40,7 @@ from fastapi import WebSocket
 from app.asr import get_model
 from app.lang_id import SpeakerLanguageTracker, detect_language_from_audio
 from app.mt import (
+    LANG_INFO,
     summarize_bilingual,
     translate_texts,
 )
@@ -638,8 +639,8 @@ def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
         speaker_languages[speaker_id] = (lang, confidence)
         print(f"  {speaker_id} → {lang} (confidence={confidence:.2f})")
 
-        # Update foreign language tracking
-        if lang not in ("unknown", "de") and session.foreign_lang is None:
+        # Update foreign language tracking - only set if it's a supported language
+        if lang not in ("unknown", "de") and lang in LANG_INFO and session.foreign_lang is None:
             session.foreign_lang = lang
             print(f"Foreign language detected: {lang}")
 
@@ -786,7 +787,11 @@ def _run_asr_fallback(
         speechbrain_lang, confidence = detect_language_from_audio(segment_audio, 16000)
         segment_lang = speechbrain_lang if speechbrain_lang != "unknown" else info.language
 
-        if segment_lang not in ("unknown", "de") and session.foreign_lang is None:
+        if (
+            segment_lang not in ("unknown", "de")
+            and segment_lang in LANG_INFO
+            and session.foreign_lang is None
+        ):
             session.foreign_lang = segment_lang
             print(f"Foreign language detected: {segment_lang}")
 
@@ -923,9 +928,12 @@ async def handle_websocket(websocket: WebSocket):
                         if session.foreign_lang is None and session.detected_lang:
                             if session.src_lang != "auto":
                                 # User explicitly selected a foreign language
-                                if session.src_lang != "de":
+                                if session.src_lang != "de" and session.src_lang in LANG_INFO:
                                     session.foreign_lang = session.src_lang
-                            elif session.detected_lang not in ("de", "unknown", None):
+                            elif (
+                                session.detected_lang not in ("de", "unknown", None)
+                                and session.detected_lang in LANG_INFO
+                            ):
                                 # Auto-detect: first non-German speech sets the foreign language
                                 session.foreign_lang = session.detected_lang
                                 print(f"Auto-detected foreign language: {session.foreign_lang}")
@@ -1002,9 +1010,18 @@ async def handle_websocket(websocket: WebSocket):
                     # Determine translation direction: German → foreign, foreign → German
                     # Default to English if foreign language not yet detected or invalid
                     foreign = session.foreign_lang
-                    if not foreign or foreign == "unknown":
+                    if not foreign or foreign == "unknown" or foreign not in LANG_INFO:
                         foreign = "en"
                     tgt_lang = foreign if seg_src_lang == "de" else "de"
+
+                    # Skip translation if source language is unsupported
+                    if seg_src_lang not in LANG_INFO:
+                        print(
+                            f"Skipping translation for segment {segment.id}: "
+                            f"unsupported source language '{seg_src_lang}'"
+                        )
+                        translation_queue.task_done()
+                        continue
 
                     print(
                         f"Translating segment {segment.id} ({seg_src_lang}→{tgt_lang}): {segment.src[:50]}"
