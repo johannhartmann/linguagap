@@ -186,10 +186,12 @@ class TurnEvaluation:
     actual_text: str | None
     transcription_score: int = 0
     transcription_reasoning: str = ""
+    cer_value: float | None = None  # Raw CER value for debugging
     expected_translation: str | None = None
     actual_translation: str | None = None
     translation_score: int | None = None
     translation_reasoning: str | None = None
+    bleu_value: float | None = None  # Raw BLEU value for debugging
 
 
 @dataclass
@@ -478,6 +480,7 @@ async def evaluate_scenario(
             cer = compute_cer(turn.text, actual_text)
             score = cer_to_score(cer)
             turn_eval.transcription_score = score
+            turn_eval.cer_value = cer
             turn_eval.transcription_reasoning = f"CER={cer:.2%}"
             transcription_scores.append(score)
 
@@ -486,6 +489,7 @@ async def evaluate_scenario(
                 bleu = compute_bleu(turn.expected_translation, match_data["translation"])
                 score = bleu_to_score(bleu)
                 turn_eval.translation_score = score
+                turn_eval.bleu_value = bleu
                 turn_eval.translation_reasoning = f"BLEU={bleu:.2%}"
                 translation_scores.append(score)
 
@@ -691,25 +695,44 @@ def generate_markdown_report(
     evaluations: list[ScenarioEvaluation],
     results_map: dict[str, dict],
 ) -> str:
-    """Generate a detailed markdown test protocol.
+    """Generate a detailed markdown test protocol for debugging.
 
     Args:
         evaluations: List of scenario evaluations
         results_map: Map of scenario name to raw results (segments, translations, summary)
 
     Returns:
-        Markdown string with detailed report
+        Markdown string with detailed report including CER/BLEU metrics
     """
     from datetime import datetime
 
     lines = []
-    lines.append("# E2E Test Protocol")
+    lines.append("# E2E Test Protocol - Debug Report")
     lines.append("")
     lines.append(f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    lines.append(f"**Scenarios:** {len(evaluations)}")
     lines.append("")
 
+    # Calculate overall stats
+    valid_evals = [e for e in evaluations if e.overall_score > 0]
+    if valid_evals:
+        avg_trans = sum(e.avg_transcription_score for e in valid_evals) / len(valid_evals)
+        trans_with_transl = [e for e in valid_evals if e.avg_translation_score > 0]
+        avg_transl = (
+            sum(e.avg_translation_score for e in trans_with_transl) / len(trans_with_transl)
+            if trans_with_transl
+            else 0
+        )
+        avg_summ = sum(e.summary_score for e in valid_evals) / len(valid_evals)
+        lines.append("## Overall Statistics")
+        lines.append("")
+        lines.append(f"- **Average Transcription Score:** {avg_trans:.2f}/5")
+        lines.append(f"- **Average Translation Score:** {avg_transl:.2f}/5")
+        lines.append(f"- **Average Summary Score:** {avg_summ:.2f}/5")
+        lines.append("")
+
     # Summary table
-    lines.append("## Summary")
+    lines.append("## Summary Table")
     lines.append("")
     lines.append("| Scenario | Language | Transcription | Translation | Summary | Overall |")
     lines.append("|----------|----------|:-------------:|:-----------:|:-------:|:-------:|")
@@ -719,10 +742,23 @@ def generate_markdown_report(
         transl = f"{ev.avg_translation_score:.1f}" if ev.avg_translation_score > 0 else "—"
         summ = f"{ev.summary_score}" if ev.summary_score > 0 else "—"
         overall = f"**{ev.overall_score:.1f}**" if ev.overall_score > 0 else "—"
+
+        # Status emoji
+        if ev.overall_score >= 4:
+            status = "✅"
+        elif ev.overall_score >= 3:
+            status = "⚠️"
+        elif ev.overall_score > 0:
+            status = "❌"
+        else:
+            status = "💥"
+
         lines.append(
-            f"| {ev.name} | {ev.foreign_lang.upper()} | {trans} | {transl} | {summ} | {overall} |"
+            f"| {status} {ev.name} | {ev.foreign_lang.upper()} | {trans} | {transl} | {summ} | {overall} |"
         )
 
+    lines.append("")
+    lines.append("Legend: ✅ Good (≥4) | ⚠️ Average (≥3) | ❌ Poor (<3) | 💥 Error")
     lines.append("")
     lines.append("---")
     lines.append("")
@@ -739,9 +775,10 @@ def generate_markdown_report(
         lines.append("")
 
         if ev.errors:
-            lines.append("### Errors")
+            lines.append("### ⚠️ Errors")
+            lines.append("")
             for err in ev.errors:
-                lines.append(f"- {err}")
+                lines.append(f"- `{err}`")
             lines.append("")
 
         # Turns detail
@@ -749,56 +786,88 @@ def generate_markdown_report(
         lines.append("")
 
         for i, turn in enumerate(ev.turns, 1):
-            lines.append(f"#### Turn {i} ({turn.speaker_id}, {turn.language.upper()})")
+            # Status indicator for turn
+            turn_status = (
+                "✅"
+                if turn.transcription_score >= 4
+                else ("⚠️" if turn.transcription_score >= 3 else "❌")
+            )
+
+            lines.append(
+                f"#### {turn_status} Turn {i} — {turn.speaker_id} ({turn.language.upper()})"
+            )
             lines.append("")
-            lines.append("| Field | Content |")
-            lines.append("|-------|---------|")
-            lines.append(f"| **Expected Text** | {turn.expected_text} |")
-            lines.append(f"| **Transcribed Text** | {turn.actual_text or '—'} |")
 
-            if turn.expected_translation:
-                lines.append(f"| **Expected Translation** | {turn.expected_translation} |")
-                lines.append(f"| **Actual Translation** | {turn.actual_translation or '—'} |")
-
+            # Transcription comparison
+            lines.append("**Transcription:**")
+            lines.append("")
+            lines.append("| | Text |")
+            lines.append("|---|------|")
+            lines.append(f"| **Expected** | {turn.expected_text} |")
+            lines.append(f"| **Actual** | {turn.actual_text or '*(no transcription)*'} |")
             lines.append("")
 
-            # Scores
-            scores = []
+            # Transcription metrics
             if turn.transcription_score > 0:
-                scores.append(f"Transcription: **{turn.transcription_score}/5**")
-            if turn.translation_score:
-                scores.append(f"Translation: **{turn.translation_score}/5**")
-
-            if scores:
-                lines.append(" | ".join(scores))
+                cer_display = f"{turn.cer_value:.2%}" if turn.cer_value is not None else "N/A"
+                lines.append(
+                    f"📊 **Transcription Score:** {turn.transcription_score}/5 (CER: {cer_display})"
+                )
                 lines.append("")
 
-            # Reasoning
-            if turn.transcription_reasoning:
-                lines.append(f"*Transcription reasoning:* {turn.transcription_reasoning}")
+            # Translation comparison (if applicable)
+            if turn.expected_translation:
+                lines.append("**Translation:**")
                 lines.append("")
-            if turn.translation_reasoning:
-                lines.append(f"*Translation reasoning:* {turn.translation_reasoning}")
+                lines.append("| | Text |")
+                lines.append("|---|------|")
+                lines.append(f"| **Expected** | {turn.expected_translation} |")
+                lines.append(f"| **Actual** | {turn.actual_translation or '*(no translation)*'} |")
                 lines.append("")
+
+                # Translation metrics
+                if turn.translation_score:
+                    bleu_display = (
+                        f"{turn.bleu_value:.2%}" if turn.bleu_value is not None else "N/A"
+                    )
+                    lines.append(
+                        f"📊 **Translation Score:** {turn.translation_score}/5 (BLEU: {bleu_display})"
+                    )
+                    lines.append("")
+
+            lines.append("")
 
         # Summary section
+        lines.append("### Summary Evaluation")
+        lines.append("")
+
         summary = results.get("summary", {})
         if summary:
-            lines.append("### Generated Summary")
+            lines.append("**Generated Summaries:**")
             lines.append("")
-            lines.append(f"**Foreign ({ev.foreign_lang.upper()}):**")
-            lines.append(f"> {summary.get('foreign', '—')}")
+            lines.append(f"**{ev.foreign_lang.upper()} (Foreign):**")
             lines.append("")
-            lines.append("**German (DE):**")
-            lines.append(f"> {summary.get('german', '—')}")
+            lines.append(f"> {summary.get('foreign', '*(no summary)*')}")
+            lines.append("")
+            lines.append("**DE (German):**")
+            lines.append("")
+            lines.append(f"> {summary.get('german', '*(no summary)*')}")
+            lines.append("")
+        else:
+            lines.append("*No summary generated*")
             lines.append("")
 
-            if ev.summary_score > 0:
-                lines.append(f"**Summary Score:** {ev.summary_score}/5")
-                lines.append("")
-            if ev.summary_reasoning:
-                lines.append(f"*Reasoning:* {ev.summary_reasoning}")
-                lines.append("")
+        # Summary score and reasoning
+        if ev.summary_score > 0:
+            summ_status = (
+                "✅" if ev.summary_score >= 4 else ("⚠️" if ev.summary_score >= 3 else "❌")
+            )
+            lines.append(f"📊 {summ_status} **Summary Score:** {ev.summary_score}/5")
+            lines.append("")
+
+        if ev.summary_reasoning:
+            lines.append(f"**Reasoning:** {ev.summary_reasoning}")
+            lines.append("")
 
         lines.append("---")
         lines.append("")
@@ -946,8 +1015,10 @@ async def main():
                     "avg_transcription_score": e.avg_transcription_score,
                     "avg_translation_score": e.avg_translation_score,
                     "summary_score": e.summary_score,
+                    "summary_reasoning": e.summary_reasoning,
                     "overall_score": e.overall_score,
                     "errors": e.errors,
+                    "summary": results_map.get(e.name, {}).get("summary"),
                     "turns": [
                         {
                             "speaker_id": t.speaker_id,
@@ -955,9 +1026,11 @@ async def main():
                             "expected_text": t.expected_text,
                             "actual_text": t.actual_text,
                             "transcription_score": t.transcription_score,
+                            "cer": t.cer_value,
                             "expected_translation": t.expected_translation,
                             "actual_translation": t.actual_translation,
                             "translation_score": t.translation_score,
+                            "bleu": t.bleu_value,
                         }
                         for t in e.turns
                     ],
