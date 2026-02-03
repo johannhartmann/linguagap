@@ -56,9 +56,10 @@ class GeminiTTSClient:
         # Build voices dict
         voices = {speaker_id: get_voice_for_speaker(speaker_id) for speaker_id in scenario.speakers}
 
-        # Use multi-speaker synthesis for better voice distinction
-        # Use default cache key (synthesis_method="multi") for compatibility
-        cache_key = compute_cache_key(scenario.to_yaml(), voices)
+        # Use multi-speaker synthesis with pause markers for better diarization
+        pause_sec = 0.7  # Natural conversational pause
+        synthesis_method = f"multi_pause_{pause_sec}s"
+        cache_key = compute_cache_key(scenario.to_yaml(), voices, synthesis_method)
 
         # Check cache
         if use_cache:
@@ -67,9 +68,9 @@ class GeminiTTSClient:
                 print(f"Using cached audio: {cached}")
                 return cached
 
-        # Build multi-speaker prompt with pause hints
-        prompt = self._build_dialogue_prompt(scenario)
-        print(f"  Synthesizing dialogue with {len(scenario.turns)} turns...")
+        # Build multi-speaker prompt with pause markers between turns
+        prompt = self._build_dialogue_prompt(scenario, pause_between_turns=pause_sec)
+        print(f"  Synthesizing dialogue with {len(scenario.turns)} turns (pause={pause_sec}s)...")
 
         # Use multi-speaker TTS
         audio = self._generate_audio(prompt, voices, scenario.speakers)
@@ -79,22 +80,33 @@ class GeminiTTSClient:
         print(f"Saved audio to cache: {cache_path}")
         return cache_path
 
-    def _build_dialogue_prompt(self, scenario: DialogueScenario) -> str:
-        """Build multi-speaker prompt.
+    def _build_dialogue_prompt(
+        self,
+        scenario: DialogueScenario,
+        pause_between_turns: float = 0.7,
+    ) -> str:
+        """Build multi-speaker prompt with pauses between turns.
 
-        Uses Gemini's multi-speaker format where speaker name is followed by text.
-        The model handles prosody and turn-taking naturally.
+        Uses Gemini's multi-speaker format with SSML-style pause tags
+        to ensure proper silence gaps for VAD/diarization.
 
         Args:
             scenario: DialogueScenario to convert
+            pause_between_turns: Silence duration in seconds between turns
+                - > 0.3s: VAD detects speech boundary
+                - > 0.5s: Pre-ASR won't merge same-speaker segments
+                - 0.5-0.8s: Natural conversational pause range
 
         Returns:
-            Formatted prompt for multi-speaker TTS
+            Formatted prompt for multi-speaker TTS with pause markers
         """
         lines = []
-        for turn in scenario.turns:
+        for i, turn in enumerate(scenario.turns):
             speaker_name = scenario.speakers.get(turn.speaker_id, turn.speaker_id)
             lines.append(f"{speaker_name}: {turn.text}")
+            # Add pause after each turn except the last
+            if i < len(scenario.turns) - 1:
+                lines.append(f"[PAUSE={pause_between_turns}s]")
         return "\n".join(lines)
 
     def _concatenate_with_silence(
