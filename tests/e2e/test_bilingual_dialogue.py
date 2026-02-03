@@ -64,7 +64,7 @@ class TestBilingualDialogue:
         expected_combined = " ".join(expected_texts)
         actual_combined = " ".join(actual_texts)
 
-        transcription_eval = judge.evaluate_transcription(
+        transcription_eval = await judge.evaluate_transcription(
             expected_text=expected_combined,
             actual_text=actual_combined,
             language="mixed",
@@ -104,7 +104,7 @@ class TestBilingualDialogue:
         expected_speaker_seq = [t.speaker_id for t in sample_scenario.turns]
         actual_speaker_seq = [s.get("speaker_id", "unknown") for s in result.final_segments]
 
-        diar_eval = judge.evaluate_speaker_diarization(
+        diar_eval = await judge.evaluate_speaker_diarization(
             expected_speakers=expected_speaker_seq,
             actual_speakers=actual_speaker_seq,
             num_expected_speakers=len(expected_speakers),
@@ -143,7 +143,7 @@ class TestBilingualDialogue:
         expected_segments = [
             {"language": t.language, "text": t.text} for t in sample_scenario.turns
         ]
-        lang_eval = judge.evaluate_language_detection(
+        lang_eval = await judge.evaluate_language_detection(
             expected_segments=expected_segments,
             actual_segments=result.final_segments,
         )
@@ -187,7 +187,7 @@ class TestBilingualDialogue:
             translations = result.translations.get(segment_id, {})
 
             if "de" in translations:
-                trans_eval = judge.evaluate_translation(
+                trans_eval = await judge.evaluate_translation(
                     source_text=turn.text,
                     expected_translation=turn.expected_translation,
                     actual_translation=translations["de"],
@@ -222,7 +222,7 @@ class TestBilingualDialogue:
         assert result.summary is not None, "Summary should be generated"
 
         # Evaluate summary quality
-        summary_eval = judge.evaluate_summary(
+        summary_eval = await judge.evaluate_summary(
             conversation_segments=result.final_segments,
             expected_topics=sample_scenario.expected_summary_topics,
             actual_summary=result.summary,
@@ -276,7 +276,7 @@ class TestLanguagePairs:
         expected_combined = " ".join(t.text for t in scenario.turns)
         actual_combined = " ".join(s.get("src", "") for s in result.final_segments)
 
-        transcription_eval = judge.evaluate_transcription(
+        transcription_eval = await judge.evaluate_transcription(
             expected_text=expected_combined,
             actual_text=actual_combined,
             language=f"German + {TARGET_LANGUAGES[foreign_lang]}",
@@ -380,7 +380,7 @@ class TestFullSuite:
                     expected_combined = " ".join(t.text for t in scenario.turns)
                     actual_combined = " ".join(s.get("src", "") for s in result.final_segments)
 
-                    scenario_report.transcription_score = judge.evaluate_transcription(
+                    scenario_report.transcription_score = await judge.evaluate_transcription(
                         expected_text=expected_combined,
                         actual_text=actual_combined,
                         language=f"German + {TARGET_LANGUAGES[lang_code]}",
@@ -388,7 +388,7 @@ class TestFullSuite:
 
                     # Evaluate summary
                     if result.summary:
-                        scenario_report.summary_score = judge.evaluate_summary(
+                        scenario_report.summary_score = await judge.evaluate_summary(
                             conversation_segments=result.final_segments,
                             expected_topics=scenario.expected_summary_topics,
                             actual_summary=result.summary,
