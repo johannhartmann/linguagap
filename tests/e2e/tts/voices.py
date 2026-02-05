@@ -27,16 +27,29 @@ AVAILABLE_VOICES = {
     "Zephyr": VoiceConfig("Zephyr", "Light, airy voice"),
 }
 
-# Language codes for Gemini TTS
-# Gemini TTS supports 24 languages, including all our target languages
+# Language codes for Gemini TTS (BCP-47 format)
+# Full list at: https://docs.cloud.google.com/text-to-speech/docs/gemini-tts
 LANGUAGE_CODES = {
+    # Core languages
     "de": "de-DE",  # German
     "en": "en-US",  # English
-    "uk": "uk-UA",  # Ukrainian
-    "sq": "sq-AL",  # Albanian (Albania)
-    "fa": "fa-IR",  # Farsi/Persian (Iran)
+    # Target languages for bilingual testing
     "ar": "ar-EG",  # Arabic (Egypt)
+    "bg": "bg-BG",  # Bulgarian
+    "es": "es-ES",  # Spanish (Spain)
+    "fa": "fa-IR",  # Farsi/Persian (Iran)
+    "fr": "fr-FR",  # French
+    "hr": "hr-HR",  # Croatian
+    "hu": "hu-HU",  # Hungarian
+    "it": "it-IT",  # Italian
+    "ku": "ku-TR",  # Kurdish (Turkey) - NOTE: May not be supported
+    "pl": "pl-PL",  # Polish
+    "ro": "ro-RO",  # Romanian
+    "ru": "ru-RU",  # Russian
+    "sq": "sq-AL",  # Albanian (Albania)
+    "sr": "sr-RS",  # Serbian (Serbia)
     "tr": "tr-TR",  # Turkish
+    "uk": "uk-UA",  # Ukrainian
 }
 
 # Voice assignments per speaker role

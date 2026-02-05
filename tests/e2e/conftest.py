@@ -54,18 +54,20 @@ def audio_cache_dir() -> Path:
 
 
 @pytest.fixture(scope="session")
-def tts_client(gemini_api_key):
+def tts_client():
     """Create a session-scoped TTS client.
 
-    Args:
-        gemini_api_key: API key fixture
+    Requires GOOGLE_APPLICATION_CREDENTIALS to be set.
 
     Returns:
         GeminiTTSClient instance
     """
+    if not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
+        pytest.skip("GOOGLE_APPLICATION_CREDENTIALS environment variable not set")
+
     from tests.e2e.tts.client import GeminiTTSClient
 
-    return GeminiTTSClient(api_key=gemini_api_key)
+    return GeminiTTSClient()
 
 
 @pytest.fixture(scope="session")

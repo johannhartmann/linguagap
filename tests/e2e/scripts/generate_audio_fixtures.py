@@ -55,14 +55,14 @@ def extract_retry_delay(error_msg: str) -> int:
 
 def main():
     """Generate all audio fixtures from pre-defined scenarios."""
-    # Check for API key
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        print("Error: GEMINI_API_KEY environment variable not set")
-        print("Set it in tests/e2e/.env or export it")
+    # Check for service account credentials
+    if not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
+        print("Error: GOOGLE_APPLICATION_CREDENTIALS environment variable not set")
+        print("Set it to the path of your service account JSON file")
+        print("See: https://cloud.google.com/docs/authentication/application-default-credentials")
         sys.exit(1)
 
-    tts_client = GeminiTTSClient(api_key=api_key)
+    tts_client = GeminiTTSClient()
     AUDIO_DIR.mkdir(parents=True, exist_ok=True)
 
     # Find all scenario YAML files
@@ -97,7 +97,7 @@ def main():
             from tests.e2e.tts.voices import get_voice_for_speaker
 
             # Must match synthesis_method used in GeminiTTSClient.synthesize_dialogue
-            synthesis_method = "per_turn_concat_0.7s"
+            synthesis_method = "cloud_tts_350ms_v3"
             voices = {sid: get_voice_for_speaker(sid) for sid in scenario.speakers}
             cache_key = compute_cache_key(scenario.to_yaml(), voices, synthesis_method)
             existing = get_cached_audio(cache_key)

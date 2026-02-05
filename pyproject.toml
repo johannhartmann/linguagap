@@ -55,7 +55,8 @@ dev = [
     "pytest-asyncio>=0.24.0",
     "httpx>=0.27.0",
     # E2E test dependencies
-    "google-genai>=1.0.0",  # Gemini TTS + dialogue gen + LLM-as-judge
+    "google-genai>=1.0.0",  # Gemini dialogue gen + LLM-as-judge
+    "google-cloud-texttospeech>=2.32.0",  # Cloud TTS API for Gemini TTS
     "pyyaml>=6.0",  # YAML dialogue templates
     "python-dotenv>=1.0.0",  # Load .env files
 ]
