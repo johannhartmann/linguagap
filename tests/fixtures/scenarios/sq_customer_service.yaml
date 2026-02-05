@@ -1,37 +1,37 @@
 name: sq_customer_service
-description: Social welfare office - residence registration
+description: Restaurant - ordering food and drinks
 german_lang: de
 foreign_lang: sq
 speakers:
-  speaker_1: Sachbearbeiterin
-  speaker_2: Zotëri Hoxha
+  speaker_1: Kellner
+  speaker_2: Gast
 turns:
   - speaker_id: speaker_1
     language: de
-    text: Guten Tag, Sie möchten sich bei der Gemeinde anmelden?
+    text: Guten Tag, herzlich willkommen. Haben Sie schon einen Tisch reserviert?
     expected_translation: null
   - speaker_id: speaker_2
     language: sq
-    text: Po, mirëdita. Sapo kam ardhur nga Shqipëria dhe dua të regjistrohem.
-    expected_translation: Ja, guten Tag. Ich bin gerade aus Albanien gekommen und möchte mich anmelden.
+    text: Po, mirëdita. Kam një rezervim për dy persona në emrin Kelmendi.
+    expected_translation: Ja, guten Tag. Ich habe eine Reservierung für zwei Personen auf den Namen Kelmendi.
   - speaker_id: speaker_1
     language: de
-    text: Gut. Haben Sie Ihren Mietvertrag und einen Ausweis dabei?
+    text: Sehr gut, ich bringe Sie zu Ihrem Tisch. Möchten Sie die Speisekarte sehen?
     expected_translation: null
   - speaker_id: speaker_2
     language: sq
-    text: Po, kam kontratën e qirasë dhe pasaportën. Familja ime ka katër anëtarë.
-    expected_translation: Ja, ich habe den Mietvertrag und den Reisepass. Meine Familie hat vier Mitglieder.
+    text: Po, faleminderit. Çfarë rekomandoni sot? A keni peshk të freskët?
+    expected_translation: Ja, danke. Was empfehlen Sie heute? Haben Sie frischen Fisch?
   - speaker_id: speaker_1
     language: de
-    text: Dann brauche ich auch die Ausweise von Ihrer Frau und den Kindern.
+    text: Ja, der gegrillte Lachs ist heute besonders gut. Dazu passt ein Weißwein.
     expected_translation: null
   - speaker_id: speaker_2
     language: sq
-    text: Sigurisht, i kam të gjitha dokumentet këtu. Faleminderit shumë.
-    expected_translation: Natürlich, ich habe alle Dokumente hier. Vielen Dank.
+    text: Shkëlqyeshëm, do ta marr laksin. Dhe një gotë verë të bardhë, ju lutem.
+    expected_translation: Ausgezeichnet, ich nehme den Lachs. Und ein Glas Weißwein, bitte.
 expected_summary_topics:
-  - residence registration
-  - arrived from Albania
-  - family of four
-  - rental contract
+  - restaurant reservation
+  - table for two
+  - grilled salmon
+  - white wine

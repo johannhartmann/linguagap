@@ -141,10 +141,21 @@ class SegmentTracker:
         return None
 
     def _overlaps_finalized(self, abs_start: float, abs_end: float) -> bool:
-        """Check if a time range overlaps significantly with any finalized segment."""
+        """Check if a time range overlaps significantly with any finalized segment.
+
+        Uses bidirectional overlap checking - a match is found if either:
+            - >50% of the new range overlaps with finalized segment, OR
+            - >50% of finalized segment overlaps with new range
+
+        This prevents duplicate segments when a short early segment is finalized
+        and a longer segment covering the same audio arrives later.
+        """
         for seg in self.finalized_segments:
-            overlap = self._calc_overlap_ratio(abs_start, abs_end, seg.abs_start, seg.abs_end)
-            if overlap > 0.5:
+            # Check both directions of overlap
+            overlap1 = self._calc_overlap_ratio(abs_start, abs_end, seg.abs_start, seg.abs_end)
+            overlap2 = self._calc_overlap_ratio(seg.abs_start, seg.abs_end, abs_start, abs_end)
+            # Match if either direction has >50% overlap
+            if overlap1 > 0.5 or overlap2 > 0.5:
                 return True
         return False
 

@@ -2,6 +2,9 @@
 
 Tests the complete pipeline: TTS -> streaming -> ASR -> translation -> summary.
 Evaluated using Gemini as LLM-as-Judge.
+
+IMPORTANT: Tests use pre-cached YAML scenarios and TTS audio to avoid
+regenerating content on every run. Audio fixtures are in tests/fixtures/e2e_audio/
 """
 
 from pathlib import Path
@@ -11,8 +14,31 @@ import pytest
 from tests.e2e.dialogues.templates import (
     SCENARIO_TYPES,
     TARGET_LANGUAGES,
+    DialogueScenario,
 )
 from tests.e2e.evaluation.reports import ScenarioReport, TestReport
+
+# Directory containing pre-cached scenario YAML files
+SCENARIOS_DIR = Path(__file__).parent.parent / "fixtures" / "scenarios"
+
+
+def load_cached_scenario(lang_code: str, scenario_type: str) -> DialogueScenario:
+    """Load a pre-cached scenario from YAML file.
+
+    Args:
+        lang_code: Language code (e.g., 'uk', 'ar', 'tr')
+        scenario_type: Scenario type (e.g., 'customer_service', 'business_meeting')
+
+    Returns:
+        DialogueScenario loaded from YAML
+
+    Raises:
+        FileNotFoundError: If scenario file doesn't exist
+    """
+    yaml_path = SCENARIOS_DIR / f"{lang_code}_{scenario_type}.yaml"
+    if not yaml_path.exists():
+        raise FileNotFoundError(f"Cached scenario not found: {yaml_path}")
+    return DialogueScenario.from_yaml_file(str(yaml_path))
 
 
 @pytest.mark.e2e
@@ -242,35 +268,35 @@ class TestBilingualDialogue:
 
 @pytest.mark.e2e
 class TestLanguagePairs:
-    """Test each target language pair."""
+    """Test each target language pair using pre-cached scenarios."""
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("foreign_lang", list(TARGET_LANGUAGES.keys()))
     async def test_language_pair(
         self,
         foreign_lang,
-        dialogue_generator,
         tts_client,
         streaming_client,
         judge,
     ):
         """Test a specific language pair (German + foreign).
 
+        Uses pre-cached YAML scenarios and TTS audio to ensure reproducibility.
+
         Args:
             foreign_lang: Language code to test (uk, sq, fa, ar, tr)
         """
-        # Generate a customer service scenario
-        scenario = dialogue_generator.generate_scenario(
-            foreign_lang_code=foreign_lang,
-            scenario_type="customer_service",
-        )
+        # Load pre-cached scenario (NOT dynamic generation)
+        scenario = load_cached_scenario(foreign_lang, "customer_service")
 
-        # Synthesize audio
-        audio_path = tts_client.synthesize_dialogue(scenario)
+        # Get cached audio (should NOT synthesize new audio)
+        audio_path = tts_client.synthesize_dialogue(scenario, use_cache=True)
 
-        # Stream and process
-        result = await streaming_client.stream_dialogue(
+        # Stream and process with foreign language hint
+        # The hint enables confusion correction for similar languages (e.g., uk/ru/be)
+        result = await streaming_client.stream_audio_with_foreign_hint(
             audio_path=audio_path,
+            foreign_lang=foreign_lang,
             request_summary=True,
         )
 
@@ -295,30 +321,28 @@ class TestLanguagePairs:
 
 @pytest.mark.e2e
 class TestScenarioTypes:
-    """Test different scenario types."""
+    """Test different scenario types using pre-cached scenarios."""
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("scenario_type", SCENARIO_TYPES)
     async def test_scenario_type(
         self,
         scenario_type,
-        dialogue_generator,
         tts_client,
         streaming_client,
     ):
         """Test a specific scenario type.
 
+        Uses pre-cached YAML scenarios and TTS audio to ensure reproducibility.
+
         Args:
             scenario_type: Type of scenario to test
         """
-        # Use Ukrainian as the test language
-        scenario = dialogue_generator.generate_scenario(
-            foreign_lang_code="uk",
-            scenario_type=scenario_type,
-        )
+        # Use Ukrainian as the test language - load from pre-cached YAML
+        scenario = load_cached_scenario("uk", scenario_type)
 
-        # Synthesize audio
-        audio_path = tts_client.synthesize_dialogue(scenario)
+        # Get cached audio (should NOT synthesize new audio)
+        audio_path = tts_client.synthesize_dialogue(scenario, use_cache=True)
 
         # Stream and process
         result = await streaming_client.stream_dialogue(
@@ -339,14 +363,13 @@ class TestFullSuite:
     @pytest.mark.slow
     async def test_full_matrix(
         self,
-        dialogue_generator,
         tts_client,
         streaming_client,
         judge,
     ):
         """Run complete test matrix: all languages x all scenario types.
 
-        This is a comprehensive test that generates a full report.
+        Uses pre-cached YAML scenarios and TTS audio to ensure reproducibility.
         Mark with @pytest.mark.slow as it takes significant time.
         """
         report = TestReport(
@@ -365,14 +388,11 @@ class TestFullSuite:
                 )
 
                 try:
-                    # Generate scenario
-                    scenario = dialogue_generator.generate_scenario(
-                        foreign_lang_code=lang_code,
-                        scenario_type=scenario_type,
-                    )
+                    # Load pre-cached scenario
+                    scenario = load_cached_scenario(lang_code, scenario_type)
 
-                    # Synthesize and stream
-                    audio_path = tts_client.synthesize_dialogue(scenario)
+                    # Get cached audio (should NOT synthesize new audio)
+                    audio_path = tts_client.synthesize_dialogue(scenario, use_cache=True)
                     result = await streaming_client.stream_dialogue(
                         audio_path=audio_path,
                         request_summary=True,

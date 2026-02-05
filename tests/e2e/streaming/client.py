@@ -72,7 +72,7 @@ class StreamingClient:
         audio_path: str | Path,
         src_lang: str = "auto",
         request_summary: bool = True,
-        timeout_sec: float = 120.0,
+        timeout_sec: float = 300.0,
     ) -> StreamingResult:
         """Stream an audio file through the WebSocket API.
 
@@ -174,7 +174,9 @@ class StreamingClient:
                 await asyncio.sleep(frame_delay)
 
             # Wait for processing to complete
-            await asyncio.sleep(2.0)
+            # ASR loop runs every 0.5s and each call takes ~1.6s
+            # Need enough time for final ASR tick to process remaining audio
+            await asyncio.sleep(5.0)
 
             # Request summary if desired
             if request_summary:
@@ -221,7 +223,7 @@ class StreamingClient:
         audio_path: str | Path,
         foreign_lang: str,
         request_summary: bool = True,
-        timeout_sec: float = 120.0,
+        timeout_sec: float = 300.0,
     ) -> StreamingResult:
         """Stream an audio file with a foreign language hint.
 
@@ -327,7 +329,9 @@ class StreamingClient:
                 await asyncio.sleep(frame_delay)
 
             # Wait for processing to complete
-            await asyncio.sleep(2.0)
+            # ASR loop runs every 0.5s and each call takes ~1.6s
+            # Need enough time for final ASR tick to process remaining audio
+            await asyncio.sleep(5.0)
 
             # Request summary if desired
             if request_summary:

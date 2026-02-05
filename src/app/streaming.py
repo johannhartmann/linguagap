@@ -80,34 +80,201 @@ BILINGUAL_PROMPTS = {
 
 # Bag of Hallucinations (BoH) - common Whisper hallucinations on silence/noise
 # Based on research: https://arxiv.org/abs/2501.11378
+# Top hallucinations by frequency from the paper's Table III
 HALLUCINATION_PHRASES = frozenset(
     phrase.lower()
     for phrase in [
+        # Top English hallucinations (from research - >0.5% frequency)
+        "Thank you",
         "Thank you.",
+        "Thanks for watching",
         "Thanks for watching.",
         "Thanks for watching!",
+        "Thank you for watching",
         "Thank you for watching.",
         "Thank you for watching!",
-        "Please subscribe.",
-        "Please subscribe!",
-        "Subscribe to my channel.",
-        "Like and subscribe.",
-        "Subtitles by the Amara.org community",
-        "Subtitles by",
-        "ご視聴ありがとうございました",
+        "So",
+        "So.",
+        "The",
+        "You",
+        "Oh",
+        "Oh.",
+        "Okay",
+        "Okay.",
+        "I'm sorry",
+        "I'm sorry.",
+        "Oh my god",
+        "Oh my god.",
+        "Bye",
         "Bye.",
         "Bye!",
-        "Goodbye.",
+        "Uh",
+        "Uh.",
+        "Meow",
+        "I'm not sure what I'm doing here",
+        "I'm not sure what I'm doing here.",
+        # Subscription/channel hallucinations
+        "Please subscribe",
+        "Please subscribe.",
+        "Please subscribe!",
+        "Subscribe to my channel",
+        "Subscribe to my channel.",
+        "Like and subscribe",
+        "Like and subscribe.",
+        "Hello everyone welcome to my channel",
+        "See you next time",
         "See you next time.",
+        "See you in the next video",
         "See you in the next video.",
-        "...",
-        "MBC 뉴스 , 뉴스를 전해 드립니다.",
+        # Subtitle attribution hallucinations
+        "Subtitles by the Amara.org community",
+        "Subtitles by the Amara org community",
+        "Subtitles by steamteamextra",
+        "Subtitles by",
+        # Non-English hallucinations
+        "ご視聴ありがとうございました",  # Japanese "Thank you for watching"
+        "MBC 뉴스 , 뉴스를 전해 드립니다.",  # Korean news intro
         "Продолжение следует...",  # Russian "To be continued"
         "Продолжение следует",
+        "字幕由Amara.org社区提供",  # Chinese subtitle attribution
+        "感谢收看",  # Chinese "Thanks for watching"
+        "شكرا للمشاهدة",  # Arabic "Thanks for watching"
+        "متابعتكم",  # Arabic "Your following"
+        "مرحبا",  # Arabic "Hello" (when alone)
+        # Common continuation/filler hallucinations
         "To be continued...",
         "To be continued",
+        "Goodbye",
+        "Goodbye.",
+        "...",
+        "…",
+        # Single word/sound hallucinations
+        "Hmm",
+        "Hmm.",
+        "Huh",
+        "Huh.",
+        "Yeah",
+        "Yeah.",
+        "Yes",
+        "Yes.",
+        "No",
+        "No.",
+        "Um",
+        "Um.",
+        "Ah",
+        "Ah.",
     ]
 )
+
+
+def deloop_text(text: str, min_ngram: int = 2, max_ngram: int = 6, min_repeats: int = 3) -> str:
+    """Remove repeated n-gram patterns from text (delooping).
+
+    Detects and removes looping patterns where the same phrase repeats
+    multiple times consecutively. This is a common Whisper hallucination pattern.
+
+    Args:
+        text: Input text to deloop
+        min_ngram: Minimum n-gram size to check (default: 2 words)
+        max_ngram: Maximum n-gram size to check (default: 6 words)
+        min_repeats: Minimum consecutive repeats to trigger removal (default: 3)
+
+    Returns:
+        Delooped text with repeated patterns reduced to single occurrence
+    """
+    if not text or not text.strip():
+        return text
+
+    words = text.split()
+    if len(words) < min_ngram * min_repeats:
+        return text
+
+    result_words = words.copy()
+    changed = True
+
+    # Iterate until no more changes (handles nested loops)
+    while changed:
+        changed = False
+        # Check n-grams from largest to smallest
+        for n in range(max_ngram, min_ngram - 1, -1):
+            i = 0
+            new_words = []
+            while i < len(result_words):
+                # Check if we have an n-gram that repeats
+                if i + n * min_repeats <= len(result_words):
+                    ngram = tuple(result_words[i : i + n])
+                    repeat_count = 1
+
+                    # Count consecutive repeats
+                    j = i + n
+                    while j + n <= len(result_words):
+                        next_ngram = tuple(result_words[j : j + n])
+                        if next_ngram == ngram:
+                            repeat_count += 1
+                            j += n
+                        else:
+                            break
+
+                    if repeat_count >= min_repeats:
+                        # Found a loop - keep only one occurrence
+                        new_words.extend(result_words[i : i + n])
+                        i = j  # Skip all repetitions
+                        changed = True
+                        continue
+
+                new_words.append(result_words[i])
+                i += 1
+
+            result_words = new_words
+
+    return " ".join(result_words)
+
+
+def is_hallucination(text: str, duration: float) -> tuple[bool, str]:
+    """Check if text is likely a hallucination.
+
+    Args:
+        text: Transcribed text to check
+        duration: Duration of the segment in seconds
+
+    Returns:
+        Tuple of (is_hallucination, reason)
+    """
+    if not text or not text.strip():
+        return True, "empty"
+
+    text_clean = text.strip()
+    text_lower = text_clean.lower()
+
+    # Check BoH (exact match)
+    if text_lower in HALLUCINATION_PHRASES:
+        return True, "boh_exact"
+
+    # Check BoH (stripped punctuation)
+    text_no_punct = text_lower.rstrip(".,!?…")
+    if text_no_punct in HALLUCINATION_PHRASES:
+        return True, "boh_stripped"
+
+    # Check for single repeated word
+    words = text_clean.split()
+    if len(words) > 1 and len({w.lower() for w in words}) == 1:
+        return True, "single_word_repeat"
+
+    # Check for excessively long segment (hallucination indicator)
+    if duration > 10.0:
+        return True, "too_long"
+
+    # Check for very short text with long duration (silence hallucination)
+    if duration > 3.0 and len(text_clean) < 10:
+        return True, "short_text_long_duration"
+
+    # Check word rate - very low word rate indicates hallucination
+    word_count = len(words)
+    if duration > 2.0 and word_count / duration < 0.5:  # Less than 0.5 words/sec
+        return True, "low_word_rate"
+
+    return False, ""
+
 
 _executor = ThreadPoolExecutor(max_workers=2)
 
@@ -549,7 +716,10 @@ def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
     tick_start = time.time()
 
     audio, window_start = session.get_window_audio()
-    now_sec = time.time() - session.start_time
+    # Use audio buffer time for finalization, not wall clock time.
+    # This ensures segments finalize based on audio position, which is correct
+    # when streaming pre-recorded audio faster/slower than realtime.
+    now_sec = session.get_current_time()
 
     if len(audio) < 1600:
         return list(session.segment_tracker.finalized_segments), []
@@ -670,24 +840,22 @@ def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
         # Transcribe this speaker segment
         seg_results = transcribe_speaker_segment(model, audio, use_lang, diar_seg, window_start)
 
-        # Filter hallucinations
+        # Filter hallucinations and apply delooping
         for seg in seg_results:
-            text = seg["text"]
+            text = seg["text"].strip()
             duration = seg["end"] - seg["start"]
 
-            # Skip repeated words
-            words = text.split()
-            if len(words) > 1 and len(set(words)) == 1:
-                continue
+            # Apply delooping to remove repeated phrases
+            delooped_text = deloop_text(text)
+            if delooped_text != text:
+                print(f"  DELOOP: '{text[:40]}...' -> '{delooped_text[:40]}...'")
+                text = delooped_text
+                seg["text"] = text
 
-            # Skip long segments (hallucinations)
-            if duration > 10.0:
-                print(f"  SKIP hallucination (long): {duration:.1f}s: {text[:50]}")
-                continue
-
-            # Skip known hallucination phrases
-            if text.lower() in HALLUCINATION_PHRASES:
-                print(f"  SKIP hallucination (BoH): {text}")
+            # Check for hallucinations
+            is_hal, reason = is_hallucination(text, duration)
+            if is_hal:
+                print(f"  SKIP hallucination ({reason}): {text[:50]}")
                 continue
 
             hyp_segments.append(seg)
@@ -769,14 +937,16 @@ def _run_asr_fallback(
         text = seg.text.strip()
         duration = seg.end - seg.start
 
-        if len(text) < 2:
-            continue
-        words = text.split()
-        if len(words) > 1 and len(set(words)) == 1:
-            continue
-        if duration > 10.0:
-            continue
-        if text.lower() in HALLUCINATION_PHRASES:
+        # Apply delooping to remove repeated phrases
+        delooped_text = deloop_text(text)
+        if delooped_text != text:
+            print(f"  DELOOP: '{text[:40]}...' -> '{delooped_text[:40]}...'")
+            text = delooped_text
+
+        # Check for hallucinations
+        is_hal, reason = is_hallucination(text, duration)
+        if is_hal:
+            print(f"  SKIP hallucination ({reason}): {text[:50]}")
             continue
 
         # Use SpeechBrain for segment language detection
@@ -1133,8 +1303,8 @@ async def handle_websocket(websocket: WebSocket):
 
                     if session is not None:
                         # Get all segments including live ones
-                        # Use wall-clock time for stability tracking
-                        now_sec = time.time() - session.start_time
+                        # Use audio buffer time for consistency with run_asr
+                        now_sec = session.get_current_time()
                         all_segs, time_finalized = session.segment_tracker.update_from_hypothesis(
                             [], 0.0, now_sec, "unknown"
                         )
