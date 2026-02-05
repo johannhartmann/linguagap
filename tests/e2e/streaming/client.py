@@ -175,8 +175,12 @@ class StreamingClient:
 
             # Wait for processing to complete
             # ASR loop runs every 0.5s and each call takes ~1.6s
-            # Need enough time for final ASR tick to process remaining audio
-            await asyncio.sleep(5.0)
+            # Worst case timing: audio arrives during ASR call, need to wait for:
+            #   - Current ASR to finish (~1.6s)
+            #   - Next tick to start (up to 0.5s)
+            #   - That ASR to finish (~1.6s)
+            # Using 8s provides margin for system load variability
+            await asyncio.sleep(8.0)
 
             # Request summary if desired
             if request_summary:
@@ -330,8 +334,12 @@ class StreamingClient:
 
             # Wait for processing to complete
             # ASR loop runs every 0.5s and each call takes ~1.6s
-            # Need enough time for final ASR tick to process remaining audio
-            await asyncio.sleep(5.0)
+            # Worst case timing: audio arrives during ASR call, need to wait for:
+            #   - Current ASR to finish (~1.6s)
+            #   - Next tick to start (up to 0.5s)
+            #   - That ASR to finish (~1.6s)
+            # Using 8s provides margin for system load variability
+            await asyncio.sleep(8.0)
 
             # Request summary if desired
             if request_summary:

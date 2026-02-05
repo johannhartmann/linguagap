@@ -117,7 +117,7 @@ Transcription and translation work fine, but summary generation times out.
 
 ### Fix Applied
 1. **streaming/client.py** - Increased timeout from 120s to 300s
-2. **streaming/client.py** - Increased post-stream wait from 2s to 5s
+2. **streaming/client.py** - Increased post-stream wait from 2s to 8s (increased from 5s to fix flaky final segment capture)
 
 ### Result
 Test now passes with summary generated successfully.
