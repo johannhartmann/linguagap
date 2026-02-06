@@ -140,23 +140,35 @@ class SegmentTracker:
                 return cs
         return None
 
-    def _overlaps_finalized(self, abs_start: float, abs_end: float) -> bool:
-        """Check if a time range overlaps significantly with any finalized segment.
+    def _overlaps_finalized(self, abs_start: float, abs_end: float, text: str = "") -> bool:
+        """Check if a segment duplicates any finalized segment.
 
-        Uses bidirectional overlap checking - a match is found if either:
-            - >50% of the new range overlaps with finalized segment, OR
-            - >50% of finalized segment overlaps with new range
+        Uses two strategies:
+            1. Time-based: bidirectional >50% overlap
+            2. Text-based: identical or near-identical text content
 
-        This prevents duplicate segments when a short early segment is finalized
-        and a longer segment covering the same audio arrives later.
+        The text check is critical because the sliding ASR window causes the
+        same speech to be re-detected at shifted absolute positions. E.g.
+        "Hallo Johann" might appear at [10.2-14.5] then [8.8-10.6] then
+        [7.6-9.4] as the window slides — these don't overlap in time but
+        are clearly the same speech.
         """
         for seg in self.finalized_segments:
-            # Check both directions of overlap
+            # Check 1: Time-based overlap (bidirectional)
             overlap1 = self._calc_overlap_ratio(abs_start, abs_end, seg.abs_start, seg.abs_end)
             overlap2 = self._calc_overlap_ratio(seg.abs_start, seg.abs_end, abs_start, abs_end)
-            # Match if either direction has >50% overlap
             if overlap1 > 0.5 or overlap2 > 0.5:
                 return True
+
+            # Check 2: Text-based deduplication for sliding window drift
+            # Only for non-trivial text to avoid filtering common short phrases
+            if text and seg.src and len(text) > 10:
+                if text == seg.src:
+                    return True
+                # Check if one is a significant substring of the other
+                shorter, longer = (text, seg.src) if len(text) <= len(seg.src) else (seg.src, text)
+                if shorter in longer and len(shorter) / len(longer) > 0.6:
+                    return True
         return False
 
     def _find_mergeable_segment(
@@ -227,8 +239,8 @@ class SegmentTracker:
             if not src_text or len(src_text) < 2:
                 continue
 
-            # Skip if overlaps with already finalized segment
-            if self._overlaps_finalized(abs_start, abs_end):
+            # Skip if overlaps with already finalized segment (time or text match)
+            if self._overlaps_finalized(abs_start, abs_end, src_text):
                 continue
 
             seg_lang = seg.get("lang", src_lang)

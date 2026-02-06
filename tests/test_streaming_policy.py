@@ -90,14 +90,15 @@ class TestSegmentTracker:
         assert newly_finalized[0].src == "Hello"
 
     def test_skip_overlapping_segments(self):
-        """Test that segments overlapping with finalized are skipped."""
+        """Test that segments overlapping >50% with finalized are skipped."""
         tracker = SegmentTracker()
 
         # First call: finalize a segment
-        hyp1 = [{"start": 0.0, "end": 1.0, "text": "First"}]
+        hyp1 = [{"start": 0.0, "end": 2.0, "text": "First segment"}]
         tracker.update_from_hypothesis(hyp1, window_start=0.0, now_sec=5.0)
 
-        # Second call: new segment that overlaps with finalized end time
+        # Second call: new segment that overlaps >50% with finalized
+        # [0.5-2.0] overlaps [0.0-2.0] by 1.5s out of 1.5s = 100% of new range
         hyp2 = [{"start": 0.5, "end": 2.0, "text": "Overlapping"}]
         all_segments, newly_finalized = tracker.update_from_hypothesis(
             hyp2, window_start=0.0, now_sec=6.0
@@ -105,7 +106,30 @@ class TestSegmentTracker:
 
         # Should only have the first finalized segment
         assert len(all_segments) == 1
-        assert all_segments[0].src == "First"
+        assert all_segments[0].src == "First segment"
+        assert newly_finalized == []
+
+    def test_skip_text_duplicate_segments(self):
+        """Test that segments with identical text to finalized are skipped.
+
+        This catches the sliding window drift problem where the same speech
+        gets re-detected at shifted absolute positions.
+        """
+        tracker = SegmentTracker()
+
+        # Finalize a segment at position [10.0-14.0]
+        hyp1 = [{"start": 0.0, "end": 4.0, "text": "Hallo Johann, willkommen hier."}]
+        tracker.update_from_hypothesis(hyp1, window_start=10.0, now_sec=20.0)
+
+        # Same text re-detected at shifted position [8.0-10.0] (no time overlap)
+        hyp2 = [{"start": 0.0, "end": 2.0, "text": "Hallo Johann, willkommen hier."}]
+        all_segments, newly_finalized = tracker.update_from_hypothesis(
+            hyp2, window_start=8.0, now_sec=21.0
+        )
+
+        # Should only have the original finalized segment
+        assert len(all_segments) == 1
+        assert all_segments[0].abs_start == 10.0
         assert newly_finalized == []
 
     def test_empty_text_skipped(self):

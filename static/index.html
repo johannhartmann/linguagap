@@ -757,6 +757,15 @@
                 const liveClass = seg.final ? '' : ' live';
                 const speakerId = seg.speaker_id;  // From diarization
 
+                // Determine speaker alignment: SPEAKER_00 = left, SPEAKER_01 = right
+                // This keeps consistent positioning regardless of language
+                let isSpeakerLeft = true;  // default to left
+                if (speakerId && typeof speakerId === 'string') {
+                    const speakerNum = parseInt(speakerId.replace('SPEAKER_', ''), 10);
+                    isSpeakerLeft = (speakerNum === 0);
+                }
+                const bubbleClass = isSpeakerLeft ? 'speaker-left' : 'speaker-right';
+
                 // Determine what goes on left (foreign) and right (German)
                 let leftText, rightText;
                 if (isGermanSpeaker) {
@@ -779,10 +788,8 @@
                 }
 
                 // Left pane (foreign language view)
-                // Foreign speaker = left bubble (owner), German speaker = right bubble (other)
                 const leftDiv = document.createElement('div');
-                const leftSpeakerClass = isGermanSpeaker ? 'speaker-right' : 'speaker-left';
-                leftDiv.className = 'bubble ' + leftSpeakerClass + liveClass;
+                leftDiv.className = 'bubble ' + bubbleClass + liveClass;
                 if (speakerLabel) {
                     leftDiv.innerHTML = `<div class="speaker-label">${speakerLabel}</div><span class="bubble-content">${escapeHtml(leftText)}</span>`;
                 } else {
@@ -794,10 +801,8 @@
                 leftTranscript.appendChild(leftDiv);
 
                 // Right pane (German view)
-                // German speaker = right bubble (owner), Foreign speaker = left bubble (other)
                 const rightDiv = document.createElement('div');
-                const rightSpeakerClass = isGermanSpeaker ? 'speaker-right' : 'speaker-left';
-                rightDiv.className = 'bubble ' + rightSpeakerClass + liveClass;
+                rightDiv.className = 'bubble ' + bubbleClass + liveClass;
                 if (speakerLabel) {
                     rightDiv.innerHTML = `<div class="speaker-label">${speakerLabel}</div><span class="bubble-content">${escapeHtml(rightText)}</span>`;
                 } else {
