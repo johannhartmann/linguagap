@@ -215,6 +215,21 @@
             background: #f8d7da;
             color: #721c24;
         }
+        /* Dual-channel indicator */
+        .dual-channel-badge {
+            display: none;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            background: #d4edda;
+            color: #155724;
+            margin-left: 10px;
+            vertical-align: middle;
+        }
+        .dual-channel-badge.active {
+            display: inline-block;
+        }
         /* QR Code sidebar styles */
         .qr-sidebar {
             background: #fff;
@@ -339,7 +354,7 @@
             <button id="clearBtn">Clear</button>
         </div>
 
-        <div class="status" id="status">Click "Start Recording" to begin</div>
+        <div class="status" id="status">Click "Start Recording" to begin<span class="dual-channel-badge" id="dualChannelBadge">Dual Channel</span></div>
 
         <div class="main-layout">
         <div class="panes">
@@ -978,6 +993,13 @@
                             console.log('Calling renderSegments with', data.segments.length, 'segments');
                             renderSegments(data.segments, data.foreign_lang);
                             console.log('renderSegments completed');
+                            // Update dual-channel indicator
+                            const badge = document.getElementById('dualChannelBadge');
+                            if (data.dual_channel) {
+                                badge.classList.add('active');
+                            } else {
+                                badge.classList.remove('active');
+                            }
                             if (data.src_lang && data.src_lang !== 'unknown') {
                                 const langName = LANG_NAMES[data.src_lang] || data.src_lang;
                                 setStatus(t('statusSpeaking', { lang: langName }), 'connected');

@@ -138,6 +138,46 @@
             color: #ef4444;
             margin-bottom: 4px;
         }
+        /* Mic button */
+        .mic-bar {
+            flex-shrink: 0;
+            padding: 12px 0;
+            text-align: center;
+            display: none;
+        }
+        .mic-bar.visible {
+            display: block;
+        }
+        .mic-btn {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            border: none;
+            background: var(--synia-teal);
+            color: white;
+            font-size: 1.5rem;
+            cursor: pointer;
+            transition: background 0.2s, transform 0.1s;
+        }
+        .mic-btn:hover {
+            background: var(--synia-teal-dark);
+        }
+        .mic-btn:active {
+            transform: scale(0.95);
+        }
+        .mic-btn.recording {
+            background: #ef4444;
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+            50% { box-shadow: 0 0 0 12px rgba(239, 68, 68, 0); }
+        }
+        .mic-status {
+            font-size: 0.75rem;
+            color: #888;
+            margin-top: 6px;
+        }
     </style>
 </head>
 <body>
@@ -150,12 +190,19 @@
             </div>
         </header>
         <div class="transcript" id="transcript"></div>
+        <div class="mic-bar" id="micBar">
+            <button class="mic-btn" id="micBtn" title="Start microphone">&#127908;</button>
+            <div class="mic-status" id="micStatus">Tap to speak</div>
+        </div>
     </div>
 
     <script>
         const statusDot = document.getElementById('statusDot');
         const statusText = document.getElementById('statusText');
         const transcript = document.getElementById('transcript');
+        const micBar = document.getElementById('micBar');
+        const micBtn = document.getElementById('micBtn');
+        const micStatus = document.getElementById('micStatus');
 
         // Language display names
         const LANG_NAMES = {
@@ -170,6 +217,13 @@
         let segments = [];
         let ws = null;
         let sessionEnded = false;
+
+        // Mic capture state
+        const SAMPLE_RATE = 16000;
+        let micRecording = false;
+        let audioContext = null;
+        let mediaStream = null;
+        let processor = null;
 
         // Get token from URL path
         const pathParts = window.location.pathname.split('/');
@@ -263,6 +317,102 @@
             });
         }
 
+        // Audio processing helpers (same as index.html)
+        function downsampleBuffer(buffer, inputSampleRate, outputSampleRate) {
+            if (inputSampleRate === outputSampleRate) return buffer;
+            const ratio = inputSampleRate / outputSampleRate;
+            const newLength = Math.round(buffer.length / ratio);
+            const result = new Float32Array(newLength);
+            for (let i = 0; i < newLength; i++) {
+                const srcIndex = i * ratio;
+                const srcIndexFloor = Math.floor(srcIndex);
+                const srcIndexCeil = Math.min(srcIndexFloor + 1, buffer.length - 1);
+                const t = srcIndex - srcIndexFloor;
+                result[i] = buffer[srcIndexFloor] * (1 - t) + buffer[srcIndexCeil] * t;
+            }
+            return result;
+        }
+
+        function floatTo16BitPCM(float32Array) {
+            const int16Array = new Int16Array(float32Array.length);
+            for (let i = 0; i < float32Array.length; i++) {
+                const s = Math.max(-1, Math.min(1, float32Array[i]));
+                int16Array[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+            }
+            return int16Array.buffer;
+        }
+
+        async function startMicrophone() {
+            if (!window.isSecureContext) {
+                micStatus.textContent = 'Requires HTTPS';
+                return;
+            }
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                micStatus.textContent = 'Mic not supported';
+                return;
+            }
+
+            try {
+                mediaStream = await navigator.mediaDevices.getUserMedia({
+                    audio: { channelCount: 1, sampleRate: { ideal: 48000 }, echoCancellation: true, noiseSuppression: true }
+                });
+
+                audioContext = new AudioContext({ sampleRate: 48000 });
+                const source = audioContext.createMediaStreamSource(mediaStream);
+                processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+                // Send viewer audio config with foreign language hint
+                if (ws && ws.readyState === WebSocket.OPEN && foreignLang) {
+                    ws.send(JSON.stringify({ type: 'viewer_audio_config', foreign_lang: foreignLang }));
+                }
+
+                processor.onaudioprocess = (e) => {
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        const inputData = e.inputBuffer.getChannelData(0);
+                        const downsampled = downsampleBuffer(inputData, audioContext.sampleRate, SAMPLE_RATE);
+                        const pcm16 = floatTo16BitPCM(downsampled);
+                        ws.send(pcm16);
+                    }
+                };
+
+                source.connect(processor);
+                processor.connect(audioContext.destination);
+
+                micRecording = true;
+                micBtn.classList.add('recording');
+                micStatus.textContent = 'Listening...';
+            } catch (err) {
+                console.error('Mic error:', err);
+                micStatus.textContent = 'Mic access denied';
+            }
+        }
+
+        function stopMicrophone() {
+            if (processor) { processor.disconnect(); processor = null; }
+            if (audioContext) { audioContext.close(); audioContext = null; }
+            if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
+            micRecording = false;
+            micBtn.classList.remove('recording');
+            micStatus.textContent = 'Tap to speak';
+        }
+
+        function showMicBar() {
+            micBar.classList.add('visible');
+        }
+
+        function hideMicBar() {
+            stopMicrophone();
+            micBar.classList.remove('visible');
+        }
+
+        micBtn.addEventListener('click', () => {
+            if (micRecording) {
+                stopMicrophone();
+            } else {
+                startMicrophone();
+            }
+        });
+
         function connect() {
             const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             const wsUrl = `${wsProtocol}//${window.location.host}/ws/viewer/${token}`;
@@ -286,12 +436,14 @@
                             foreignLang = data.foreign_lang;
                             updateSegments(data.segments || []);
                             setStatus('Live', 'connected');
+                            showMicBar();
                         }
                     } else if (data.type === 'session_active') {
                         // Recording has started, we now have an active session
                         foreignLang = data.foreign_lang;
                         updateSegments(data.segments || []);
                         setStatus('Live', 'connected');
+                        showMicBar();
                     } else if (data.type === 'segments') {
                         if (data.foreign_lang && !foreignLang) {
                             foreignLang = data.foreign_lang;
@@ -300,6 +452,7 @@
                     } else if (data.type === 'translation') {
                         updateTranslation(data.segment_id, data.tgt_lang, data.text);
                     } else if (data.type === 'session_ended') {
+                        hideMicBar();
                         showSessionEnded();
                     } else if (data.type === 'ping') {
                         // Respond to ping with pong
@@ -316,6 +469,7 @@
             };
 
             ws.onclose = (event) => {
+                stopMicrophone();
                 if (!sessionEnded) {
                     if (event.code === 4004) {
                         setStatus('Invalid or expired link', 'error');

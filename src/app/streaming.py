@@ -358,6 +358,13 @@ class StreamingSession:
         self.language_tracker = SpeakerLanguageTracker()  # Kept for compatibility
         self.last_diar_segments: list[SpeakerSegment] = []  # Cache for merging with ASR
 
+        # Dual-channel buffers (German mic on main page, foreign mic on viewer)
+        self.german_audio_buffer: deque[bytes] = deque()
+        self.foreign_audio_buffer: deque[bytes] = deque()
+        self.german_total_samples: int = 0
+        self.foreign_total_samples: int = 0
+        self.viewer_last_audio_time: float = 0.0
+
     def add_audio(self, pcm16_bytes: bytes):
         self.audio_buffer.append(pcm16_bytes)
         self.total_samples += len(pcm16_bytes) // 2
@@ -376,6 +383,56 @@ class StreamingSession:
             self.audio_buffer.clear()
             self.audio_buffer.append(trimmed_bytes)
             self.dropped_frames += 1
+
+    def add_german_audio(self, pcm16_bytes: bytes):
+        """Add audio from the main page (German speaker) to the german channel buffer."""
+        self.german_audio_buffer.append(pcm16_bytes)
+        self.german_total_samples += len(pcm16_bytes) // 2
+        self._enforce_max_buffer_channel(self.german_audio_buffer)
+        # Also add to combined buffer for get_current_time() / get_buffered_seconds()
+        self.add_audio(pcm16_bytes)
+
+    def add_foreign_audio(self, pcm16_bytes: bytes):
+        """Add audio from the viewer (foreign speaker) to the foreign channel buffer."""
+        self.foreign_audio_buffer.append(pcm16_bytes)
+        self.foreign_total_samples += len(pcm16_bytes) // 2
+        self.viewer_last_audio_time = time.time()
+        self._enforce_max_buffer_channel(self.foreign_audio_buffer)
+        # Also add to combined buffer for get_current_time() / get_buffered_seconds()
+        self.add_audio(pcm16_bytes)
+
+    def _enforce_max_buffer_channel(self, buffer: deque[bytes]):
+        """Trim a per-channel buffer to MAX_BUFFER_SEC."""
+        max_samples = int(MAX_BUFFER_SEC * self.sample_rate)
+        all_bytes = b"".join(buffer)
+        total_samples = len(all_bytes) // 2
+
+        if total_samples > max_samples:
+            excess_samples = total_samples - max_samples
+            excess_bytes = excess_samples * 2
+            trimmed_bytes = all_bytes[excess_bytes:]
+            buffer.clear()
+            buffer.append(trimmed_bytes)
+
+    def get_german_window_audio(self) -> tuple[np.ndarray, float]:
+        """Get the German channel audio buffer as a float32 array."""
+        all_bytes = b"".join(self.german_audio_buffer)
+        if not all_bytes:
+            return np.array([], dtype=np.float32), 0.0
+        samples = np.frombuffer(all_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+        return samples, 0.0
+
+    def get_foreign_window_audio(self) -> tuple[np.ndarray, float]:
+        """Get the foreign channel audio buffer as a float32 array."""
+        all_bytes = b"".join(self.foreign_audio_buffer)
+        if not all_bytes:
+            return np.array([], dtype=np.float32), 0.0
+        samples = np.frombuffer(all_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+        return samples, 0.0
+
+    def is_dual_channel(self) -> bool:
+        """Check if viewer is actively sending audio (within last 5 seconds)."""
+        return (time.time() - self.viewer_last_audio_time) < 5.0
 
     def get_window_audio(self) -> tuple[np.ndarray, float]:
         """Get audio for ASR processing.
@@ -896,6 +953,166 @@ def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
     return all_segments, newly_finalized
 
 
+def _transcribe_channel(
+    model,
+    audio: np.ndarray,
+    language: str | None,
+    speaker_id: str,
+) -> list[dict]:
+    """Transcribe a full channel buffer with a known language hint.
+
+    Simpler than transcribe_speaker_segment() - no diarization segment
+    extraction needed since the entire buffer IS one speaker.
+    """
+    if len(audio) < 1600:  # < 0.1s at 16kHz
+        return []
+
+    # Handle unsupported languages
+    whisper_lang = language
+    original_lang = language
+    if language and language != "unknown" and language not in WHISPER_LANGUAGES:
+        whisper_lang = LANGUAGE_FALLBACKS.get(language)
+        if whisper_lang is None:
+            print(f"  Language {language} not supported by Whisper, using multilingual")
+
+    initial_prompt = BILINGUAL_PROMPTS.get(original_lang) if original_lang else None
+    use_multilingual = whisper_lang is None or whisper_lang == "unknown"
+
+    segments, info = model.transcribe(
+        audio,
+        language=whisper_lang if not use_multilingual else None,
+        beam_size=1,
+        patience=1.0,
+        vad_filter=True,
+        vad_parameters={
+            "threshold": 0.35,
+            "min_silence_duration_ms": 300,
+            "min_speech_duration_ms": 200,
+            "speech_pad_ms": 250,
+        },
+        compression_ratio_threshold=1.8,
+        no_speech_threshold=0.3,
+        log_prob_threshold=-0.8,
+        condition_on_previous_text=False,
+        word_timestamps=True,
+        hallucination_silence_threshold=1.5,
+        multilingual=use_multilingual,
+        language_detection_threshold=0.5,
+        initial_prompt=initial_prompt,
+    )
+
+    results = []
+    for seg in segments:
+        text = seg.text.strip()
+        if len(text) < 2:
+            continue
+        results.append(
+            {
+                "start": seg.start,
+                "end": seg.end,
+                "text": text,
+                "speaker_id": speaker_id,
+                "lang": original_lang
+                if original_lang and original_lang != "unknown"
+                else info.language,
+            }
+        )
+    return results
+
+
+def run_asr_dual_channel(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
+    """
+    Run ASR with separate German and foreign audio channels.
+
+    Used when the viewer is actively sending audio (dual-channel mode).
+    Much simpler than run_asr() - no diarization or language detection needed
+    since each channel is a known speaker with a known language.
+
+    Returns:
+        Tuple of (all_segments, newly_finalized)
+    """
+    tick_start = time.time()
+    now_sec = session.get_current_time()
+
+    german_audio, _ = session.get_german_window_audio()
+    foreign_audio, _ = session.get_foreign_window_audio()
+
+    if len(german_audio) < 1600 and len(foreign_audio) < 1600:
+        return list(session.segment_tracker.finalized_segments), []
+
+    model = get_model()
+
+    print(
+        f"Dual-channel pipeline: german={len(german_audio)} samples, "
+        f"foreign={len(foreign_audio)} samples"
+    )
+
+    asr_start = time.time()
+    hyp_segments: list[dict] = []
+
+    # Transcribe German channel
+    german_results = _transcribe_channel(model, german_audio, "de", "SPEAKER_00")
+
+    # Transcribe foreign channel
+    foreign_lang = session.foreign_lang
+    foreign_results = _transcribe_channel(
+        model,
+        foreign_audio,
+        foreign_lang,
+        "SPEAKER_01",
+    )
+
+    # Auto-detect foreign language from results if not yet known
+    if session.foreign_lang is None:
+        for seg in foreign_results:
+            lang = seg.get("lang")
+            if lang and lang not in ("unknown", "de") and lang in LANG_INFO:
+                session.foreign_lang = lang
+                print(f"Dual-channel: foreign language detected as {lang}")
+                break
+
+    # Filter hallucinations and apply delooping on both channels
+    for seg in german_results + foreign_results:
+        text = seg["text"].strip()
+        duration = seg["end"] - seg["start"]
+
+        delooped_text = deloop_text(text)
+        if delooped_text != text:
+            print(f"  DELOOP: '{text[:40]}...' -> '{delooped_text[:40]}...'")
+            text = delooped_text
+            seg["text"] = text
+
+        is_hal, reason = is_hallucination(text, duration)
+        if is_hal:
+            print(f"  SKIP hallucination ({reason}): {text[:50]}")
+            continue
+
+        hyp_segments.append(seg)
+
+    # Sort by time to interleave both channels
+    hyp_segments.sort(key=lambda s: s["start"])
+
+    asr_time = time.time() - asr_start
+    _metrics["asr_times"].append(asr_time)
+
+    print(f"Dual-channel ASR: {len(hyp_segments)} segments in {asr_time * 1000:.1f}ms")
+
+    # Set detected language for session
+    session.detected_lang = session.foreign_lang or "unknown"
+
+    all_segments, newly_finalized = session.segment_tracker.update_from_hypothesis(
+        hyp_segments=hyp_segments,
+        window_start=0.0,
+        now_sec=now_sec,
+        src_lang=session.detected_lang,
+    )
+
+    tick_time = time.time() - tick_start
+    _metrics["tick_times"].append(tick_time)
+
+    return all_segments, newly_finalized
+
+
 def _run_asr_fallback(
     model,
     session: StreamingSession,
@@ -1089,8 +1306,9 @@ async def handle_websocket(websocket: WebSocket):
                     print(f"ASR tick #{tick_count}: {session.get_buffered_seconds():.1f}s buffered")
                 loop = asyncio.get_event_loop()
                 try:
+                    asr_fn = run_asr_dual_channel if session.is_dual_channel() else run_asr
                     all_segments, newly_finalized = await loop.run_in_executor(
-                        _executor, run_asr, session
+                        _executor, asr_fn, session
                     )
 
                     if running:
@@ -1135,6 +1353,7 @@ async def handle_websocket(websocket: WebSocket):
                                 "t": session.get_current_time(),
                                 "src_lang": session.detected_lang or "unknown",
                                 "foreign_lang": session.foreign_lang,
+                                "dual_channel": session.is_dual_channel(),
                                 "segments": segments_data,
                             }
                             await websocket.send_text(json.dumps(segments_msg))
@@ -1432,7 +1651,7 @@ async def handle_websocket(websocket: WebSocket):
                 if session is not None:
                     audio_bytes = message["bytes"]
                     bytes_received += len(audio_bytes)
-                    session.add_audio(audio_bytes)
+                    session.add_german_audio(audio_bytes)
                     if msg_count % 50 == 0:
                         print(
                             f"Audio: {bytes_received} bytes, {session.get_buffered_seconds():.1f}s buffered"
@@ -1508,13 +1727,50 @@ async def handle_viewer_websocket(websocket: WebSocket, token: str) -> None:
                 )
             )
 
-        # Keep connection alive with ping/pong
+        # Cache session reference for audio routing
+        cached_session = None
+
+        # Main loop: handle pong/keepalive, audio frames, and viewer config
         while True:
             try:
-                # Wait for any message (used for pong/keepalive)
                 message = await asyncio.wait_for(websocket.receive(), timeout=30.0)
                 if message["type"] == "websocket.disconnect":
                     break
+
+                # Handle binary audio from viewer mic
+                if "bytes" in message:
+                    # Lazily resolve session reference
+                    if cached_session is None:
+                        entry = await registry.get(token)
+                        if entry and entry.session:
+                            cached_session = entry.session
+                    if cached_session is not None:
+                        cached_session.add_foreign_audio(message["bytes"])
+
+                # Handle text messages (pong, viewer_audio_config)
+                elif "text" in message:
+                    try:
+                        data = json.loads(message["text"])
+                        msg_type = data.get("type")
+
+                        if msg_type == "viewer_audio_config":
+                            # Viewer sends foreign language hint
+                            viewer_foreign_lang = data.get("foreign_lang")
+                            if viewer_foreign_lang:
+                                if cached_session is None:
+                                    entry = await registry.get(token)
+                                    if entry and entry.session:
+                                        cached_session = entry.session
+                                if (
+                                    cached_session is not None
+                                    and cached_session.foreign_lang is None
+                                ):
+                                    cached_session.foreign_lang = viewer_foreign_lang
+                                    print(f"Viewer set foreign language: {viewer_foreign_lang}")
+                        # pong is implicitly handled (no action needed)
+                    except (json.JSONDecodeError, KeyError):
+                        pass
+
             except TimeoutError:
                 # Send ping
                 try:
