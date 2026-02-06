@@ -178,6 +178,27 @@
             color: #888;
             margin-top: 6px;
         }
+        .lang-select {
+            padding: 8px 12px;
+            font-size: 0.95rem;
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 8px;
+            background: var(--synia-dark);
+            color: #eee;
+            margin-bottom: 10px;
+            font-family: 'Assistant', sans-serif;
+            cursor: pointer;
+            min-width: 180px;
+        }
+        .lang-select:focus {
+            outline: 2px solid var(--synia-teal);
+            outline-offset: 2px;
+        }
+        .mic-btn:disabled {
+            background: #555;
+            cursor: not-allowed;
+            animation: none;
+        }
     </style>
 </head>
 <body>
@@ -191,8 +212,28 @@
         </header>
         <div class="transcript" id="transcript"></div>
         <div class="mic-bar" id="micBar">
-            <button class="mic-btn" id="micBtn" title="Start microphone">&#127908;</button>
-            <div class="mic-status" id="micStatus">Tap to speak</div>
+            <select class="lang-select" id="viewerLangSelect">
+                <option value="" disabled selected>-- Your language --</option>
+                <option value="en">English</option>
+                <option value="fr">French</option>
+                <option value="es">Spanish</option>
+                <option value="it">Italian</option>
+                <option value="pl">Polish</option>
+                <option value="ro">Romanian</option>
+                <option value="hr">Croatian</option>
+                <option value="bg">Bulgarian</option>
+                <option value="tr">Turkish</option>
+                <option value="ru">Russian</option>
+                <option value="uk">Ukrainian</option>
+                <option value="hu">Hungarian</option>
+                <option value="ar">Arabic</option>
+                <option value="fa">Persian</option>
+                <option value="sr">Serbian</option>
+                <option value="sq">Albanian</option>
+            </select>
+            <br>
+            <button class="mic-btn" id="micBtn" title="Start microphone" disabled>&#127908;</button>
+            <div class="mic-status" id="micStatus">Select your language first</div>
         </div>
     </div>
 
@@ -203,6 +244,7 @@
         const micBar = document.getElementById('micBar');
         const micBtn = document.getElementById('micBtn');
         const micStatus = document.getElementById('micStatus');
+        const viewerLangSelect = document.getElementById('viewerLangSelect');
 
         // Language display names
         const LANG_NAMES = {
@@ -380,6 +422,7 @@
 
                 micRecording = true;
                 micBtn.classList.add('recording');
+                viewerLangSelect.disabled = true;
                 micStatus.textContent = 'Listening...';
             } catch (err) {
                 console.error('Mic error:', err);
@@ -393,11 +436,18 @@
             if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
             micRecording = false;
             micBtn.classList.remove('recording');
+            viewerLangSelect.disabled = false;
             micStatus.textContent = 'Tap to speak';
         }
 
         function showMicBar() {
             micBar.classList.add('visible');
+            // Pre-select language if already known from server
+            if (foreignLang && viewerLangSelect.querySelector(`option[value="${foreignLang}"]`)) {
+                viewerLangSelect.value = foreignLang;
+                micBtn.disabled = false;
+                micStatus.textContent = 'Tap to speak';
+            }
         }
 
         function hideMicBar() {
@@ -405,10 +455,27 @@
             micBar.classList.remove('visible');
         }
 
+        viewerLangSelect.addEventListener('change', () => {
+            const selectedLang = viewerLangSelect.value;
+            if (selectedLang) {
+                foreignLang = selectedLang;
+                micBtn.disabled = false;
+                micStatus.textContent = 'Tap to speak';
+                // Send language hint to server immediately if connected
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: 'viewer_audio_config', foreign_lang: selectedLang }));
+                }
+            }
+        });
+
         micBtn.addEventListener('click', () => {
             if (micRecording) {
                 stopMicrophone();
             } else {
+                if (!viewerLangSelect.value) {
+                    micStatus.textContent = 'Select your language first';
+                    return;
+                }
                 startMicrophone();
             }
         });
