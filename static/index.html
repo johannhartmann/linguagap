@@ -162,59 +162,6 @@
         .status.error {
             color: #d9534f;
         }
-        /* Summary styles */
-        .summary-section {
-            margin-top: 20px;
-            display: none;
-        }
-        .summary-section.visible {
-            display: block;
-        }
-        .summary-card {
-            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-            border-radius: 12px;
-            padding: 16px;
-            border-left: 4px solid var(--synia-teal);
-        }
-        .summary-card h3 {
-            font-size: 0.9rem;
-            color: #666;
-            margin-bottom: 8px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-        .summary-card p {
-            font-size: 1rem;
-            line-height: 1.6;
-            color: #333;
-        }
-        .summary-card.loading {
-            opacity: 0.7;
-        }
-        .summary-card.loading p {
-            font-style: italic;
-            color: #666;
-        }
-        .alignment-badge {
-            display: inline-block;
-            padding: 4px 10px;
-            border-radius: 12px;
-            font-size: 0.75rem;
-            font-weight: 600;
-            margin-top: 8px;
-        }
-        .alignment-badge.aligned {
-            background: #d4edda;
-            color: #155724;
-        }
-        .alignment-badge.regenerated {
-            background: #fff3cd;
-            color: #856404;
-        }
-        .alignment-badge.misaligned {
-            background: #f8d7da;
-            color: #721c24;
-        }
         /* Dual-channel indicator */
         .dual-channel-badge {
             display: none;
@@ -361,23 +308,10 @@
             <div class="pane">
                 <h2 id="leftLangLabel">Foreign Language</h2>
                 <div class="transcript" id="leftTranscript"></div>
-                <div class="summary-section" id="leftSummarySection">
-                    <div class="summary-card" id="leftSummaryCard">
-                        <h3>Summary</h3>
-                        <p id="leftSummaryText"></p>
-                    </div>
-                </div>
             </div>
             <div class="pane">
                 <h2 id="rightLangLabel">German</h2>
                 <div class="transcript" id="rightTranscript"></div>
-                <div class="summary-section" id="rightSummarySection">
-                    <div class="summary-card" id="rightSummaryCard">
-                        <h3>Summary</h3>
-                        <p id="rightSummaryText"></p>
-                        <span class="alignment-badge" id="alignmentBadge"></span>
-                    </div>
-                </div>
             </div>
         </div>
 
@@ -412,33 +346,18 @@
                 statusReady: 'Klicken Sie auf "Aufnahme starten"',
                 foreignLang: 'Fremdsprache',
                 german: 'Deutsch',
-                summary: 'Zusammenfassung',
                 shareTitle: 'Mit Gesprächspartner teilen',
                 shareSubtitle: 'QR-Code scannen für Live-Transkript',
-                badgeVerified: 'Geprüft',
-                badgeRefined: 'Verfeinert',
-                badgeNeedsReview: 'Prüfung erforderlich',
                 statusMicRequest: 'Mikrofonzugriff wird angefordert...',
                 statusConnecting: 'Verbindung zum Server...',
                 statusRecording: 'Verbunden - Aufnahme läuft...',
                 statusSpeaking: 'Aufnahme... (spricht: {lang})',
-                statusGeneratingSummary: 'Zusammenfassung wird erstellt...',
-                statusSummaryGenerated: 'Zusammenfassung erstellt',
                 statusStopped: 'Aufnahme beendet',
                 statusConnError: 'Verbindungsfehler',
                 statusConnClosed: 'Verbindung geschlossen',
-                summaryLoading: 'Zusammenfassung wird erstellt...',
-                summaryForeign: 'Gespräch wird zusammengefasst...',
-                summaryGerman: 'Deutsche Zusammenfassung wird erstellt...',
-                summaryValidate: 'Ausrichtung wird geprüft...',
-                summaryRefine: 'Zusammenfassung wird verfeinert...',
-                summaryUnavailable: 'Zusammenfassung nicht verfügbar',
-                summaryTimeout: 'Zeitüberschreitung',
-                summaryNone: 'Keine Zusammenfassung verfügbar',
                 errorHttps: 'Fehler: Mikrofon erfordert HTTPS oder localhost',
                 errorBrowser: 'Fehler: Browser unterstützt keinen Mikrofonzugriff',
                 errorMicDenied: 'Mikrofonzugriff verweigert',
-                errorSummaryFailed: 'Zusammenfassungserstellung fehlgeschlagen',
                 speaker: 'Sprecher {n}'
             },
             en: {
@@ -453,33 +372,18 @@
                 statusReady: 'Click "Start Recording" to begin',
                 foreignLang: 'Foreign Language',
                 german: 'German',
-                summary: 'Summary',
                 shareTitle: 'Share with Foreign Speaker',
                 shareSubtitle: 'Scan to view live transcript',
-                badgeVerified: 'Verified',
-                badgeRefined: 'Refined',
-                badgeNeedsReview: 'Needs review',
                 statusMicRequest: 'Requesting microphone access...',
                 statusConnecting: 'Connecting to server...',
                 statusRecording: 'Connected - Recording...',
                 statusSpeaking: 'Recording... (speaking: {lang})',
-                statusGeneratingSummary: 'Generating summary...',
-                statusSummaryGenerated: 'Summary generated',
                 statusStopped: 'Recording stopped',
                 statusConnError: 'Connection error',
                 statusConnClosed: 'Connection closed',
-                summaryLoading: 'Generating summary...',
-                summaryForeign: 'Summarizing conversation...',
-                summaryGerman: 'Generating German summary...',
-                summaryValidate: 'Validating alignment...',
-                summaryRefine: 'Refining summary...',
-                summaryUnavailable: 'Summary unavailable',
-                summaryTimeout: 'Summary timed out',
-                summaryNone: 'No summary available',
                 errorHttps: 'Error: Microphone requires HTTPS or localhost access',
                 errorBrowser: 'Error: Browser does not support microphone access',
                 errorMicDenied: 'Microphone access denied',
-                errorSummaryFailed: 'Summary generation failed',
                 speaker: 'Speaker {n}'
             }
         };
@@ -507,13 +411,6 @@
         const rightTranscript = document.getElementById('rightTranscript');
         const leftLangLabel = document.getElementById('leftLangLabel');
         const rightLangLabel = document.getElementById('rightLangLabel');
-        const leftSummarySection = document.getElementById('leftSummarySection');
-        const rightSummarySection = document.getElementById('rightSummarySection');
-        const leftSummaryCard = document.getElementById('leftSummaryCard');
-        const rightSummaryCard = document.getElementById('rightSummaryCard');
-        const leftSummaryText = document.getElementById('leftSummaryText');
-        const rightSummaryText = document.getElementById('rightSummaryText');
-        const alignmentBadge = document.getElementById('alignmentBadge');
         const uiLangSelect = document.getElementById('uiLangSelect');
         const subtitleEl = document.getElementById('subtitle');
 
@@ -532,7 +429,6 @@
         let audioContext = null;
         let mediaStream = null;
         let processor = null;
-        let awaitingSummary = false;  // Track if we're waiting for summary before closing
         let sessionCleared = false;  // Guard flag to prevent renderSegments after clear
 
         const SAMPLE_RATE = 16000;
@@ -626,11 +522,6 @@
             }
             if (rightLangLabel) rightLangLabel.textContent = t('german');
 
-            // Summary headers
-            document.querySelectorAll('.summary-card h3').forEach(el => {
-                el.textContent = t('summary');
-            });
-
             // QR sidebar
             const qrTitle = document.querySelector('.qr-sidebar h3');
             const qrSubtitle = document.querySelector('.qr-sidebar p');
@@ -648,70 +539,6 @@
             localStorage.setItem('uiLang', currentUiLang);
             applyTranslations();
         });
-
-        function showSummaryLoading() {
-            leftSummarySection.classList.add('visible');
-            rightSummarySection.classList.add('visible');
-            leftSummaryCard.classList.add('loading');
-            rightSummaryCard.classList.add('loading');
-            leftSummaryText.textContent = t('summaryLoading');
-            rightSummaryText.textContent = t('summaryLoading');
-            alignmentBadge.textContent = '';
-            alignmentBadge.className = 'alignment-badge';
-        }
-
-        function updateSummaryProgress(step) {
-            const messageKeys = {
-                'summarize_foreign': 'summaryForeign',
-                'summarize_german': 'summaryGerman',
-                'validate': 'summaryValidate',
-                'regenerate': 'summaryRefine'
-            };
-            const key = messageKeys[step] || 'summaryLoading';
-            const msg = t(key);
-            leftSummaryText.textContent = msg;
-            rightSummaryText.textContent = msg;
-        }
-
-        function displaySummary(data) {
-            leftSummaryCard.classList.remove('loading');
-            rightSummaryCard.classList.remove('loading');
-
-            leftSummaryText.textContent = data.foreign_summary || t('summaryNone');
-            rightSummaryText.textContent = data.german_summary || t('summaryNone');
-
-            // Show alignment status
-            if (data.regenerated) {
-                alignmentBadge.textContent = t('badgeRefined');
-                alignmentBadge.className = 'alignment-badge regenerated';
-            } else if (data.aligned) {
-                alignmentBadge.textContent = t('badgeVerified');
-                alignmentBadge.className = 'alignment-badge aligned';
-            } else {
-                alignmentBadge.textContent = t('badgeNeedsReview');
-                alignmentBadge.className = 'alignment-badge misaligned';
-            }
-        }
-
-        function displaySummaryError(error) {
-            leftSummaryCard.classList.remove('loading');
-            rightSummaryCard.classList.remove('loading');
-            leftSummaryText.textContent = t('summaryUnavailable');
-            rightSummaryText.textContent = error || t('errorSummaryFailed');
-            alignmentBadge.textContent = '';
-            alignmentBadge.className = 'alignment-badge';
-        }
-
-        function hideSummaries() {
-            leftSummarySection.classList.remove('visible');
-            rightSummarySection.classList.remove('visible');
-            leftSummaryCard.classList.remove('loading');
-            rightSummaryCard.classList.remove('loading');
-            leftSummaryText.textContent = '';
-            rightSummaryText.textContent = '';
-            alignmentBadge.textContent = '';
-            alignmentBadge.className = 'alignment-badge';
-        }
 
         async function enumerateDevices() {
             try {
@@ -1007,16 +834,6 @@
                         } else if (data.type === 'translation') {
                             // Update translation for specific segment
                             updateTranslation(data.segment_id, data.tgt_lang, data.text);
-                        } else if (data.type === 'summary_progress') {
-                            updateSummaryProgress(data.step);
-                        } else if (data.type === 'summary') {
-                            displaySummary(data);
-                            setStatus(t('statusSummaryGenerated'), '');
-                            finishStopRecording();
-                        } else if (data.type === 'summary_error') {
-                            displaySummaryError(data.error);
-                            setStatus(t('errorSummaryFailed'), 'error');
-                            finishStopRecording();
                         }
                     } catch (e) {
                         console.error('WebSocket message error:', e, e.stack);
@@ -1084,30 +901,10 @@
                 mediaStream = null;
             }
 
-            // Request summary before closing WebSocket if we have content
-            if (ws && ws.readyState === WebSocket.OPEN && foreignLang) {
-                awaitingSummary = true;
-                showSummaryLoading();
-                setStatus(t('statusGeneratingSummary'), '');
-                startBtn.disabled = true;
-
-                // Request summary from server
+            // Tell server to stop (drains translations and sends final segments)
+            if (ws && ws.readyState === WebSocket.OPEN) {
                 ws.send(JSON.stringify({ type: 'request_summary' }));
-
-                // Set a timeout in case summary takes too long
-                setTimeout(() => {
-                    if (awaitingSummary) {
-                        displaySummaryError(t('summaryTimeout'));
-                        finishStopRecording();
-                    }
-                }, 60000);  // 60 second timeout
-            } else {
-                finishStopRecording();
             }
-        }
-
-        function finishStopRecording() {
-            awaitingSummary = false;
 
             if (ws) {
                 ws.close();
@@ -1119,10 +916,7 @@
             startBtn.disabled = false;
             languageSelect.disabled = false;
             audioInputSelect.disabled = false;
-
-            if (!leftSummarySection.classList.contains('visible')) {
-                setStatus(t('statusStopped'), '');
-            }
+            setStatus(t('statusStopped'), '');
         }
 
         // Disable start button until language is selected
@@ -1158,7 +952,7 @@
 
             // Stop recording to prevent new messages
             if (isRecording) {
-                // Skip summary generation, just stop
+                // Force stop without server notification
                 isRecording = false;
                 if (processor) {
                     processor.disconnect();
@@ -1186,7 +980,6 @@
             rightTranscript.innerHTML = '';
             foreignLang = null;
             leftLangLabel.textContent = t('foreignLang');
-            hideSummaries();
             setStatus(t('statusReady'), '');
         });
     </script>

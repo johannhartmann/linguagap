@@ -41,7 +41,6 @@ from app.asr import get_model
 from app.lang_id import SpeakerLanguageTracker, detect_language_from_audio
 from app.mt import (
     LANG_INFO,
-    summarize_bilingual,
     translate_texts,
 )
 from app.session_registry import SessionEntry, registry
@@ -1216,46 +1215,6 @@ def run_translation(text: str, src_lang: str, tgt_lang: str) -> str:
     return result
 
 
-def run_summarization_pipeline(
-    segments_data: list[dict],
-    foreign_lang: str,
-) -> dict:
-    """
-    Generate bilingual summaries of the conversation.
-
-    Called when the user stops recording. Uses Qwen3-4B to generate two
-    summaries in a single LLM call:
-        1. Summary in the foreign language
-        2. Same summary translated to German
-
-    Args:
-        segments_data: List of segment dicts with 'src', 'src_lang', 'translations'
-        foreign_lang: ISO code of the non-German language (e.g., "bg", "tr")
-
-    Returns:
-        Dict with 'foreign_summary', 'german_summary', 'foreign_lang',
-        'validation' status, and 'regenerated' flag
-    """
-    print(f"Starting summarization: {len(segments_data)} segments, foreign_lang={foreign_lang}")
-
-    # Generate both summaries in one call
-    print("Generating bilingual summary...")
-    foreign_summary, german_summary = summarize_bilingual(
-        segments=segments_data,
-        foreign_lang=foreign_lang,
-    )
-    print(f"Foreign summary: {foreign_summary[:100]}...")
-    print(f"German summary: {german_summary[:100]}...")
-
-    return {
-        "foreign_summary": foreign_summary,
-        "german_summary": german_summary,
-        "foreign_lang": foreign_lang,
-        "validation": {"aligned": True, "issues": None},
-        "regenerated": False,
-    }
-
-
 async def handle_websocket(websocket: WebSocket):
     """
     Main WebSocket handler for real-time streaming transcription.
@@ -1265,20 +1224,19 @@ async def handle_websocket(websocket: WebSocket):
         2. Start ASR loop (runs every TICK_SEC, transcribes audio windows)
         3. Start MT loop (translates finalized segments asynchronously)
         4. Receive binary audio frames, buffer them
-        5. Handle summary requests when recording stops
+        5. Handle stop requests (drain translations, send final segments)
         6. Clean up and notify viewers on disconnect
 
     Message protocol:
         Client → Server:
             - {"type": "config", "sample_rate": 16000, "src_lang": "auto", "token": "..."}
             - Binary PCM16 audio frames (16kHz mono)
-            - {"type": "request_summary"}
+            - {"type": "request_summary"} (stops recording, drains translations)
 
         Server → Client:
             - {"type": "config_ack", "status": "active"}
             - {"type": "segments", "segments": [...], "src_lang": "...", "foreign_lang": "..."}
             - {"type": "translation", "segment_id": N, "tgt_lang": "de", "text": "..."}
-            - {"type": "summary", "foreign_summary": "...", "german_summary": "..."}
 
     The handler spawns two async tasks that run concurrently:
         - asr_loop: Processes audio every TICK_SEC, sends segment updates
@@ -1512,139 +1470,65 @@ async def handle_websocket(websocket: WebSocket):
                         )
 
                 elif data.get("type") == "request_summary":
-                    # Handle summary request - stop ASR loop first
+                    # Stop ASR loop
                     if asr_task:
                         asr_task.cancel()
                         with contextlib.suppress(asyncio.CancelledError):
                             await asr_task
                         asr_task = None
-                        print("ASR loop stopped for summary generation")
+                        print("ASR loop stopped for stop request")
 
                     if session is not None:
-                        # Get all segments including live ones
-                        # Use audio buffer time for consistency with run_asr
+                        # Finalize remaining segments
                         now_sec = session.get_current_time()
                         all_segs, time_finalized = session.segment_tracker.update_from_hypothesis(
                             [], 0.0, now_sec, "unknown"
                         )
 
-                        # Queue any segments that were just finalized by time
                         for seg in time_finalized:
                             print(f"Queuing time-finalized segment {seg.id}: {seg.src[:50]}")
                             await translation_queue.put(seg)
 
-                        # Identify live segments that need finalization
                         live_segs = [s for s in all_segs if not s.final]
                         if live_segs:
                             print(f"Force-finalizing {len(live_segs)} live segments")
                             newly_final = session.segment_tracker.force_finalize_all(live_segs)
-                            # Queue for translation
                             for seg in newly_final:
                                 print(f"Queuing force-finalized segment {seg.id}: {seg.src[:50]}")
                                 await translation_queue.put(seg)
 
-                        finalized = session.segment_tracker.finalized_segments
-                        if finalized:
-                            # Wait for translation queue to drain (up to 10s)
-                            await websocket.send_text(
-                                json.dumps(
-                                    {
-                                        "type": "summary_progress",
-                                        "step": "translate",
-                                        "message": "Completing translations...",
-                                    }
-                                )
+                        # Wait for translations to complete
+                        try:
+                            await asyncio.wait_for(translation_queue.join(), timeout=60)
+                        except TimeoutError:
+                            print(
+                                f"Warning: translation queue join timed out, "
+                                f"{translation_queue.qsize()} items remaining"
                             )
 
-                            # Wait for all translations to complete (not just queue empty)
-                            try:
-                                await asyncio.wait_for(translation_queue.join(), timeout=60)
-                            except TimeoutError:
-                                print(
-                                    f"Warning: translation queue join timed out, "
-                                    f"{translation_queue.qsize()} items remaining"
-                                )
-
-                            # Build segments data with translations
+                        # Send final segments with all translations
+                        finalized = session.segment_tracker.finalized_segments
+                        if finalized:
                             segments_data = []
                             for seg in finalized:
                                 seg_dict = asdict(seg)
                                 seg_dict["translations"] = session.translations.get(seg.id, {})
                                 segments_data.append(seg_dict)
 
-                            foreign_lang = session.foreign_lang or "en"
-
-                            # Send final segments with all translations before summary
                             await websocket.send_text(
                                 json.dumps(
                                     {
                                         "type": "segments",
                                         "t": session.get_current_time(),
                                         "src_lang": session.detected_lang or "unknown",
-                                        "foreign_lang": foreign_lang,
+                                        "foreign_lang": session.foreign_lang or "en",
                                         "segments": segments_data,
                                     }
                                 )
                             )
 
-                            # Send progress update
-                            await websocket.send_text(
-                                json.dumps(
-                                    {
-                                        "type": "summary_progress",
-                                        "step": "summarize_foreign",
-                                        "message": "Generating summaries...",
-                                    }
-                                )
-                            )
-
-                            # Run summarization in executor
-                            loop = asyncio.get_event_loop()
-                            try:
-                                result = await loop.run_in_executor(
-                                    _executor,
-                                    run_summarization_pipeline,
-                                    segments_data,
-                                    foreign_lang,
-                                )
-
-                                # Send final summary
-                                await websocket.send_text(
-                                    json.dumps(
-                                        {
-                                            "type": "summary",
-                                            "foreign_summary": result["foreign_summary"],
-                                            "german_summary": result["german_summary"],
-                                            "foreign_lang": result["foreign_lang"],
-                                            "aligned": result["validation"]["aligned"],
-                                            "issues": result["validation"].get("issues"),
-                                            "regenerated": result["regenerated"],
-                                        }
-                                    )
-                                )
-                            except Exception as e:
-                                print(f"Summarization error: {e}")
-                                await websocket.send_text(
-                                    json.dumps(
-                                        {
-                                            "type": "summary_error",
-                                            "error": str(e),
-                                        }
-                                    )
-                                )
-                        else:
-                            await websocket.send_text(
-                                json.dumps(
-                                    {
-                                        "type": "summary_error",
-                                        "error": "No conversation segments to summarize",
-                                    }
-                                )
-                            )
-
-                        # Stop ASR/MT loops after summary is sent
                         running = False
-                        print("Summary sent, stopping ASR/MT loops")
+                        print("Recording stopped, closing connection")
                         await websocket.close()
 
             elif "bytes" in message:

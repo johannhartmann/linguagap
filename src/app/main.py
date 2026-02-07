@@ -17,7 +17,7 @@ Endpoints:
 
 Startup:
     All models are warmed up on startup via the lifespan handler to minimize
-    cold-start latency on first request. This includes ASR, MT, summarization,
+    cold-start latency on first request. This includes ASR, MT,
     diarization, and language ID models.
 """
 
@@ -33,7 +33,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.asr import get_model, transcribe_wav_path
 from app.lang_id import warmup_lang_id
-from app.mt import get_llm, get_summ_llm, translate_texts
+from app.mt import get_llm, translate_texts
 from app.scripts.asr_smoke import generate_silence_wav
 from app.speaker_tracker import warmup_speaker_model
 from app.streaming import get_metrics, handle_viewer_websocket, handle_websocket
@@ -50,7 +50,6 @@ def warmup_models():
     Models warmed up:
         - ASR (faster-whisper): ~2-3 GB VRAM
         - Translation (TranslateGemma 12B): ~8 GB VRAM
-        - Summarization (Qwen3-4B): ~4 GB VRAM
         - Speaker embeddings (SpeechBrain ECAPA): ~1 GB VRAM
         - Language ID (SpeechBrain): ~1 GB VRAM
 
@@ -73,10 +72,6 @@ def warmup_models():
     get_llm()
     translate_texts(["Hello"], src_lang="en", tgt_lang="de")
     print("MT model ready")
-
-    print("Warming up summarization model...")
-    get_summ_llm()
-    print("Summarization model ready")
 
 
 @asynccontextmanager
