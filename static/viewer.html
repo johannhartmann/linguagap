@@ -126,10 +126,6 @@
             flex-shrink: 0;
             padding: 12px 0;
             text-align: center;
-            display: none;
-        }
-        .mic-bar.visible {
-            display: block;
         }
         .mic-btn {
             width: 60px;
@@ -242,6 +238,7 @@
         let segments = [];
         let ws = null;
         let sessionEnded = false;
+        let sessionActive = false;
 
         // Mic capture state
         const SAMPLE_RATE = 16000;
@@ -416,32 +413,46 @@
             micStatus.textContent = 'Tap to speak';
         }
 
-        function showMicBar() {
-            micBar.classList.add('visible');
-            // Pre-select language if already known from server
-            if (foreignLang && viewerLangSelect.querySelector(`option[value="${foreignLang}"]`)) {
-                viewerLangSelect.value = foreignLang;
-                micBtn.disabled = false;
+        function updateMicState() {
+            // Mic requires both language selected and active session
+            const canMic = sessionActive && viewerLangSelect.value;
+            micBtn.disabled = !canMic;
+            if (!viewerLangSelect.value) {
+                micStatus.textContent = 'Select your language first';
+            } else if (!sessionActive) {
+                micStatus.textContent = 'Waiting for session...';
+            } else {
                 micStatus.textContent = 'Tap to speak';
             }
         }
 
-        function hideMicBar() {
+        function onSessionActive() {
+            sessionActive = true;
+            // Pre-select language if server already knows it
+            if (foreignLang && viewerLangSelect.querySelector(`option[value="${foreignLang}"]`)) {
+                viewerLangSelect.value = foreignLang;
+            }
+            updateMicState();
+        }
+
+        function onSessionEnded() {
+            sessionActive = false;
             stopMicrophone();
-            micBar.classList.remove('visible');
+            updateMicState();
         }
 
         viewerLangSelect.addEventListener('change', () => {
             const selectedLang = viewerLangSelect.value;
             if (selectedLang) {
                 foreignLang = selectedLang;
-                micBtn.disabled = false;
-                micStatus.textContent = 'Tap to speak';
+                // Re-render with correct language for translations
+                renderSegments();
                 // Send language hint to server immediately if connected
                 if (ws && ws.readyState === WebSocket.OPEN) {
                     ws.send(JSON.stringify({ type: 'viewer_audio_config', foreign_lang: selectedLang }));
                 }
             }
+            updateMicState();
         });
 
         micBtn.addEventListener('click', () => {
@@ -473,20 +484,18 @@
 
                     if (data.type === 'init') {
                         if (data.status === 'waiting') {
-                            // Session exists but recording hasn't started yet
                             setStatus('Waiting for session to start...', 'connected');
                         } else {
-                            foreignLang = data.foreign_lang;
+                            if (data.foreign_lang) foreignLang = data.foreign_lang;
                             updateSegments(data.segments || []);
                             setStatus('Live', 'connected');
-                            showMicBar();
+                            onSessionActive();
                         }
                     } else if (data.type === 'session_active') {
-                        // Recording has started, we now have an active session
-                        foreignLang = data.foreign_lang;
+                        if (data.foreign_lang) foreignLang = data.foreign_lang;
                         updateSegments(data.segments || []);
                         setStatus('Live', 'connected');
-                        showMicBar();
+                        onSessionActive();
                     } else if (data.type === 'segments') {
                         if (data.foreign_lang && !foreignLang) {
                             foreignLang = data.foreign_lang;
@@ -495,7 +504,7 @@
                     } else if (data.type === 'translation') {
                         updateTranslation(data.segment_id, data.tgt_lang, data.text);
                     } else if (data.type === 'session_ended') {
-                        hideMicBar();
+                        onSessionEnded();
                         showSessionEnded();
                     } else if (data.type === 'ping') {
                         // Respond to ping with pong
