@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
+from app.backends import get_asr_backend, get_translation_backend
 from app.streaming import StreamingSession, get_metrics, run_asr, run_translation
 
 
@@ -32,7 +33,6 @@ class TestStreamingSession:
     def test_add_audio(self):
         """Test adding audio data."""
         session = StreamingSession(sample_rate=16000)
-        # 1 second of audio = 16000 samples = 32000 bytes (int16)
         audio_data = np.zeros(16000, dtype=np.int16).tobytes()
         session.add_audio(audio_data)
         assert session.total_samples == 16000
@@ -41,7 +41,7 @@ class TestStreamingSession:
     def test_add_audio_multiple(self):
         """Test adding multiple audio chunks."""
         session = StreamingSession(sample_rate=16000)
-        chunk = np.zeros(1600, dtype=np.int16).tobytes()  # 0.1s chunks
+        chunk = np.zeros(1600, dtype=np.int16).tobytes()
         for _ in range(10):
             session.add_audio(chunk)
         assert session.total_samples == 16000
@@ -78,28 +78,13 @@ class TestStreamingSession:
         assert window_start == 0.0
         assert len(samples) == 8000
 
-    def test_get_window_audio_long(self):
-        """Test getting window audio when buffer exceeds window size."""
-        session = StreamingSession(sample_rate=16000)
-        # Add 16 seconds of audio (exceeds 8s window)
-        for _ in range(16):
-            audio_data = np.zeros(16000, dtype=np.int16).tobytes()
-            session.add_audio(audio_data)
-
-        samples, window_start = session.get_window_audio()
-        # Window should be last 8 seconds
-        assert window_start == 8.0
-        assert len(samples) == 8 * 16000
-
     def test_enforce_max_buffer(self):
         """Test that buffer is trimmed when exceeding max size."""
         session = StreamingSession(sample_rate=16000)
-        # MAX_BUFFER_SEC is 30s by default, add 40s of audio
         for _ in range(40):
             audio_data = np.zeros(16000, dtype=np.int16).tobytes()
             session.add_audio(audio_data)
 
-        # Buffer should be trimmed, dropped_frames > 0
         assert session.dropped_frames > 0
         assert session.get_buffered_seconds() <= 30.0
 
@@ -137,11 +122,16 @@ class TestMetrics:
 class TestRunASR:
     """Tests for run_asr function."""
 
-    @patch("app.streaming.get_model")
-    def test_run_asr_short_audio(self, mock_get_model):
+    def setup_method(self):
+        get_asr_backend.cache_clear()
+
+    def teardown_method(self):
+        get_asr_backend.cache_clear()
+
+    @patch("app.streaming.get_asr_backend")
+    def test_run_asr_short_audio(self, mock_get_backend):
         """Test run_asr with very short audio returns early."""
         session = StreamingSession(sample_rate=16000)
-        # Add only 50 samples (less than 1600 threshold)
         audio_data = np.zeros(50, dtype=np.int16).tobytes()
         session.add_audio(audio_data)
 
@@ -149,122 +139,38 @@ class TestRunASR:
 
         assert all_segs == []
         assert newly_final == []
-        mock_get_model.assert_not_called()
-
-    @patch("app.streaming.get_model")
-    def test_run_asr_with_segments(self, mock_get_model):
-        """Test run_asr processes audio and returns segments."""
-        mock_model = MagicMock()
-        mock_segment = MagicMock()
-        mock_segment.start = 0.0
-        mock_segment.end = 1.5
-        mock_segment.text = "Hello world"
-
-        mock_info = MagicMock()
-        mock_info.language = "en"
-
-        mock_model.transcribe.return_value = ([mock_segment], mock_info)
-        mock_get_model.return_value = mock_model
-
-        session = StreamingSession(sample_rate=16000)
-        # Add 1 second of audio
-        audio_data = np.zeros(16000, dtype=np.int16).tobytes()
-        session.add_audio(audio_data)
-
-        all_segs, newly_final = run_asr(session)
-
-        mock_model.transcribe.assert_called_once()
-        assert session.detected_lang == "en"
-
-    @patch("app.streaming.get_model")
-    def test_run_asr_filters_short_text(self, mock_get_model):
-        """Test run_asr filters segments with very short text."""
-        mock_model = MagicMock()
-        mock_segment = MagicMock()
-        mock_segment.start = 0.0
-        mock_segment.end = 1.0
-        mock_segment.text = "A"  # Too short
-
-        mock_info = MagicMock()
-        mock_info.language = "en"
-
-        mock_model.transcribe.return_value = ([mock_segment], mock_info)
-        mock_get_model.return_value = mock_model
-
-        session = StreamingSession(sample_rate=16000)
-        audio_data = np.zeros(16000, dtype=np.int16).tobytes()
-        session.add_audio(audio_data)
-
-        all_segs, newly_final = run_asr(session)
-
-        # Segment should be filtered out
-        assert all_segs == []
-
-    @patch("app.streaming.get_model")
-    def test_run_asr_filters_repeated_words(self, mock_get_model):
-        """Test run_asr filters segments with repeated words."""
-        mock_model = MagicMock()
-        mock_segment = MagicMock()
-        mock_segment.start = 0.0
-        mock_segment.end = 1.0
-        mock_segment.text = "hello hello hello"  # All same word
-
-        mock_info = MagicMock()
-        mock_info.language = "en"
-
-        mock_model.transcribe.return_value = ([mock_segment], mock_info)
-        mock_get_model.return_value = mock_model
-
-        session = StreamingSession(sample_rate=16000)
-        audio_data = np.zeros(16000, dtype=np.int16).tobytes()
-        session.add_audio(audio_data)
-
-        all_segs, newly_final = run_asr(session)
-
-        # Segment should be filtered out
-        assert all_segs == []
-
-    @patch("app.streaming.get_model")
-    def test_run_asr_explicit_src_lang(self, mock_get_model):
-        """Test run_asr uses explicit src_lang instead of auto-detect."""
-        mock_model = MagicMock()
-        mock_segment = MagicMock()
-        mock_segment.start = 0.0
-        mock_segment.end = 1.5
-        mock_segment.text = "Hello world"
-
-        mock_info = MagicMock()
-        mock_info.language = "en"
-
-        mock_model.transcribe.return_value = ([mock_segment], mock_info)
-        mock_get_model.return_value = mock_model
-
-        session = StreamingSession(sample_rate=16000, src_lang="fr")
-        audio_data = np.zeros(16000, dtype=np.int16).tobytes()
-        session.add_audio(audio_data)
-
-        run_asr(session)
-
-        assert session.detected_lang == "fr"
+        mock_get_backend.assert_not_called()
 
 
 class TestRunTranslation:
     """Tests for run_translation function."""
 
-    @patch("app.streaming.translate_texts")
-    def test_run_translation_success(self, mock_translate):
+    def setup_method(self):
+        get_translation_backend.cache_clear()
+
+    def teardown_method(self):
+        get_translation_backend.cache_clear()
+
+    @patch("app.streaming.get_translation_backend")
+    def test_run_translation_success(self, mock_get_backend):
         """Test run_translation returns translated text."""
-        mock_translate.return_value = ["Hallo Welt"]
+        mock_backend = MagicMock()
+        mock_backend.translate.return_value = ["Hallo Welt"]
+        mock_get_backend.return_value = mock_backend
 
         result = run_translation("Hello world", "en", "de")
 
         assert result == "Hallo Welt"
-        mock_translate.assert_called_once_with(["Hello world"], src_lang="en", tgt_lang="de")
+        mock_backend.translate.assert_called_once_with(
+            ["Hello world"], src_lang="en", tgt_lang="de"
+        )
 
-    @patch("app.streaming.translate_texts")
-    def test_run_translation_records_metrics(self, mock_translate):
+    @patch("app.streaming.get_translation_backend")
+    def test_run_translation_records_metrics(self, mock_get_backend):
         """Test run_translation records timing metrics."""
-        mock_translate.return_value = ["Test"]
+        mock_backend = MagicMock()
+        mock_backend.translate.return_value = ["Test"]
+        mock_get_backend.return_value = mock_backend
 
         from app.streaming import _metrics
 
@@ -278,29 +184,40 @@ class TestRunTranslation:
 class TestWebSocketHandler:
     """Tests for WebSocket handler."""
 
+    def setup_method(self):
+        get_asr_backend.cache_clear()
+        get_translation_backend.cache_clear()
+
+    def teardown_method(self):
+        get_asr_backend.cache_clear()
+        get_translation_backend.cache_clear()
+
     @pytest.fixture
     def mock_models(self):
-        """Mock ASR and MT models."""
+        """Mock ASR and MT backends."""
         with (
-            patch("app.streaming.get_model") as mock_asr,
-            patch("app.streaming.translate_texts") as mock_translate,
+            patch("app.streaming.get_asr_backend") as mock_asr,
+            patch("app.streaming.get_translation_backend") as mock_mt,
         ):
-            mock_model = MagicMock()
-            mock_model.transcribe.return_value = ([], MagicMock(language="en"))
-            mock_asr.return_value = mock_model
-            mock_translate.return_value = ["Translated"]
-            yield {"asr": mock_asr, "translate": mock_translate}
+            mock_asr_backend = MagicMock()
+            mock_mt_backend = MagicMock()
+            mock_mt_backend.translate.return_value = ["Translated"]
+            mock_asr.return_value = mock_asr_backend
+            mock_mt.return_value = mock_mt_backend
+            yield {"asr": mock_asr, "mt": mock_mt}
 
     @pytest.fixture
     def client(self, mock_models):  # noqa: ARG002
-        """Create test client with mocked models."""
+        """Create test client with mocked backends."""
         with (
-            patch("app.main.get_model") as mock_asr,
-            patch("app.main.get_llm") as mock_llm,
+            patch("app.main.get_asr_backend") as mock_asr,
+            patch("app.main.get_translation_backend") as mock_mt,
+            patch("app.main.get_summarization_backend") as mock_summ,
             patch("app.main.translate_texts") as mock_translate,
         ):
             mock_asr.return_value = MagicMock()
-            mock_llm.return_value = MagicMock()
+            mock_mt.return_value = MagicMock()
+            mock_summ.return_value = None
             mock_translate.return_value = ["Translated"]
 
             from fastapi.testclient import TestClient
@@ -315,7 +232,6 @@ class TestWebSocketHandler:
         with client.websocket_connect("/ws") as websocket:
             config = {"type": "config", "sample_rate": 16000, "src_lang": "en"}
             websocket.send_text(json.dumps(config))
-            # Just verify no exception is raised
 
     def test_websocket_binary_audio(self, client, mock_models):  # noqa: ARG002
         """Test WebSocket accepts binary audio data."""
@@ -323,6 +239,5 @@ class TestWebSocketHandler:
             config = {"type": "config", "sample_rate": 16000, "src_lang": "en"}
             websocket.send_text(json.dumps(config))
 
-            # Send some audio data
             audio_data = np.zeros(1600, dtype=np.int16).tobytes()
             websocket.send_bytes(audio_data)

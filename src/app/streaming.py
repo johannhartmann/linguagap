@@ -37,12 +37,9 @@ from dataclasses import asdict
 import numpy as np
 from fastapi import WebSocket
 
-from app.asr import get_model
+from app.backends import get_asr_backend, get_summarization_backend, get_translation_backend
 from app.lang_id import SpeakerLanguageTracker, detect_language_from_audio
-from app.mt import (
-    LANG_INFO,
-    translate_texts,
-)
+from app.mt import LANG_INFO
 from app.session_registry import SessionEntry, registry
 from app.speaker_tracker import SpeakerSegment, SpeakerTracker
 from app.streaming_policy import Segment, SegmentTracker
@@ -50,230 +47,6 @@ from app.streaming_policy import Segment, SegmentTracker
 WINDOW_SEC = float(os.getenv("WINDOW_SEC", "8.0"))
 TICK_SEC = float(os.getenv("TICK_SEC", "0.5"))
 MAX_BUFFER_SEC = float(os.getenv("MAX_BUFFER_SEC", "30.0"))
-
-# Bilingual example prompts for Whisper initial_prompt
-# These are example text snippets (not instructions) that help Whisper recognize
-# the expected languages. Whisper follows the style of the prompt, not instructions.
-# See: https://cookbook.openai.com/examples/whisper_prompting_guide
-BILINGUAL_PROMPTS = {
-    # Must have languages
-    "bg": "Guten Tag, wie kann ich Ihnen helfen? Здравейте, как мога да ви помогна?",
-    "en": "Guten Tag, wie kann ich Ihnen helfen? Hello, how can I help you?",
-    "es": "Guten Tag, wie kann ich Ihnen helfen? Hola, ¿cómo puedo ayudarle?",
-    "fr": "Guten Tag, wie kann ich Ihnen helfen? Bonjour, comment puis-je vous aider?",
-    "hr": "Guten Tag, wie kann ich Ihnen helfen? Dobar dan, kako vam mogu pomoći?",
-    "hu": "Guten Tag, wie kann ich Ihnen helfen? Jó napot, miben segíthetek?",
-    "it": "Guten Tag, wie kann ich Ihnen helfen? Buongiorno, come posso aiutarla?",
-    "pl": "Guten Tag, wie kann ich Ihnen helfen? Dzień dobry, jak mogę pomóc?",
-    "ro": "Guten Tag, wie kann ich Ihnen helfen? Bună ziua, cum vă pot ajuta?",
-    "ru": "Guten Tag, wie kann ich Ihnen helfen? Здравствуйте, чем могу помочь?",
-    "sq": "Guten Tag, wie kann ich Ihnen helfen? Mirëdita, si mund t'ju ndihmoj?",
-    "tr": "Guten Tag, wie kann ich Ihnen helfen? Merhaba, size nasıl yardımcı olabilirim?",
-    "uk": "Guten Tag, wie kann ich Ihnen helfen? Добрий день, чим можу допомогти?",
-    # Nice to have languages
-    "ar": "Guten Tag, wie kann ich Ihnen helfen? مرحباً، كيف يمكنني مساعدتك؟",
-    "fa": "Guten Tag, wie kann ich Ihnen helfen? سلام، چطور می‌توانم کمکتان کنم؟",
-    "ku": "Guten Tag, wie kann ich Ihnen helfen? Rojbaş, çawa dikarim alîkariya we bikim?",
-    "sr": "Guten Tag, wie kann ich Ihnen helfen? Dobar dan, kako mogu da vam pomognem?",
-}
-
-# Bag of Hallucinations (BoH) - common Whisper hallucinations on silence/noise
-# Based on research: https://arxiv.org/abs/2501.11378
-# Top hallucinations by frequency from the paper's Table III
-HALLUCINATION_PHRASES = frozenset(
-    phrase.lower()
-    for phrase in [
-        # Top English hallucinations (from research - >0.5% frequency)
-        "Thank you",
-        "Thank you.",
-        "Thanks for watching",
-        "Thanks for watching.",
-        "Thanks for watching!",
-        "Thank you for watching",
-        "Thank you for watching.",
-        "Thank you for watching!",
-        "So",
-        "So.",
-        "The",
-        "You",
-        "Oh",
-        "Oh.",
-        "Okay",
-        "Okay.",
-        "I'm sorry",
-        "I'm sorry.",
-        "Oh my god",
-        "Oh my god.",
-        "Bye",
-        "Bye.",
-        "Bye!",
-        "Uh",
-        "Uh.",
-        "Meow",
-        "I'm not sure what I'm doing here",
-        "I'm not sure what I'm doing here.",
-        # Subscription/channel hallucinations
-        "Please subscribe",
-        "Please subscribe.",
-        "Please subscribe!",
-        "Subscribe to my channel",
-        "Subscribe to my channel.",
-        "Like and subscribe",
-        "Like and subscribe.",
-        "Hello everyone welcome to my channel",
-        "See you next time",
-        "See you next time.",
-        "See you in the next video",
-        "See you in the next video.",
-        # Subtitle attribution hallucinations
-        "Subtitles by the Amara.org community",
-        "Subtitles by the Amara org community",
-        "Subtitles by steamteamextra",
-        "Subtitles by",
-        # Non-English hallucinations
-        "ご視聴ありがとうございました",  # Japanese "Thank you for watching"
-        "MBC 뉴스 , 뉴스를 전해 드립니다.",  # Korean news intro
-        "Продолжение следует...",  # Russian "To be continued"
-        "Продолжение следует",
-        "字幕由Amara.org社区提供",  # Chinese subtitle attribution
-        "感谢收看",  # Chinese "Thanks for watching"
-        "شكرا للمشاهدة",  # Arabic "Thanks for watching"
-        "متابعتكم",  # Arabic "Your following"
-        "مرحبا",  # Arabic "Hello" (when alone)
-        # Common continuation/filler hallucinations
-        "To be continued...",
-        "To be continued",
-        "Goodbye",
-        "Goodbye.",
-        "...",
-        "…",
-        # Single word/sound hallucinations
-        "Hmm",
-        "Hmm.",
-        "Huh",
-        "Huh.",
-        "Yeah",
-        "Yeah.",
-        "Yes",
-        "Yes.",
-        "No",
-        "No.",
-        "Um",
-        "Um.",
-        "Ah",
-        "Ah.",
-    ]
-)
-
-
-def deloop_text(text: str, min_ngram: int = 2, max_ngram: int = 6, min_repeats: int = 3) -> str:
-    """Remove repeated n-gram patterns from text (delooping).
-
-    Detects and removes looping patterns where the same phrase repeats
-    multiple times consecutively. This is a common Whisper hallucination pattern.
-
-    Args:
-        text: Input text to deloop
-        min_ngram: Minimum n-gram size to check (default: 2 words)
-        max_ngram: Maximum n-gram size to check (default: 6 words)
-        min_repeats: Minimum consecutive repeats to trigger removal (default: 3)
-
-    Returns:
-        Delooped text with repeated patterns reduced to single occurrence
-    """
-    if not text or not text.strip():
-        return text
-
-    words = text.split()
-    if len(words) < min_ngram * min_repeats:
-        return text
-
-    result_words = words.copy()
-    changed = True
-
-    # Iterate until no more changes (handles nested loops)
-    while changed:
-        changed = False
-        # Check n-grams from largest to smallest
-        for n in range(max_ngram, min_ngram - 1, -1):
-            i = 0
-            new_words = []
-            while i < len(result_words):
-                # Check if we have an n-gram that repeats
-                if i + n * min_repeats <= len(result_words):
-                    ngram = tuple(result_words[i : i + n])
-                    repeat_count = 1
-
-                    # Count consecutive repeats
-                    j = i + n
-                    while j + n <= len(result_words):
-                        next_ngram = tuple(result_words[j : j + n])
-                        if next_ngram == ngram:
-                            repeat_count += 1
-                            j += n
-                        else:
-                            break
-
-                    if repeat_count >= min_repeats:
-                        # Found a loop - keep only one occurrence
-                        new_words.extend(result_words[i : i + n])
-                        i = j  # Skip all repetitions
-                        changed = True
-                        continue
-
-                new_words.append(result_words[i])
-                i += 1
-
-            result_words = new_words
-
-    return " ".join(result_words)
-
-
-def is_hallucination(text: str, duration: float) -> tuple[bool, str]:
-    """Check if text is likely a hallucination.
-
-    Args:
-        text: Transcribed text to check
-        duration: Duration of the segment in seconds
-
-    Returns:
-        Tuple of (is_hallucination, reason)
-    """
-    if not text or not text.strip():
-        return True, "empty"
-
-    text_clean = text.strip()
-    text_lower = text_clean.lower()
-
-    # Check BoH (exact match)
-    if text_lower in HALLUCINATION_PHRASES:
-        return True, "boh_exact"
-
-    # Check BoH (stripped punctuation)
-    text_no_punct = text_lower.rstrip(".,!?…")
-    if text_no_punct in HALLUCINATION_PHRASES:
-        return True, "boh_stripped"
-
-    # Check for single repeated word
-    words = text_clean.split()
-    if len(words) > 1 and len({w.lower() for w in words}) == 1:
-        return True, "single_word_repeat"
-
-    # Check for excessively long segment (hallucination indicator)
-    if duration > 10.0:
-        return True, "too_long"
-
-    # Check for very short text with long duration (silence hallucination)
-    if duration > 3.0 and len(text_clean) < 10:
-        return True, "short_text_long_duration"
-
-    # Check word rate - very low word rate indicates hallucination
-    word_count = len(words)
-    if duration > 2.0 and word_count / duration < 0.5:  # Less than 0.5 words/sec
-        return True, "low_word_rate"
-
-    return False, ""
-
 
 _executor = ThreadPoolExecutor(max_workers=2)
 
@@ -520,121 +293,40 @@ def extract_speaker_audio(
     return np.array([], dtype=audio.dtype)
 
 
-# Whisper supported language codes
-# Languages not in this set will use multilingual mode
-WHISPER_LANGUAGES = frozenset(
-    [
-        "af",
-        "am",
-        "ar",
-        "as",
-        "az",
-        "ba",
-        "be",
-        "bg",
-        "bn",
-        "bo",
-        "br",
-        "bs",
-        "ca",
-        "cs",
-        "cy",
-        "da",
-        "de",
-        "el",
-        "en",
-        "es",
-        "et",
-        "eu",
-        "fa",
-        "fi",
-        "fo",
-        "fr",
-        "gl",
-        "gu",
-        "ha",
-        "haw",
-        "he",
-        "hi",
-        "hr",
-        "ht",
-        "hu",
-        "hy",
-        "id",
-        "is",
-        "it",
-        "ja",
-        "jw",
-        "ka",
-        "kk",
-        "km",
-        "kn",
-        "ko",
-        "la",
-        "lb",
-        "ln",
-        "lo",
-        "lt",
-        "lv",
-        "mg",
-        "mi",
-        "mk",
-        "ml",
-        "mn",
-        "mr",
-        "ms",
-        "mt",
-        "my",
-        "ne",
-        "nl",
-        "nn",
-        "no",
-        "oc",
-        "pa",
-        "pl",
-        "ps",
-        "pt",
-        "ro",
-        "ru",
-        "sa",
-        "sd",
-        "si",
-        "sk",
-        "sl",
-        "sn",
-        "so",
-        "sq",
-        "sr",
-        "su",
-        "sv",
-        "sw",
-        "ta",
-        "te",
-        "tg",
-        "th",
-        "tk",
-        "tl",
-        "tr",
-        "tt",
-        "uk",
-        "ur",
-        "uz",
-        "vi",
-        "yi",
-        "yo",
-        "zh",
-        "yue",
-    ]
-)
+def _extract_segment_audio(
+    audio: np.ndarray,
+    diar_seg: SpeakerSegment,
+    window_start: float,
+    sample_rate: int = 16000,
+    padding_sec: float = 0.3,
+) -> tuple[np.ndarray | None, float]:
+    """Extract audio for a diarization segment with padding.
 
-# Map unsupported languages to closest supported alternatives
-LANGUAGE_FALLBACKS = {
-    "ku": None,  # Kurdish - no close match, use multilingual
-}
+    Returns:
+        Tuple of (segment_audio, padded_start) or (None, 0.0) if too short.
+    """
+    start_rel = diar_seg.start - window_start
+    end_rel = diar_seg.end - window_start
+
+    padded_start = max(0, start_rel - padding_sec)
+    padded_end = min(len(audio) / sample_rate, end_rel + padding_sec)
+
+    start_sample = int(padded_start * sample_rate)
+    end_sample = int(padded_end * sample_rate)
+
+    segment_duration = diar_seg.end - diar_seg.start
+    if segment_duration < 0.5:
+        print(f"  SKIP short diar segment: {segment_duration:.2f}s")
+        return None, 0.0
+
+    if end_sample - start_sample < int(0.5 * sample_rate):
+        return None, 0.0
+
+    return audio[start_sample:end_sample], padded_start
 
 
-def transcribe_speaker_segment(
-    model,
+def _transcribe_speaker_segment(
+    backend,
     audio: np.ndarray,
     language: str | None,
     diar_seg: SpeakerSegment,
@@ -642,104 +334,31 @@ def transcribe_speaker_segment(
     sample_rate: int = 16000,
     padding_sec: float = 0.3,
 ) -> list[dict]:
-    """Transcribe a single speaker segment with explicit language hint.
+    """Transcribe a single speaker segment via the ASR backend.
 
-    Args:
-        model: Whisper model
-        audio: Full audio window
-        language: Language code to use (or None for multilingual)
-        diar_seg: Diarization segment with start/end times
-        window_start: Absolute start time of the audio window
-        sample_rate: Audio sample rate
-        padding_sec: Padding to add before/after segment boundaries
-
-    Returns:
-        List of segment dicts with text, timing, speaker, and language
+    Extracts audio with padding, delegates to backend.transcribe() + post_process().
     """
-    # Extract audio for this speaker segment with padding for context
-    start_rel = diar_seg.start - window_start
-    end_rel = diar_seg.end - window_start
-
-    # Add padding to capture context (helps with word boundaries)
-    padded_start = max(0, start_rel - padding_sec)
-    padded_end = min(len(audio) / sample_rate, end_rel + padding_sec)
-
-    start_sample = int(padded_start * sample_rate)
-    end_sample = int(padded_end * sample_rate)
-
-    # Skip segments that are too short even with padding
-    segment_duration = diar_seg.end - diar_seg.start
-    if segment_duration < 0.5:  # Skip <0.5s diarization segments (likely truncated)
-        print(f"  SKIP short diar segment: {segment_duration:.2f}s")
-        return []
-
-    if end_sample - start_sample < int(0.5 * sample_rate):  # Skip <0.5s audio
-        return []
-
-    segment_audio = audio[start_sample:end_sample]
-
-    # Handle unsupported languages - use fallback or multilingual mode
-    whisper_lang = language
-    original_lang = language  # Keep original for segment tagging
-    if language and language != "unknown" and language not in WHISPER_LANGUAGES:
-        # Check for fallback mapping
-        whisper_lang = LANGUAGE_FALLBACKS.get(language)
-        if whisper_lang is None:
-            print(f"  Language {language} not supported by Whisper, using multilingual")
-
-    # Get initial prompt for bilingual context (helps ASR recognize language patterns)
-    # Uses the foreign language as key since German is always present
-    initial_prompt = BILINGUAL_PROMPTS.get(original_lang) if original_lang else None
-
-    # Transcribe with explicit language (or multilingual if unknown/unsupported)
-    use_multilingual = whisper_lang is None or whisper_lang == "unknown"
-    segments, info = model.transcribe(
-        segment_audio,
-        language=whisper_lang if not use_multilingual else None,
-        beam_size=1,
-        patience=1.0,
-        vad_filter=True,
-        vad_parameters={
-            "threshold": 0.35,
-            "min_silence_duration_ms": 300,
-            "min_speech_duration_ms": 200,
-            "speech_pad_ms": 250,
-        },
-        compression_ratio_threshold=1.8,
-        no_speech_threshold=0.3,
-        log_prob_threshold=-0.8,
-        condition_on_previous_text=False,
-        word_timestamps=True,
-        hallucination_silence_threshold=1.5,
-        multilingual=use_multilingual,
-        language_detection_threshold=0.5,
-        initial_prompt=initial_prompt,  # Bilingual context prompt
+    segment_audio, padded_start = _extract_segment_audio(
+        audio, diar_seg, window_start, sample_rate, padding_sec
     )
+    if segment_audio is None:
+        return []
+
+    prompt = backend.get_bilingual_prompt(language) if language else None
+    asr_result = backend.transcribe(segment_audio, language=language, initial_prompt=prompt)
+    filtered = backend.post_process(asr_result.segments)
 
     results = []
-    for seg in segments:
-        text = seg.text.strip()
-        if len(text) < 2:
-            continue
-
-        # Convert times back to window-relative (accounting for padding)
-        # seg.start/end are relative to padded_start, so add padded_start to get window-relative
-        seg_start = padded_start + seg.start
-        seg_end = padded_start + seg.end
-
+    for seg in filtered:
         results.append(
             {
-                "start": seg_start,
-                "end": seg_end,
-                "text": text,
+                "start": padded_start + seg.start,
+                "end": padded_start + seg.end,
+                "text": seg.text,
                 "speaker_id": diar_seg.speaker_id,
-                # Use original language (user's intent) even if Whisper used multilingual
-                "lang": original_lang
-                if original_lang and original_lang != "unknown"
-                else info.language,
+                "lang": seg.language,
             }
         )
-
     return results
 
 
@@ -772,15 +391,12 @@ def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
     tick_start = time.time()
 
     audio, window_start = session.get_window_audio()
-    # Use audio buffer time for finalization, not wall clock time.
-    # This ensures segments finalize based on audio position, which is correct
-    # when streaming pre-recorded audio faster/slower than realtime.
     now_sec = session.get_current_time()
 
     if len(audio) < 1600:
         return list(session.segment_tracker.finalized_segments), []
 
-    model = get_model()
+    backend = get_asr_backend()
 
     # Debug audio stats
     audio_rms = float(np.sqrt(np.mean(audio**2)))
@@ -794,93 +410,23 @@ def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
     detect_time = time.time() - detect_start
 
     if not diar_segments:
-        # Fallback: no speaker segments, run full-window ASR with multilingual
         print("No speaker segments, falling back to full-window ASR")
-        return _run_asr_fallback(model, session, audio, window_start, now_sec)
+        return _run_asr_fallback(session, audio, window_start, now_sec)
 
     print(f"Speaker detection: {len(diar_segments)} segments in {detect_time * 1000:.1f}ms")
 
     # STEP 2: Detect language per speaker from raw audio (BEFORE ASR)
-    speaker_languages: dict[str, tuple[str, float]] = {}  # speaker_id -> (lang, confidence)
-    unique_speakers = {seg.speaker_id for seg in diar_segments}
-
-    # Language confusion groups - SpeechBrain often confuses these similar languages
-    # If user selected a language and detection returns a confused one, use user's choice
-    LANGUAGE_CONFUSION_GROUPS = [
-        {"bg", "sl", "mk"},  # Bulgarian, Slovenian, Macedonian (South Slavic)
-        {"sr", "bs", "hr"},  # Serbian, Bosnian, Croatian (mutually intelligible)
-        {"ku", "fa", "ps"},  # Kurdish, Farsi, Pashto (Iranian languages)
-        {"uk", "ru", "be"},  # Ukrainian, Russian, Belarusian (East Slavic)
-        {"cs", "sk"},  # Czech, Slovak
-        {"no", "da", "sv"},  # Norwegian, Danish, Swedish (Scandinavian)
-        {"id", "ms"},  # Indonesian, Malay
-    ]
-
-    def correct_language_confusion(detected: str, user_hint: str | None, confidence: float) -> str:
-        """Correct language detection if user hint is in same confusion group."""
-        if not user_hint or detected == user_hint:
-            return detected
-
-        # Check confusion groups (similar languages that SpeechBrain confuses)
-        for group in LANGUAGE_CONFUSION_GROUPS:
-            if detected in group and user_hint in group:
-                print(f"    Correcting {detected} → {user_hint} (user hint, confusion group)")
-                return user_hint
-
-        # If detected as non-German but user specified a different foreign language,
-        # trust the user's hint (SpeechBrain often misidentifies rare languages)
-        if detected not in ("de", "unknown") and user_hint not in ("de", "unknown"):
-            print(f"    Correcting {detected} → {user_hint} (user hint, foreign speaker)")
-            return user_hint
-
-        # If detected as German with low confidence for a foreign language hint,
-        # the speaker might actually be speaking the foreign language
-        if detected == "de" and confidence < 0.9 and user_hint not in ("de", "unknown"):
-            print(f"    Correcting {detected} → {user_hint} (user hint, low confidence de)")
-            return user_hint
-
-        return detected
-
-    for speaker_id in unique_speakers:
-        # Extract all audio for this speaker
-        speaker_audio = extract_speaker_audio(audio, diar_segments, speaker_id, window_start)
-
-        if len(speaker_audio) < 8000:  # Need at least 0.5s for reliable detection
-            print(f"  {speaker_id}: audio too short ({len(speaker_audio) / 16000:.2f}s)")
-            continue
-
-        # Use SpeechBrain language detection on raw audio
-        detected_lang, confidence = session.language_tracker.get_speaker_language(
-            speaker_id, speaker_audio, 16000
-        )
-
-        # Always apply correction for confused languages (even for cached values)
-        lang = detected_lang
-        corrected = correct_language_confusion(lang, session.foreign_lang, confidence)
-        if corrected != lang:
-            lang = corrected
-            # Update the cached language in tracker with corrected value
-            session.language_tracker.set_speaker_language(speaker_id, lang, confidence)
-
-        speaker_languages[speaker_id] = (lang, confidence)
-        print(f"  {speaker_id} → {lang} (confidence={confidence:.2f})")
-
-        # Update foreign language tracking - only set if it's a supported language
-        if lang not in ("unknown", "de") and lang in LANG_INFO and session.foreign_lang is None:
-            session.foreign_lang = lang
-            print(f"Foreign language detected: {lang}")
+    speaker_languages = _detect_speaker_languages(session, audio, diar_segments, window_start)
 
     # STEP 3: Transcribe per speaker with their detected language
     asr_start = time.time()
-    hyp_segments = []
+    hyp_segments: list[dict] = []
 
-    # Group consecutive segments by speaker to reduce ASR calls
     for diar_seg in diar_segments:
         speaker_id = diar_seg.speaker_id
         lang, confidence = speaker_languages.get(speaker_id, ("unknown", 0.0))
 
         # Skip segments that start right at window boundary (likely truncated from earlier)
-        # These are the tail ends of segments that started before this window
         segment_rel_start = diar_seg.start - window_start
         if segment_rel_start < 0.5 and (diar_seg.end - diar_seg.start) < 1.0:
             print(
@@ -889,32 +435,11 @@ def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
             )
             continue
 
-        # Use detected language if confident, otherwise let Whisper decide
-        # Threshold lowered from 0.7 to 0.5 to use more detected languages
         use_lang = lang if confidence > 0.5 and lang != "unknown" else None
 
-        # Transcribe this speaker segment
-        seg_results = transcribe_speaker_segment(model, audio, use_lang, diar_seg, window_start)
-
-        # Filter hallucinations and apply delooping
-        for seg in seg_results:
-            text = seg["text"].strip()
-            duration = seg["end"] - seg["start"]
-
-            # Apply delooping to remove repeated phrases
-            delooped_text = deloop_text(text)
-            if delooped_text != text:
-                print(f"  DELOOP: '{text[:40]}...' -> '{delooped_text[:40]}...'")
-                text = delooped_text
-                seg["text"] = text
-
-            # Check for hallucinations
-            is_hal, reason = is_hallucination(text, duration)
-            if is_hal:
-                print(f"  SKIP hallucination ({reason}): {text[:50]}")
-                continue
-
-            hyp_segments.append(seg)
+        # Transcribe via backend (includes post_process: delooping + hallucination filtering)
+        seg_results = _transcribe_speaker_segment(backend, audio, use_lang, diar_seg, window_start)
+        hyp_segments.extend(seg_results)
 
     asr_time = time.time() - asr_start
     _metrics["asr_times"].append(asr_time)
@@ -928,7 +453,6 @@ def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
 
     # Determine detected language for session (backwards compatibility)
     if session.src_lang == "auto":
-        # Use most common non-unknown language from speakers
         lang_counts: dict[str, int] = {}
         for lang, _ in speaker_languages.values():
             if lang != "unknown":
@@ -953,70 +477,29 @@ def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
 
 
 def _transcribe_channel(
-    model,
+    backend,
     audio: np.ndarray,
     language: str | None,
     speaker_id: str,
 ) -> list[dict]:
-    """Transcribe a full channel buffer with a known language hint.
-
-    Simpler than transcribe_speaker_segment() - no diarization segment
-    extraction needed since the entire buffer IS one speaker.
-    """
-    if len(audio) < 1600:  # < 0.1s at 16kHz
+    """Transcribe a full channel buffer via the ASR backend."""
+    if len(audio) < 1600:
         return []
 
-    # Handle unsupported languages
-    whisper_lang = language
-    original_lang = language
-    if language and language != "unknown" and language not in WHISPER_LANGUAGES:
-        whisper_lang = LANGUAGE_FALLBACKS.get(language)
-        if whisper_lang is None:
-            print(f"  Language {language} not supported by Whisper, using multilingual")
+    prompt = backend.get_bilingual_prompt(language) if language else None
+    asr_result = backend.transcribe(audio, language=language, initial_prompt=prompt)
+    filtered = backend.post_process(asr_result.segments)
 
-    initial_prompt = BILINGUAL_PROMPTS.get(original_lang) if original_lang else None
-    use_multilingual = whisper_lang is None or whisper_lang == "unknown"
-
-    segments, info = model.transcribe(
-        audio,
-        language=whisper_lang if not use_multilingual else None,
-        beam_size=1,
-        patience=1.0,
-        vad_filter=True,
-        vad_parameters={
-            "threshold": 0.35,
-            "min_silence_duration_ms": 300,
-            "min_speech_duration_ms": 200,
-            "speech_pad_ms": 250,
-        },
-        compression_ratio_threshold=1.8,
-        no_speech_threshold=0.3,
-        log_prob_threshold=-0.8,
-        condition_on_previous_text=False,
-        word_timestamps=True,
-        hallucination_silence_threshold=1.5,
-        multilingual=use_multilingual,
-        language_detection_threshold=0.5,
-        initial_prompt=initial_prompt,
-    )
-
-    results = []
-    for seg in segments:
-        text = seg.text.strip()
-        if len(text) < 2:
-            continue
-        results.append(
-            {
-                "start": seg.start,
-                "end": seg.end,
-                "text": text,
-                "speaker_id": speaker_id,
-                "lang": original_lang
-                if original_lang and original_lang != "unknown"
-                else info.language,
-            }
-        )
-    return results
+    return [
+        {
+            "start": seg.start,
+            "end": seg.end,
+            "text": seg.text,
+            "speaker_id": speaker_id,
+            "lang": seg.language,
+        }
+        for seg in filtered
+    ]
 
 
 def run_asr_dual_channel(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
@@ -1039,7 +522,7 @@ def run_asr_dual_channel(session: StreamingSession) -> tuple[list[Segment], list
     if len(german_audio) < 1600 and len(foreign_audio) < 1600:
         return list(session.segment_tracker.finalized_segments), []
 
-    model = get_model()
+    backend = get_asr_backend()
 
     print(
         f"Dual-channel pipeline: german={len(german_audio)} samples, "
@@ -1047,18 +530,11 @@ def run_asr_dual_channel(session: StreamingSession) -> tuple[list[Segment], list
     )
 
     asr_start = time.time()
-    hyp_segments: list[dict] = []
 
-    # Transcribe German channel
-    german_results = _transcribe_channel(model, german_audio, "de", "SPEAKER_00")
-
-    # Transcribe foreign channel
-    foreign_lang = session.foreign_lang
+    # Transcribe both channels via backend
+    german_results = _transcribe_channel(backend, german_audio, "de", "SPEAKER_00")
     foreign_results = _transcribe_channel(
-        model,
-        foreign_audio,
-        foreign_lang,
-        "SPEAKER_01",
+        backend, foreign_audio, session.foreign_lang, "SPEAKER_01"
     )
 
     # Auto-detect foreign language from results if not yet known
@@ -1070,25 +546,7 @@ def run_asr_dual_channel(session: StreamingSession) -> tuple[list[Segment], list
                 print(f"Dual-channel: foreign language detected as {lang}")
                 break
 
-    # Filter hallucinations and apply delooping on both channels
-    for seg in german_results + foreign_results:
-        text = seg["text"].strip()
-        duration = seg["end"] - seg["start"]
-
-        delooped_text = deloop_text(text)
-        if delooped_text != text:
-            print(f"  DELOOP: '{text[:40]}...' -> '{delooped_text[:40]}...'")
-            text = delooped_text
-            seg["text"] = text
-
-        is_hal, reason = is_hallucination(text, duration)
-        if is_hal:
-            print(f"  SKIP hallucination ({reason}): {text[:50]}")
-            continue
-
-        hyp_segments.append(seg)
-
-    # Sort by time to interleave both channels
+    hyp_segments = german_results + foreign_results
     hyp_segments.sort(key=lambda s: s["start"])
 
     asr_time = time.time() - asr_start
@@ -1096,7 +554,6 @@ def run_asr_dual_channel(session: StreamingSession) -> tuple[list[Segment], list
 
     print(f"Dual-channel ASR: {len(hyp_segments)} segments in {asr_time * 1000:.1f}ms")
 
-    # Set detected language for session
     session.detected_lang = session.foreign_lang or "unknown"
 
     all_segments, newly_finalized = session.segment_tracker.update_from_hypothesis(
@@ -1112,66 +569,109 @@ def run_asr_dual_channel(session: StreamingSession) -> tuple[list[Segment], list
     return all_segments, newly_finalized
 
 
+def _detect_speaker_languages(
+    session: StreamingSession,
+    audio: np.ndarray,
+    diar_segments: list[SpeakerSegment],
+    window_start: float,
+) -> dict[str, tuple[str, float]]:
+    """Detect language per speaker from raw audio using SpeechBrain.
+
+    Returns:
+        Dict mapping speaker_id -> (language_code, confidence)
+    """
+    speaker_languages: dict[str, tuple[str, float]] = {}
+    unique_speakers = {seg.speaker_id for seg in diar_segments}
+
+    # Language confusion groups - SpeechBrain often confuses these similar languages
+    language_confusion_groups = [
+        {"bg", "sl", "mk"},
+        {"sr", "bs", "hr"},
+        {"ku", "fa", "ps"},
+        {"uk", "ru", "be"},
+        {"cs", "sk"},
+        {"no", "da", "sv"},
+        {"id", "ms"},
+    ]
+
+    def correct_language_confusion(detected: str, user_hint: str | None, confidence: float) -> str:
+        if not user_hint or detected == user_hint:
+            return detected
+
+        for group in language_confusion_groups:
+            if detected in group and user_hint in group:
+                print(f"    Correcting {detected} → {user_hint} (user hint, confusion group)")
+                return user_hint
+
+        if detected not in ("de", "unknown") and user_hint not in ("de", "unknown"):
+            print(f"    Correcting {detected} → {user_hint} (user hint, foreign speaker)")
+            return user_hint
+
+        if detected == "de" and confidence < 0.9 and user_hint not in ("de", "unknown"):
+            print(f"    Correcting {detected} → {user_hint} (user hint, low confidence de)")
+            return user_hint
+
+        return detected
+
+    for speaker_id in unique_speakers:
+        speaker_audio = extract_speaker_audio(audio, diar_segments, speaker_id, window_start)
+
+        if len(speaker_audio) < 8000:
+            print(f"  {speaker_id}: audio too short ({len(speaker_audio) / 16000:.2f}s)")
+            continue
+
+        detected_lang, confidence = session.language_tracker.get_speaker_language(
+            speaker_id, speaker_audio, 16000
+        )
+
+        lang = detected_lang
+        corrected = correct_language_confusion(lang, session.foreign_lang, confidence)
+        if corrected != lang:
+            lang = corrected
+            session.language_tracker.set_speaker_language(speaker_id, lang, confidence)
+
+        speaker_languages[speaker_id] = (lang, confidence)
+        print(f"  {speaker_id} → {lang} (confidence={confidence:.2f})")
+
+        if lang not in ("unknown", "de") and lang in LANG_INFO and session.foreign_lang is None:
+            session.foreign_lang = lang
+            print(f"Foreign language detected: {lang}")
+
+    return speaker_languages
+
+
 def _run_asr_fallback(
-    model,
     session: StreamingSession,
     audio: np.ndarray,
     window_start: float,
     now_sec: float,
 ) -> tuple[list[Segment], list[Segment]]:
     """Fallback ASR when diarization fails - uses full window with multilingual."""
+    backend = get_asr_backend()
     asr_start = time.time()
 
-    asr_segments, info = model.transcribe(
-        audio,
-        beam_size=1,
-        patience=1.0,
-        vad_filter=True,
-        vad_parameters={
-            "threshold": 0.35,
-            "min_silence_duration_ms": 300,
-            "min_speech_duration_ms": 200,
-            "speech_pad_ms": 250,
-        },
-        compression_ratio_threshold=1.8,
-        no_speech_threshold=0.3,
-        log_prob_threshold=-0.8,
-        condition_on_previous_text=False,
-        word_timestamps=True,
-        hallucination_silence_threshold=1.5,
-        multilingual=True,
-        language_detection_threshold=0.5,
-    )
-    asr_segments = list(asr_segments)
+    asr_result = backend.transcribe(audio)
+    filtered = backend.post_process(asr_result.segments)
+
     asr_time = time.time() - asr_start
     _metrics["asr_times"].append(asr_time)
 
-    print(f"Fallback ASR: {len(asr_segments)} segs, lang={info.language}, {asr_time * 1000:.1f}ms")
+    print(
+        f"Fallback ASR: {len(filtered)} segs, "
+        f"lang={asr_result.detected_language}, {asr_time * 1000:.1f}ms"
+    )
 
     hyp_segments = []
-    for seg in asr_segments:
-        text = seg.text.strip()
-        duration = seg.end - seg.start
-
-        # Apply delooping to remove repeated phrases
-        delooped_text = deloop_text(text)
-        if delooped_text != text:
-            print(f"  DELOOP: '{text[:40]}...' -> '{delooped_text[:40]}...'")
-            text = delooped_text
-
-        # Check for hallucinations
-        is_hal, reason = is_hallucination(text, duration)
-        if is_hal:
-            print(f"  SKIP hallucination ({reason}): {text[:50]}")
-            continue
-
+    for seg in filtered:
         # Use SpeechBrain for segment language detection
         seg_start_sample = int(seg.start * 16000)
         seg_end_sample = int(seg.end * 16000)
         segment_audio = audio[seg_start_sample : min(seg_end_sample, len(audio))]
 
-        speechbrain_lang, confidence = detect_language_from_audio(segment_audio, 16000)
-        segment_lang = speechbrain_lang if speechbrain_lang != "unknown" else info.language
+        speechbrain_lang, confidence = detect_language_from_audio(segment_audio, 16000)  # noqa: F841
+        segment_lang = (
+            speechbrain_lang if speechbrain_lang != "unknown" else asr_result.detected_language
+        )
 
         if (
             segment_lang not in ("unknown", "de")
@@ -1185,14 +685,14 @@ def _run_asr_fallback(
             {
                 "start": seg.start,
                 "end": seg.end,
-                "text": text,
+                "text": seg.text,
                 "speaker_id": None,
                 "lang": segment_lang,
             }
         )
 
     if session.src_lang == "auto":
-        session.detected_lang = info.language
+        session.detected_lang = asr_result.detected_language
     else:
         session.detected_lang = session.src_lang
 
@@ -1209,7 +709,8 @@ def _run_asr_fallback(
 def run_translation(text: str, src_lang: str, tgt_lang: str) -> str:
     """Translate a single text from src_lang to tgt_lang."""
     mt_start = time.time()
-    result = translate_texts([text], src_lang=src_lang, tgt_lang=tgt_lang)[0]
+    mt_backend = get_translation_backend()
+    result = mt_backend.translate([text], src_lang=src_lang, tgt_lang=tgt_lang)[0]
     mt_time = time.time() - mt_start
     _metrics["mt_times"].append(mt_time)
     return result
@@ -1526,6 +1027,61 @@ async def handle_websocket(websocket: WebSocket):
                                     }
                                 )
                             )
+
+                        # Run summarization if backend is configured
+                        summ_backend = get_summarization_backend()
+                        if summ_backend is not None and finalized:
+                            foreign_lang = session.foreign_lang or "en"
+                            summ_segments = [
+                                {
+                                    "src": seg.src,
+                                    "src_lang": seg.src_lang,
+                                    "translations": session.translations.get(seg.id, {}),
+                                }
+                                for seg in finalized
+                            ]
+                            await websocket.send_text(
+                                json.dumps(
+                                    {
+                                        "type": "summary_progress",
+                                        "step": "summarize",
+                                        "message": "Generating summaries...",
+                                    }
+                                )
+                            )
+                            try:
+                                loop = asyncio.get_event_loop()
+                                foreign_summary, german_summary = await loop.run_in_executor(
+                                    _executor,
+                                    summ_backend.summarize_bilingual,
+                                    summ_segments,
+                                    foreign_lang,
+                                )
+                                await websocket.send_text(
+                                    json.dumps(
+                                        {
+                                            "type": "summary",
+                                            "foreign_summary": foreign_summary,
+                                            "german_summary": german_summary,
+                                            "foreign_lang": foreign_lang,
+                                        }
+                                    )
+                                )
+                                # Broadcast summary to viewers
+                                if session_token:
+                                    entry = await registry.get(session_token)
+                                    if entry:
+                                        await broadcast_to_viewers(
+                                            entry,
+                                            {
+                                                "type": "summary",
+                                                "foreign_summary": foreign_summary,
+                                                "german_summary": german_summary,
+                                                "foreign_lang": foreign_lang,
+                                            },
+                                        )
+                            except Exception as e:
+                                print(f"Summarization error: {e}")
 
                         running = False
                         print("Recording stopped, closing connection")

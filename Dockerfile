@@ -27,16 +27,23 @@ RUN pip3 install --no-cache-dir uv --break-system-packages
 ENV CMAKE_ARGS="-DGGML_CUDA=ON -DGGML_CUDA_FORCE_CUBLAS=1 -DGGML_CUDA_NO_PINNED=1 -DCMAKE_CUDA_ARCHITECTURES=120 -DGGML_NATIVE=OFF -DGGML_AVX=ON -DGGML_AVX2=ON -DGGML_AVX512=OFF -DGGML_FMA=ON -DGGML_F16C=ON"
 ENV FORCE_CMAKE=1
 
+# Backend selection (build-time)
+ARG ASR_BACKEND=whisper
+ARG MT_BACKEND=translategemma
+ARG SUMM_BACKEND=
+
 WORKDIR /app
 
 # Copy dependency files first for layer caching
 COPY pyproject.toml uv.lock ./
 
-# Create symlink for CUDA stub library and install dependencies
+# Create symlink for CUDA stub library and install selected backends
 RUN ln -s /usr/local/cuda/lib64/stubs/libcuda.so /usr/local/cuda/lib64/libcuda.so.1 && \
     ln -s /usr/local/cuda/lib64/libcuda.so.1 /usr/local/cuda/lib64/libcuda.so && \
     ldconfig && \
-    uv sync --frozen
+    EXTRAS="--extra asr-${ASR_BACKEND} --extra mt-${MT_BACKEND}" && \
+    if [ -n "$SUMM_BACKEND" ]; then EXTRAS="$EXTRAS --extra summ-${SUMM_BACKEND}"; fi && \
+    uv sync --frozen $EXTRAS
 
 # Runtime stage - must match builder CUDA version
 FROM nvidia/cuda:12.9.0-cudnn-runtime-ubuntu24.04
@@ -70,11 +77,21 @@ COPY src/ ./src/
 # Copy static files
 COPY static/ ./static/
 
+# Re-declare ARGs for runtime stage
+ARG ASR_BACKEND=whisper
+ARG MT_BACKEND=translategemma
+ARG SUMM_BACKEND=
+
 # Set PYTHONPATH to include src directory
 ENV PYTHONPATH=/app/src
 ENV PATH="/app/.venv/bin:$PATH"
 # Prioritize PyTorch's bundled cuDNN over system cuDNN to avoid version mismatch
 ENV LD_LIBRARY_PATH="/app/.venv/lib/python3.12/site-packages/nvidia/cudnn/lib:${LD_LIBRARY_PATH}"
+
+# Backend selection (runtime)
+ENV ASR_BACKEND=${ASR_BACKEND}
+ENV MT_BACKEND=${MT_BACKEND}
+ENV SUMM_BACKEND=${SUMM_BACKEND}
 
 # Expose port
 EXPOSE 8000

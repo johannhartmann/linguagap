@@ -26,14 +26,14 @@ import tempfile
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-import numpy as np
 from fastapi import FastAPI, File, Form, UploadFile, WebSocket
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.asr import get_model, transcribe_wav_path
+from app.asr import transcribe_wav_path
+from app.backends import get_asr_backend, get_summarization_backend, get_translation_backend
 from app.lang_id import warmup_lang_id
-from app.mt import get_llm, translate_texts
+from app.mt import translate_texts
 from app.scripts.asr_smoke import generate_silence_wav
 from app.speaker_tracker import warmup_speaker_model
 from app.streaming import get_metrics, handle_viewer_websocket, handle_websocket
@@ -48,10 +48,11 @@ def warmup_models():
     would experience significant latency (minutes for large models).
 
     Models warmed up:
-        - ASR (faster-whisper): ~2-3 GB VRAM
-        - Translation (TranslateGemma 12B): ~8 GB VRAM
         - Speaker embeddings (SpeechBrain ECAPA): ~1 GB VRAM
         - Language ID (SpeechBrain): ~1 GB VRAM
+        - ASR (via backend): ~2-3 GB VRAM
+        - Translation (via backend): ~8 GB VRAM
+        - Summarization (optional, via backend): ~4 GB VRAM
 
     Total warmup time is typically 5-10 minutes depending on network speed
     for model downloads and GPU initialization.
@@ -61,17 +62,21 @@ def warmup_models():
     warmup_speaker_model()
     warmup_lang_id()
 
-    print("Warming up ASR model...")
-    asr_model = get_model()
-    print("  Running test transcription...")
-    silence = np.zeros(16000, dtype=np.float32)
-    list(asr_model.transcribe(silence))
-    print("ASR model ready")
+    print("Warming up ASR backend...")
+    asr = get_asr_backend()
+    asr.warmup()
+    print("ASR backend ready")
 
-    print("Warming up MT model...")
-    get_llm()
-    translate_texts(["Hello"], src_lang="en", tgt_lang="de")
-    print("MT model ready")
+    print("Warming up MT backend...")
+    mt = get_translation_backend()
+    mt.warmup()
+    print("MT backend ready")
+
+    summ = get_summarization_backend()
+    if summ is not None:
+        print("Warming up summarization backend...")
+        summ.warmup()
+        print("Summarization backend ready")
 
 
 @asynccontextmanager

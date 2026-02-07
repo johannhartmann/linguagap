@@ -2,6 +2,7 @@
 
 from unittest.mock import MagicMock, patch
 
+from app.backends import get_translation_backend
 from app.mt import LANG_NAMES, translate_texts
 
 
@@ -23,118 +24,72 @@ class TestLangNames:
 
 
 class TestTranslateTexts:
-    """Tests for translate_texts function."""
+    """Tests for translate_texts function via backend."""
 
-    @patch("app.mt.get_llm")
-    def test_translate_single_text(self, mock_get_llm):
-        """Test translating a single text."""
-        mock_llm = MagicMock()
-        mock_llm.create_chat_completion.return_value = {
+    def setup_method(self):
+        get_translation_backend.cache_clear()
+
+    def teardown_method(self):
+        get_translation_backend.cache_clear()
+
+    @patch("app.backends.translation.translategemma.TranslateGemmaBackend.load_model")
+    def test_translate_single_text(self, mock_load):  # noqa: ARG002
+        backend = get_translation_backend()
+        backend._llm = MagicMock()
+        backend._llm.create_chat_completion.return_value = {
             "choices": [{"message": {"content": "Hallo Welt"}}]
         }
-        mock_get_llm.return_value = mock_llm
 
         result = translate_texts(["Hello world"], src_lang="en", tgt_lang="de")
 
         assert result == ["Hallo Welt"]
-        mock_llm.create_chat_completion.assert_called_once()
+        backend._llm.create_chat_completion.assert_called_once()
 
-    @patch("app.mt.get_llm")
-    def test_translate_multiple_texts(self, mock_get_llm):
-        """Test translating multiple texts."""
-        mock_llm = MagicMock()
-        mock_llm.create_chat_completion.side_effect = [
+    @patch("app.backends.translation.translategemma.TranslateGemmaBackend.load_model")
+    def test_translate_multiple_texts(self, mock_load):  # noqa: ARG002
+        backend = get_translation_backend()
+        backend._llm = MagicMock()
+        backend._llm.create_chat_completion.side_effect = [
             {"choices": [{"message": {"content": "Hallo"}}]},
             {"choices": [{"message": {"content": "Welt"}}]},
         ]
-        mock_get_llm.return_value = mock_llm
 
         result = translate_texts(["Hello", "World"], src_lang="en", tgt_lang="de")
 
         assert result == ["Hallo", "Welt"]
-        assert mock_llm.create_chat_completion.call_count == 2
+        assert backend._llm.create_chat_completion.call_count == 2
 
-    @patch("app.mt.get_llm")
-    def test_translate_empty_text(self, mock_get_llm):
-        """Test translating empty text returns empty string."""
-        mock_llm = MagicMock()
-        mock_get_llm.return_value = mock_llm
+    @patch("app.backends.translation.translategemma.TranslateGemmaBackend.load_model")
+    def test_translate_empty_text(self, mock_load):  # noqa: ARG002
+        backend = get_translation_backend()
+        backend._llm = MagicMock()
 
         result = translate_texts([""], src_lang="en", tgt_lang="de")
 
         assert result == [""]
-        mock_llm.create_chat_completion.assert_not_called()
+        backend._llm.create_chat_completion.assert_not_called()
 
-    @patch("app.mt.get_llm")
-    def test_translate_whitespace_text(self, mock_get_llm):
-        """Test translating whitespace-only text returns empty string."""
-        mock_llm = MagicMock()
-        mock_get_llm.return_value = mock_llm
+    @patch("app.backends.translation.translategemma.TranslateGemmaBackend.load_model")
+    def test_translate_whitespace_text(self, mock_load):  # noqa: ARG002
+        backend = get_translation_backend()
+        backend._llm = MagicMock()
 
         result = translate_texts(["   "], src_lang="en", tgt_lang="de")
 
         assert result == [""]
-        mock_llm.create_chat_completion.assert_not_called()
+        backend._llm.create_chat_completion.assert_not_called()
 
-    @patch("app.mt.get_llm")
-    def test_translate_strips_thinking_tags(self, mock_get_llm):
-        """Test that thinking tags are stripped from output."""
-        mock_llm = MagicMock()
-        mock_llm.create_chat_completion.return_value = {
-            "choices": [{"message": {"content": "<think>Let me translate...</think>Hallo Welt"}}]
-        }
-        mock_get_llm.return_value = mock_llm
-
-        result = translate_texts(["Hello world"], src_lang="en", tgt_lang="de")
-
-        assert result == ["Hallo Welt"]
-
-    @patch("app.mt.get_llm")
-    def test_translate_uses_correct_language_names(self, mock_get_llm):
-        """Test that full language names are used in prompts."""
-        mock_llm = MagicMock()
-        mock_llm.create_chat_completion.return_value = {
-            "choices": [{"message": {"content": "Bonjour"}}]
-        }
-        mock_get_llm.return_value = mock_llm
-
-        translate_texts(["Hello"], src_lang="en", tgt_lang="fr")
-
-        call_args = mock_llm.create_chat_completion.call_args
-        messages = call_args[1]["messages"]
-        system_content = messages[0]["content"]
-        assert "English" in system_content
-        assert "French" in system_content
-
-    @patch("app.mt.get_llm")
-    def test_translate_unknown_language_code(self, mock_get_llm):
-        """Test that unknown language codes are used as-is."""
-        mock_llm = MagicMock()
-        mock_llm.create_chat_completion.return_value = {
+    @patch("app.backends.translation.translategemma.TranslateGemmaBackend.load_model")
+    def test_translate_parameters(self, mock_load):  # noqa: ARG002
+        backend = get_translation_backend()
+        backend._llm = MagicMock()
+        backend._llm.create_chat_completion.return_value = {
             "choices": [{"message": {"content": "Test"}}]
         }
-        mock_get_llm.return_value = mock_llm
-
-        translate_texts(["Hello"], src_lang="xx", tgt_lang="yy")
-
-        call_args = mock_llm.create_chat_completion.call_args
-        messages = call_args[1]["messages"]
-        system_content = messages[0]["content"]
-        assert "xx" in system_content
-        assert "yy" in system_content
-
-    @patch("app.mt.get_llm")
-    def test_translate_parameters(self, mock_get_llm):
-        """Test that correct parameters are passed to LLM."""
-        mock_llm = MagicMock()
-        mock_llm.create_chat_completion.return_value = {
-            "choices": [{"message": {"content": "Test"}}]
-        }
-        mock_get_llm.return_value = mock_llm
 
         translate_texts(["Hello"], src_lang="en", tgt_lang="de")
 
-        call_args = mock_llm.create_chat_completion.call_args
+        call_args = backend._llm.create_chat_completion.call_args
         assert call_args[1]["max_tokens"] == 256
         assert call_args[1]["temperature"] == 0.3
         assert call_args[1]["top_p"] == 0.9

@@ -59,9 +59,15 @@ readinessProbe:
 
 # Environment variables
 env:
+  # Backend selection
+  ASR_BACKEND: whisper
+  MT_BACKEND: translategemma
+  SUMM_BACKEND: ""  # Empty = disabled. Set to "qwen3" to enable summarization.
+  # ASR config
   ASR_MODEL: deepdml/faster-whisper-large-v3-turbo-ct2
   ASR_DEVICE: cuda
   ASR_COMPUTE_TYPE: float16
+  # Translation config
   MT_MODEL_REPO: mradermacher/translategemma-27b-it-GGUF
   MT_MODEL_FILE: translategemma-27b-it.Q3_K_S.gguf
   MT_N_GPU_LAYERS: "-1"

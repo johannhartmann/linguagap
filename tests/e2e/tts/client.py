@@ -33,7 +33,7 @@ TARGET_SAMPLE_RATE = 16000
 DEFAULT_TURN_GAP_MS = 350
 
 # Style prompt for consistent voice across all turns
-DEFAULT_STYLE_PROMPT = "Sprich natürlich, klar und freundlich. " "Nutze kurze, natürliche Pausen."
+DEFAULT_STYLE_PROMPT = "Sprich natürlich, klar und freundlich. Nutze kurze, natürliche Pausen."
 
 
 class GeminiTTSClient:

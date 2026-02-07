@@ -10,24 +10,25 @@ from fastapi.testclient import TestClient
 def mock_models():
     """Mock ASR and MT models to avoid loading them."""
     with (
-        patch("app.main.get_model") as mock_asr,
-        patch("app.main.get_llm") as mock_llm,
+        patch("app.main.get_asr_backend") as mock_asr,
+        patch("app.main.get_translation_backend") as mock_mt,
+        patch("app.main.get_summarization_backend") as mock_summ,
         patch("app.main.translate_texts") as mock_translate,
     ):
-        # Mock ASR model
-        mock_asr_model = MagicMock()
-        mock_asr_model.transcribe.return_value = iter([])
-        mock_asr.return_value = mock_asr_model
+        mock_asr_backend = MagicMock()
+        mock_asr.return_value = mock_asr_backend
 
-        # Mock LLM
-        mock_llm.return_value = MagicMock()
+        mock_mt_backend = MagicMock()
+        mock_mt.return_value = mock_mt_backend
 
-        # Mock translate
+        mock_summ.return_value = None
+
         mock_translate.return_value = ["Translated"]
 
         yield {
             "asr": mock_asr,
-            "llm": mock_llm,
+            "mt": mock_mt,
+            "summ": mock_summ,
             "translate": mock_translate,
         }
 

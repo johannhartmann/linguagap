@@ -1,56 +1,47 @@
 """
-Automatic Speech Recognition using faster-whisper.
+Automatic Speech Recognition - thin shim delegating to the ASR backend.
 
-Provides a lazy-loaded singleton WhisperModel for GPU-accelerated transcription.
-The model is configured via environment variables and loaded on first use to
-minimize startup time.
+This module provides backward-compatible functions for file-based transcription
+used by the /transcribe_translate endpoint and /asr_smoke test. Streaming
+transcription uses the backend directly via streaming.py.
 
 Configuration:
-    ASR_MODEL: Model name or path (default: deepdml/faster-whisper-large-v3-turbo-ct2)
-    ASR_DEVICE: cuda or cpu (default: cuda)
-    ASR_COMPUTE_TYPE: Compute type for inference (default: int8_float16)
-
-Note: This module provides the base transcription capability. For streaming
-with diarization, see streaming.py which orchestrates per-speaker ASR.
+    ASR_BACKEND: Backend to use (default: "whisper")
+    ASR_MODEL: Model name or path (passed to backend)
+    ASR_DEVICE: cuda or cpu (passed to backend)
+    ASR_COMPUTE_TYPE: Compute type for inference (passed to backend)
 """
 
-import os
 from typing import Any
 
-from faster_whisper import WhisperModel
-
-ASR_MODEL = os.getenv("ASR_MODEL", "deepdml/faster-whisper-large-v3-turbo-ct2")
-ASR_DEVICE = os.getenv("ASR_DEVICE", "cuda")
-ASR_COMPUTE_TYPE = os.getenv("ASR_COMPUTE_TYPE", "int8_float16")
-
-_model: WhisperModel | None = None
+from app.backends import get_asr_backend
 
 
-def get_model() -> WhisperModel:
+def get_model():
+    """Get the ASR backend (for backward compatibility with warmup code).
+
+    Returns the backend object, which is no longer a raw WhisperModel but
+    implements the ASRBackend interface. Code that only calls warmup/load_model
+    will work transparently.
     """
-    Get the faster-whisper model singleton.
-
-    Loads the model on first call and caches it for subsequent calls.
-    Model loading includes downloading from HuggingFace if not cached locally.
-
-    Returns:
-        WhisperModel instance configured per environment variables
-    """
-    global _model
-    if _model is None:
-        print(f"  Loading WhisperModel: {ASR_MODEL}")
-        print(f"  Device: {ASR_DEVICE}, Compute type: {ASR_COMPUTE_TYPE}")
-        _model = WhisperModel(
-            ASR_MODEL,
-            device=ASR_DEVICE,
-            compute_type=ASR_COMPUTE_TYPE,
-        )
-        print("  WhisperModel loaded")
-    return _model
+    backend = get_asr_backend()
+    backend.load_model()
+    return backend
 
 
 def transcribe_wav_path(path: str) -> dict[str, Any]:
-    model = get_model()
+    """Transcribe a WAV file and return segments with language detection.
+
+    Uses the underlying faster-whisper model's ability to accept file paths
+    directly. This bypasses the backend.transcribe() method to avoid
+    requiring soundfile as a dependency for file-based transcription.
+    """
+    backend = get_asr_backend()
+    backend.load_model()
+
+    # Access the underlying model for file-path transcription
+    # This is Whisper-specific but this shim is only used by HTTP endpoints
+    model = backend._model  # noqa: SLF001
     segments, info = model.transcribe(path)
 
     result_segments = []
