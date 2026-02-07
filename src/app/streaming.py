@@ -1434,7 +1434,7 @@ async def handle_websocket(websocket: WebSocket):
 
                     session = StreamingSession(sample_rate=sample_rate, src_lang=src_lang)
                     # Set foreign language hint if provided (improves ASR for known language pairs)
-                    if foreign_lang:
+                    if foreign_lang and foreign_lang not in ("auto", "de", "unknown"):
                         session.foreign_lang = foreign_lang
                     asr_task = asyncio.create_task(asr_loop())
                     mt_task = asyncio.create_task(mt_loop())

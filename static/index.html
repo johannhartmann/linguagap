@@ -793,7 +793,7 @@
                         type: 'config',
                         sample_rate: SAMPLE_RATE,
                         src_lang: selectedLang,
-                        foreign_lang: selectedLang,
+                        foreign_lang: (selectedLang !== 'auto' && selectedLang !== 'de') ? selectedLang : null,
                         token: sessionToken
                     };
                     ws.send(JSON.stringify(config));
