@@ -284,7 +284,8 @@ class SegmentTracker:
                         match.segment.abs_start = min(match.segment.abs_start, abs_start)
                         match.segment.abs_end = max(match.segment.abs_end, abs_end)
                         match.segment.src = src_text
-                        match.segment.src_lang = seg_lang
+                        if match.segment.src_lang == "unknown":
+                            match.segment.src_lang = seg_lang
                         if speaker_id:
                             match.segment.speaker_id = speaker_id
 

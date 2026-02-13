@@ -356,7 +356,7 @@ def _transcribe_speaker_segment(
                 "end": padded_start + seg.end,
                 "text": seg.text,
                 "speaker_id": diar_seg.speaker_id,
-                "lang": seg.language,
+                "lang": language if language else seg.language,
             }
         )
     return results
@@ -496,7 +496,7 @@ def _transcribe_channel(
             "end": seg.end,
             "text": seg.text,
             "speaker_id": speaker_id,
-            "lang": seg.language,
+            "lang": language if language else seg.language,
         }
         for seg in filtered
     ]
