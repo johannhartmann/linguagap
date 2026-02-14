@@ -451,17 +451,19 @@ def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
             f"lang={seg['lang']}: {seg['text'][:40]}"
         )
 
-    # Determine detected language for session (backwards compatibility)
-    if session.src_lang == "auto":
-        lang_counts: dict[str, int] = {}
-        for lang, _ in speaker_languages.values():
-            if lang != "unknown":
-                lang_counts[lang] = lang_counts.get(lang, 0) + 1
-        session.detected_lang = (
-            max(lang_counts, key=lambda k: lang_counts[k]) if lang_counts else "unknown"
-        )
-    else:
-        session.detected_lang = session.src_lang
+    # Determine detected language for session from actual ASR results
+    lang_counts: dict[str, int] = {}
+    for lang, _ in speaker_languages.values():
+        if lang != "unknown":
+            lang_counts[lang] = lang_counts.get(lang, 0) + 1
+    session.detected_lang = (
+        max(lang_counts, key=lambda k: lang_counts[k]) if lang_counts else "unknown"
+    )
+
+    # Set foreign language from user selection if not yet detected
+    if session.foreign_lang is None and session.src_lang not in ("auto", "de"):
+        session.foreign_lang = session.src_lang
+        print(f"Foreign language set from user selection: {session.foreign_lang}")
 
     all_segments, newly_finalized = session.segment_tracker.update_from_hypothesis(
         hyp_segments=hyp_segments,
@@ -691,10 +693,12 @@ def _run_asr_fallback(
             }
         )
 
-    if session.src_lang == "auto":
-        session.detected_lang = asr_result.detected_language
-    else:
-        session.detected_lang = session.src_lang
+    session.detected_lang = asr_result.detected_language
+
+    # Set foreign language from user selection if not yet detected
+    if session.foreign_lang is None and session.src_lang not in ("auto", "de"):
+        session.foreign_lang = session.src_lang
+        print(f"Foreign language set from user selection: {session.foreign_lang}")
 
     all_segments, newly_finalized = session.segment_tracker.update_from_hypothesis(
         hyp_segments=hyp_segments,
@@ -771,20 +775,6 @@ async def handle_websocket(websocket: WebSocket):
                     )
 
                     if running:
-                        # Auto-detect foreign language from first non-German speech
-                        if session.foreign_lang is None and session.detected_lang:
-                            if session.src_lang != "auto":
-                                # User explicitly selected a foreign language
-                                if session.src_lang != "de" and session.src_lang in LANG_INFO:
-                                    session.foreign_lang = session.src_lang
-                            elif (
-                                session.detected_lang not in ("de", "unknown", None)
-                                and session.detected_lang in LANG_INFO
-                            ):
-                                # Auto-detect: first non-German speech sets the foreign language
-                                session.foreign_lang = session.detected_lang
-                                print(f"Auto-detected foreign language: {session.foreign_lang}")
-
                         # Build segments with translations where available
                         segments_data = []
                         for seg in all_segments:
