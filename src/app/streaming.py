@@ -445,6 +445,18 @@ def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
     _metrics["asr_times"].append(asr_time)
 
     print(f"Per-speaker ASR: {len(hyp_segments)} segments in {asr_time * 1000:.1f}ms")
+
+    # Set foreign language from user selection if not yet detected
+    if session.foreign_lang is None and session.src_lang not in ("auto", "de"):
+        session.foreign_lang = session.src_lang
+        print(f"Foreign language set from user selection: {session.foreign_lang}")
+
+    # Clamp languages: in a bilingual session only "de" and foreign_lang are valid
+    if session.foreign_lang:
+        for seg in hyp_segments:
+            if seg["lang"] != "de":
+                seg["lang"] = session.foreign_lang
+
     for seg in hyp_segments[:3]:
         print(
             f"  - [{seg['start']:.1f}-{seg['end']:.1f}] {seg['speaker_id']} "
@@ -459,11 +471,6 @@ def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
     session.detected_lang = (
         max(lang_counts, key=lambda k: lang_counts[k]) if lang_counts else "unknown"
     )
-
-    # Set foreign language from user selection if not yet detected
-    if session.foreign_lang is None and session.src_lang not in ("auto", "de"):
-        session.foreign_lang = session.src_lang
-        print(f"Foreign language set from user selection: {session.foreign_lang}")
 
     all_segments, newly_finalized = session.segment_tracker.update_from_hypothesis(
         hyp_segments=hyp_segments,
@@ -699,6 +706,12 @@ def _run_asr_fallback(
     if session.foreign_lang is None and session.src_lang not in ("auto", "de"):
         session.foreign_lang = session.src_lang
         print(f"Foreign language set from user selection: {session.foreign_lang}")
+
+    # Clamp languages: in a bilingual session only "de" and foreign_lang are valid
+    if session.foreign_lang:
+        for seg in hyp_segments:
+            if seg["lang"] != "de":
+                seg["lang"] = session.foreign_lang
 
     all_segments, newly_finalized = session.segment_tracker.update_from_hypothesis(
         hyp_segments=hyp_segments,
