@@ -53,6 +53,7 @@ class Segment:
     src_lang: str
     final: bool
     speaker_id: str | None = None
+    speaker_role: str | None = None  # "german" | "foreign" | None
 
 
 @dataclass
@@ -104,8 +105,43 @@ class SegmentTracker:
             return 0.0
         return overlap_duration / duration1
 
+    @staticmethod
+    def _normalize_text(text: str) -> str:
+        return " ".join(text.lower().split())
+
+    def _is_compatible_segment(
+        self,
+        existing: Segment,
+        speaker_id: str | None,
+        src_lang: str,
+        speaker_role: str | None = None,
+    ) -> bool:
+        """Check whether two segments can represent the same utterance."""
+        if (
+            existing.speaker_id
+            and speaker_id
+            and existing.speaker_id != speaker_id
+            and not (
+                existing.speaker_role and speaker_role and existing.speaker_role == speaker_role
+            )
+        ):
+            return False
+
+        existing_lang = existing.src_lang
+        return not (
+            existing_lang != "unknown"
+            and src_lang != "unknown"
+            and (existing_lang == "de") != (src_lang == "de")
+        )
+
     def _find_matching_cumulative(
-        self, abs_start: float, abs_end: float
+        self,
+        abs_start: float,
+        abs_end: float,
+        src_text: str,
+        speaker_id: str | None,
+        src_lang: str,
+        speaker_role: str | None,
     ) -> CumulativeSegment | None:
         """
         Find a cumulative segment that overlaps significantly with the given range.
@@ -128,6 +164,9 @@ class SegmentTracker:
         for cs in self.cumulative_segments:
             if cs.segment.final:
                 continue
+            if not self._is_compatible_segment(cs.segment, speaker_id, src_lang, speaker_role):
+                continue
+
             # Check both directions of overlap
             overlap1 = self._calc_overlap_ratio(
                 abs_start, abs_end, cs.segment.abs_start, cs.segment.abs_end
@@ -138,6 +177,26 @@ class SegmentTracker:
             # Match if either direction has >50% overlap
             if overlap1 > 0.5 or overlap2 > 0.5:
                 return cs
+
+            # Also match near-identical text in a short time window.
+            # This catches repeated ASR outputs of the same phrase with shifted timestamps.
+            if src_text and cs.segment.src:
+                text_a = self._normalize_text(src_text)
+                text_b = self._normalize_text(cs.segment.src)
+                if len(text_a) >= 8 and len(text_b) >= 8:
+                    if text_a == text_b:
+                        if abs(abs_start - cs.segment.abs_start) <= 2.0:
+                            return cs
+                    else:
+                        shorter, longer = (
+                            (text_a, text_b) if len(text_a) <= len(text_b) else (text_b, text_a)
+                        )
+                        if (
+                            shorter in longer
+                            and len(shorter) / len(longer) >= 0.85
+                            and abs(abs_start - cs.segment.abs_start) <= 1.5
+                        ):
+                            return cs
         return None
 
     def _overlaps_finalized(self, abs_start: float, abs_end: float, text: str = "") -> bool:
@@ -245,9 +304,17 @@ class SegmentTracker:
 
             seg_lang = seg.get("lang", src_lang)
             speaker_id = seg.get("speaker_id")
+            speaker_role = seg.get("speaker_role")
 
             # Try to find matching cumulative segment (by time overlap)
-            match = self._find_matching_cumulative(abs_start, abs_end)
+            match = self._find_matching_cumulative(
+                abs_start=abs_start,
+                abs_end=abs_end,
+                src_text=src_text,
+                speaker_id=speaker_id,
+                src_lang=seg_lang,
+                speaker_role=speaker_role,
+            )
             is_merge = False
 
             # If no overlap match, check for mergeable segment (same speaker, small gap)
@@ -287,6 +354,8 @@ class SegmentTracker:
                         match.segment.src_lang = seg_lang
                         if speaker_id:
                             match.segment.speaker_id = speaker_id
+                        if speaker_role:
+                            match.segment.speaker_role = speaker_role
 
                         match.last_updated = now_sec
                         if text_changed:
@@ -307,6 +376,7 @@ class SegmentTracker:
                     src_lang=seg_lang,
                     final=False,
                     speaker_id=speaker_id,
+                    speaker_role=speaker_role,
                 )
                 self.cumulative_segments.append(
                     CumulativeSegment(

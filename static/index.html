@@ -595,18 +595,13 @@
             segments.forEach(seg => {
                 const segLang = seg.src_lang;
                 const translations = seg.translations || {};
-                const isGermanSpeaker = (segLang === 'de');
+                const speakerRole = seg.speaker_role || (segLang === 'de' ? 'german' : 'foreign');
+                const isGermanSpeaker = speakerRole === 'german';
                 const liveClass = seg.final ? '' : ' live';
                 const speakerId = seg.speaker_id;  // From diarization
 
-                // Determine speaker alignment: SPEAKER_00 = left, SPEAKER_01 = right
-                // This keeps consistent positioning regardless of language
-                let isSpeakerLeft = true;  // default to left
-                if (speakerId && typeof speakerId === 'string') {
-                    const speakerNum = parseInt(speakerId.replace('SPEAKER_', ''), 10);
-                    isSpeakerLeft = (speakerNum === 0);
-                }
-                const bubbleClass = isSpeakerLeft ? 'speaker-left' : 'speaker-right';
+                // German speaker is always right; foreign speaker is always left.
+                const bubbleClass = isGermanSpeaker ? 'speaker-right' : 'speaker-left';
 
                 // Determine what goes on left (foreign) and right (German)
                 let leftText, rightText;
@@ -639,6 +634,7 @@
                 }
                 leftDiv.dataset.id = seg.id;
                 leftDiv.dataset.srcLang = segLang;
+                leftDiv.dataset.speakerRole = speakerRole;
                 if (speakerId) leftDiv.dataset.speakerId = speakerId;
                 leftTranscript.appendChild(leftDiv);
 
@@ -652,6 +648,7 @@
                 }
                 rightDiv.dataset.id = seg.id;
                 rightDiv.dataset.srcLang = segLang;
+                rightDiv.dataset.speakerRole = speakerRole;
                 if (speakerId) rightDiv.dataset.speakerId = speakerId;
                 rightTranscript.appendChild(rightDiv);
             });
@@ -680,7 +677,8 @@
             if (!leftDiv || !rightDiv) return;
 
             // Determine which pane needs the translation update
-            const isGermanSpeaker = (leftDiv.dataset.srcLang === 'de');
+            const speakerRole = leftDiv.dataset.speakerRole || (leftDiv.dataset.srcLang === 'de' ? 'german' : 'foreign');
+            const isGermanSpeaker = speakerRole === 'german';
 
             // Update the bubble content (handles both plain text and speaker-labeled bubbles)
             function updateBubbleContent(div, newText) {

@@ -355,6 +355,20 @@ class WhisperASRBackend(ASRBackend):
                     language=seg.language,
                     confidence=seg.confidence,
                 )
+
+            # Suppress immediate duplicate phrases from the same ASR pass.
+            if result:
+                prev = result[-1]
+                prev_norm = " ".join(prev.text.lower().split())
+                cur_norm = " ".join(seg.text.lower().split())
+                if (
+                    prev.language == seg.language
+                    and prev_norm == cur_norm
+                    and seg.start - prev.end <= 1.0
+                ):
+                    print(f"  SKIP duplicate segment: {seg.text[:50]}")
+                    continue
+
             result.append(seg)
         return result
 

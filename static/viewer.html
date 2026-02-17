@@ -84,14 +84,14 @@
             word-wrap: break-word;
             line-height: 1.5;
         }
-        /* My speech (foreign speaker) - right side, teal */
+        /* German speaker (desktop) - right side */
         .bubble.mine {
             align-self: flex-end;
             background: var(--synia-teal);
             color: white;
             border-bottom-right-radius: 6px;
         }
-        /* Their speech (German) - left side, dark teal */
+        /* Foreign speaker (mobile) - left side */
         .bubble.theirs {
             align-self: flex-start;
             background: var(--synia-dark);
@@ -268,13 +268,13 @@
             segments.forEach(seg => {
                 const segLang = seg.src_lang;
                 const translations = seg.translations || {};
-                const isGermanSpeaker = (segLang === 'de');
+                const speakerRole = seg.speaker_role || (segLang === 'de' ? 'german' : 'foreign');
+                const isGermanSpeaker = speakerRole === 'german';
                 const liveClass = seg.final ? '' : ' live';
 
-                // From foreign speaker's perspective:
-                // - Their own speech (foreign) = "mine" (right, blue)
-                // - German speaker = "theirs" (left, gray)
-                const bubbleClass = isGermanSpeaker ? 'theirs' : 'mine';
+                // Keep speaker direction consistent with desktop view:
+                // German on right, foreign on left.
+                const bubbleClass = isGermanSpeaker ? 'mine' : 'theirs';
 
                 const div = document.createElement('div');
                 div.className = 'bubble ' + bubbleClass + liveClass;
@@ -283,7 +283,7 @@
                 let html = '';
 
                 if (isGermanSpeaker) {
-                    // German speaker: show only the translation in foreign language
+                    // Show German speech translated to foreign language.
                     const translation = translations[foreignLang] || '';
                     if (translation) {
                         html = `<div class="bubble-source">${escapeHtml(translation)}</div>`;
@@ -291,7 +291,7 @@
                         html = `<div class="bubble-source" style="opacity:0.5">...</div>`;
                     }
                 } else {
-                    // Foreign speaker (me): show only my speech in my language
+                    // Show foreign speaker transcription (already in foreign language).
                     html = `<div class="bubble-source">${escapeHtml(seg.src)}</div>`;
                 }
 

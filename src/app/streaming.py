@@ -59,6 +59,31 @@ _metrics = {
 }
 
 
+def _role_from_lang(lang: str | None) -> str | None:
+    """Map a source language to a semantic speaker role."""
+    if lang == "de":
+        return "german"
+    if lang and lang != "unknown":
+        return "foreign"
+    return None
+
+
+def _resolve_segment_role(
+    _session: "StreamingSession", segment: Segment, dual_channel: bool
+) -> str | None:
+    """Resolve the role for a segment, preferring explicit role metadata."""
+    if segment.speaker_role in {"german", "foreign"}:
+        return segment.speaker_role
+
+    if dual_channel:
+        if segment.speaker_id == "SPEAKER_00":
+            return "german"
+        if segment.speaker_id == "SPEAKER_01":
+            return "foreign"
+
+    return _role_from_lang(segment.src_lang)
+
+
 def get_metrics() -> dict:
     asr_times = list(_metrics["asr_times"])
     mt_times = list(_metrics["mt_times"])
@@ -139,6 +164,7 @@ class StreamingSession:
         self.german_trimmed_samples: int = 0
         self.foreign_trimmed_samples: int = 0
         self.viewer_last_audio_time: float = 0.0
+        self.dual_channel_locked: bool = False
 
     def add_audio(self, pcm16_bytes: bytes):
         self.audio_buffer.append(pcm16_bytes)
@@ -174,6 +200,7 @@ class StreamingSession:
         self.foreign_audio_buffer.append(pcm16_bytes)
         self.foreign_total_samples += len(pcm16_bytes) // 2
         self.viewer_last_audio_time = time.time()
+        self.dual_channel_locked = True
         trimmed = self._enforce_max_buffer_channel(self.foreign_audio_buffer)
         self.foreign_trimmed_samples += trimmed
         # Also add to combined buffer for get_current_time() / get_buffered_seconds()
@@ -213,8 +240,8 @@ class StreamingSession:
         return samples, window_start
 
     def is_dual_channel(self) -> bool:
-        """Check if viewer is actively sending audio (within last 5 seconds)."""
-        return (time.time() - self.viewer_last_audio_time) < 5.0
+        """Use dual-channel mode once foreign mic audio has been received at least once."""
+        return self.dual_channel_locked
 
     def get_window_audio(self) -> tuple[np.ndarray, float]:
         """Get audio for ASR processing.
@@ -468,6 +495,9 @@ def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
             if seg["lang"] != "de":
                 seg["lang"] = session.foreign_lang
 
+    for seg in hyp_segments:
+        seg["speaker_role"] = _role_from_lang(seg.get("lang"))
+
     for seg in hyp_segments[:3]:
         print(
             f"  - [{seg['start']:.1f}-{seg['end']:.1f}] {seg['speaker_id']} "
@@ -501,6 +531,7 @@ def _transcribe_channel(
     audio: np.ndarray,
     language: str | None,
     speaker_id: str,
+    speaker_role: str,
 ) -> list[dict]:
     """Transcribe a full channel buffer via the ASR backend."""
     if len(audio) < 1600:
@@ -517,6 +548,7 @@ def _transcribe_channel(
             "text": seg.text,
             "speaker_id": speaker_id,
             "lang": language if language else seg.language,
+            "speaker_role": speaker_role,
         }
         for seg in filtered
     ]
@@ -552,9 +584,19 @@ def run_asr_dual_channel(session: StreamingSession) -> tuple[list[Segment], list
     asr_start = time.time()
 
     # Transcribe both channels via backend
-    german_results = _transcribe_channel(backend, german_audio, "de", "SPEAKER_00")
+    german_results = _transcribe_channel(
+        backend,
+        german_audio,
+        "de",
+        "SPEAKER_00",
+        "german",
+    )
     foreign_results = _transcribe_channel(
-        backend, foreign_audio, session.foreign_lang, "SPEAKER_01"
+        backend,
+        foreign_audio,
+        session.foreign_lang,
+        "SPEAKER_01",
+        "foreign",
     )
 
     # Offset segment timestamps to absolute time
@@ -573,6 +615,11 @@ def run_asr_dual_channel(session: StreamingSession) -> tuple[list[Segment], list
                 session.foreign_lang = lang
                 print(f"Dual-channel: foreign language detected as {lang}")
                 break
+
+    # Keep foreign-channel language consistent once known.
+    if session.foreign_lang:
+        for seg in foreign_results:
+            seg["lang"] = session.foreign_lang
 
     hyp_segments = german_results + foreign_results
     hyp_segments.sort(key=lambda s: s["start"])
@@ -716,6 +763,7 @@ def _run_asr_fallback(
                 "text": seg.text,
                 "speaker_id": None,
                 "lang": segment_lang,
+                "speaker_role": _role_from_lang(segment_lang),
             }
         )
 
@@ -731,6 +779,7 @@ def _run_asr_fallback(
         for seg in hyp_segments:
             if seg["lang"] != "de":
                 seg["lang"] = session.foreign_lang
+            seg["speaker_role"] = _role_from_lang(seg["lang"])
 
     all_segments, newly_finalized = session.segment_tracker.update_from_hypothesis(
         hyp_segments=hyp_segments,
@@ -809,17 +858,30 @@ async def handle_websocket(websocket: WebSocket):
                     if running:
                         # Build segments with translations where available
                         segments_data = []
+                        dual_channel = session.is_dual_channel()
                         for seg in all_segments:
                             seg_dict = asdict(seg)
+                            speaker_role = _resolve_segment_role(session, seg, dual_channel)
+                            seg_dict["speaker_role"] = speaker_role
+                            if speaker_role == "german":
+                                seg_dict["src_lang"] = "de"
+                            elif (
+                                speaker_role == "foreign"
+                                and session.foreign_lang
+                                and seg_dict.get("src_lang") in {"unknown", None, ""}
+                            ):
+                                seg_dict["src_lang"] = session.foreign_lang
                             seg_dict["translations"] = session.translations.get(seg.id, {})
                             segments_data.append(seg_dict)
 
                         # Only send if segments changed (avoid redundant updates)
-                        # Hash: (id, src, final, translations) for each segment
+                        # Hash: (id, src, lang, role, final, translations) for each segment
                         current_hash = tuple(
                             (
                                 s["id"],
                                 s["src"],
+                                s.get("src_lang"),
+                                s.get("speaker_role"),
                                 s["final"],
                                 tuple(sorted(s["translations"].items())),
                             )
@@ -834,7 +896,7 @@ async def handle_websocket(websocket: WebSocket):
                                 "t": session.get_current_time(),
                                 "src_lang": session.detected_lang or "unknown",
                                 "foreign_lang": session.foreign_lang,
-                                "dual_channel": session.is_dual_channel(),
+                                "dual_channel": dual_channel,
                                 "segments": segments_data,
                             }
                             await websocket.send_text(json.dumps(segments_msg))
@@ -874,15 +936,28 @@ async def handle_websocket(websocket: WebSocket):
 
                 # Run translation in executor - bidirectional
                 loop = asyncio.get_event_loop()
-                seg_src_lang = segment.src_lang
 
                 try:
-                    # Determine translation direction: German → foreign, foreign → German
-                    # Default to English if foreign language not yet detected or invalid
+                    # Use explicit speaker role when available to keep translation direction stable.
                     foreign = session.foreign_lang
                     if not foreign or foreign == "unknown" or foreign not in LANG_INFO:
                         foreign = "en"
-                    tgt_lang = foreign if seg_src_lang == "de" else "de"
+                    role = _resolve_segment_role(session, segment, session.is_dual_channel())
+
+                    if role == "german":
+                        seg_src_lang = "de"
+                        tgt_lang = foreign
+                    elif role == "foreign":
+                        if session.foreign_lang and session.foreign_lang in LANG_INFO:
+                            seg_src_lang = session.foreign_lang
+                        elif segment.src_lang in LANG_INFO and segment.src_lang != "de":
+                            seg_src_lang = segment.src_lang
+                        else:
+                            seg_src_lang = foreign
+                        tgt_lang = "de"
+                    else:
+                        seg_src_lang = segment.src_lang
+                        tgt_lang = foreign if seg_src_lang == "de" else "de"
 
                     # Skip translation if source language is unsupported
                     if seg_src_lang not in LANG_INFO:
@@ -890,6 +965,10 @@ async def handle_websocket(websocket: WebSocket):
                             f"Skipping translation for segment {segment.id}: "
                             f"unsupported source language '{seg_src_lang}'"
                         )
+                        translation_queue.task_done()
+                        continue
+
+                    if session.translations.get(segment.id, {}).get(tgt_lang):
                         translation_queue.task_done()
                         continue
 
@@ -1033,8 +1112,12 @@ async def handle_websocket(websocket: WebSocket):
                         finalized = session.segment_tracker.finalized_segments
                         if finalized:
                             segments_data = []
+                            dual_channel = session.is_dual_channel()
                             for seg in finalized:
                                 seg_dict = asdict(seg)
+                                seg_dict["speaker_role"] = _resolve_segment_role(
+                                    session, seg, dual_channel
+                                )
                                 seg_dict["translations"] = session.translations.get(seg.id, {})
                                 segments_data.append(seg_dict)
 
@@ -1164,6 +1247,9 @@ async def handle_viewer_websocket(websocket: WebSocket, token: str) -> None:
             all_segments = list(session.segment_tracker.finalized_segments) + live_segments
             for seg in all_segments:
                 seg_dict = asdict(seg)
+                seg_dict["speaker_role"] = _resolve_segment_role(
+                    session, seg, session.is_dual_channel()
+                )
                 seg_dict["translations"] = session.translations.get(seg.id, {})
                 segments_data.append(seg_dict)
 
