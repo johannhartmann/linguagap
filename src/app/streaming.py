@@ -87,6 +87,17 @@ def _resolve_segment_role(
     return _role_from_lang(segment.src_lang)
 
 
+def _is_effective_silence(
+    audio: np.ndarray, rms_threshold: float = 0.003, peak_threshold: float = 0.02
+) -> bool:
+    """Detect near-silent buffers that should not be sent to ASR."""
+    if len(audio) == 0:
+        return True
+    rms = float(np.sqrt(np.mean(audio**2)))
+    peak = float(np.max(np.abs(audio)))
+    return rms < rms_threshold and peak < peak_threshold
+
+
 def get_metrics() -> dict:
     asr_times = list(_metrics["asr_times"])
     mt_times = list(_metrics["mt_times"])
@@ -245,8 +256,11 @@ class StreamingSession:
         if not all_bytes:
             return np.array([], dtype=np.float32), 0.0
         samples = np.frombuffer(all_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+        max_window_samples = int(WINDOW_SEC * self.sample_rate)
+        if len(samples) > max_window_samples:
+            samples = samples[-max_window_samples:]
         window_start = self.german_start_offset_sec + (
-            self.german_trimmed_samples / self.sample_rate
+            max(0, self.german_total_samples - len(samples)) / self.sample_rate
         )
         return samples, window_start
 
@@ -256,8 +270,11 @@ class StreamingSession:
         if not all_bytes:
             return np.array([], dtype=np.float32), 0.0
         samples = np.frombuffer(all_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+        max_window_samples = int(WINDOW_SEC * self.sample_rate)
+        if len(samples) > max_window_samples:
+            samples = samples[-max_window_samples:]
         window_start = self.foreign_start_offset_sec + (
-            self.foreign_trimmed_samples / self.sample_rate
+            max(0, self.foreign_total_samples - len(samples)) / self.sample_rate
         )
         return samples, window_start
 
@@ -608,6 +625,8 @@ def _transcribe_channel(
     """Transcribe a full channel buffer via the ASR backend."""
     if len(audio) < 1600:
         return []
+    if _is_effective_silence(audio):
+        return []
 
     prompt = backend.get_bilingual_prompt(language) if language else None
     asr_result = backend.transcribe(audio, language=language, initial_prompt=prompt)
@@ -624,6 +643,57 @@ def _transcribe_channel(
         }
         for seg in filtered
     ]
+
+
+def run_asr_german_channel(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
+    """
+    Run ASR in deterministic desktop mode.
+
+    When the foreign language is known and only desktop audio is active, treat
+    desktop input as German-only to prevent role/language drift.
+    """
+    tick_start = time.time()
+    now_sec = session.get_current_time()
+    german_audio, german_offset = session.get_german_window_audio()
+
+    if len(german_audio) < 1600:
+        return list(session.segment_tracker.finalized_segments), []
+
+    backend = get_asr_backend()
+    asr_start = time.time()
+
+    german_results = _transcribe_channel(
+        backend,
+        german_audio,
+        "de",
+        "SPEAKER_00",
+        "german",
+        force_lang="de",
+    )
+
+    for seg in german_results:
+        seg["start"] += german_offset
+        seg["end"] += german_offset
+
+    asr_time = time.time() - asr_start
+    _metrics["asr_times"].append(asr_time)
+    print(f"German-channel ASR: {len(german_results)} segments in {asr_time * 1000:.1f}ms")
+
+    if session.foreign_lang is None and session.src_lang not in ("auto", "de"):
+        session.foreign_lang = session.src_lang
+        print(f"Foreign language set from user selection: {session.foreign_lang}")
+
+    session.detected_lang = "de"
+    all_segments, newly_finalized = session.segment_tracker.update_from_hypothesis(
+        hyp_segments=german_results,
+        window_start=0.0,
+        now_sec=now_sec,
+        src_lang="de",
+    )
+
+    tick_time = time.time() - tick_start
+    _metrics["tick_times"].append(tick_time)
+    return all_segments, newly_finalized
 
 
 def run_asr_dual_channel(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
@@ -926,6 +996,15 @@ async def handle_websocket(websocket: WebSocket):
                 loop = asyncio.get_event_loop()
                 try:
                     asr_fn = run_asr_dual_channel if session.is_dual_channel() else run_asr
+                    if not session.is_dual_channel():
+                        if (
+                            session.src_lang not in ("auto", "de")
+                            and session.foreign_lang
+                            and session.foreign_lang in LANG_INFO
+                        ):
+                            asr_fn = run_asr_german_channel
+                        else:
+                            asr_fn = run_asr
                     all_segments, newly_finalized = await loop.run_in_executor(
                         _executor, asr_fn, session
                     )
@@ -940,6 +1019,12 @@ async def handle_websocket(websocket: WebSocket):
                             seg_dict["speaker_role"] = speaker_role
                             if speaker_role == "german":
                                 seg_dict["src_lang"] = "de"
+                            elif (
+                                speaker_role == "foreign"
+                                and session.foreign_lang
+                                and session.foreign_lang in LANG_INFO
+                            ):
+                                seg_dict["src_lang"] = session.foreign_lang
                             seg_dict["translations"] = session.translations.get(seg.id, {})
                             segments_data.append(seg_dict)
 
@@ -1010,13 +1095,19 @@ async def handle_websocket(websocket: WebSocket):
                     # Use explicit speaker role when available to keep translation direction stable.
                     foreign = session.foreign_lang
                     if not foreign or foreign == "unknown" or foreign not in LANG_INFO:
-                        foreign = "en"
+                        foreign = None
                     role = _resolve_segment_role(session, segment, session.is_dual_channel())
 
                     if role == "german":
+                        if not foreign:
+                            translation_queue.task_done()
+                            continue
                         seg_src_lang = "de"
                         tgt_lang = foreign
                     elif role == "foreign":
+                        if not foreign:
+                            translation_queue.task_done()
+                            continue
                         if segment.src_lang == "de":
                             # Foreign-side segment recognized as German: translate to foreign for UI.
                             seg_src_lang = "de"
@@ -1036,7 +1127,7 @@ async def handle_websocket(websocket: WebSocket):
                             continue
                     else:
                         seg_src_lang = segment.src_lang
-                        tgt_lang = foreign if seg_src_lang == "de" else "de"
+                        tgt_lang = foreign if (seg_src_lang == "de" and foreign) else "de"
 
                     # Skip translation if source language is unsupported
                     if seg_src_lang not in LANG_INFO:

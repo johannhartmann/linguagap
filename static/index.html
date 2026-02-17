@@ -606,20 +606,14 @@
                 // Determine what goes on left (foreign) and right (German)
                 let leftText, rightText;
                 if (isGermanSpeaker) {
-                    // German speaker: source on right pane, translation on left pane
-                    rightText = seg.src;
+                    // German speaker: right pane must remain German.
+                    rightText = (segLang === 'de') ? seg.src : (translations['de'] || '...');
                     leftText = translations[foreignLang] || '...';
                 } else {
-                    // Foreign speaker: enforce foreign-only on left pane.
+                    // Foreign speaker: prefer explicit foreign translation first.
                     const foreignSourceReliable = !!foreignLang && segLang === foreignLang;
-                    leftText = foreignSourceReliable ? seg.src : (translations[foreignLang] || '...');
-
-                    // German pane should still show German.
-                    if (segLang === 'de') {
-                        rightText = seg.src;
-                    } else {
-                        rightText = translations['de'] || '...';
-                    }
+                    leftText = translations[foreignLang] || (foreignSourceReliable ? seg.src : '...');
+                    rightText = translations['de'] || (segLang === 'de' ? seg.src : '...');
                 }
 
                 // Format speaker label (e.g., "SPEAKER_00" -> "Speaker 1" or "Sprecher 1")
@@ -698,16 +692,15 @@
             }
 
                 if (isGermanSpeaker) {
-                    // German speaker: translation goes to left (foreign) pane
-                    if (tgtLang !== 'de') {
+                    // German speaker: only foreign translation belongs on left pane.
+                    if (foreignLang && tgtLang === foreignLang) {
                         updateBubbleContent(leftDiv, text);
                     }
                 } else {
-                    // Foreign speaker: German translation on right pane,
-                    // optional foreign normalization on left pane.
+                    // Foreign speaker: German translation on right pane.
                     if (tgtLang === 'de') {
                         updateBubbleContent(rightDiv, text);
-                    } else {
+                    } else if (foreignLang && tgtLang === foreignLang) {
                         updateBubbleContent(leftDiv, text);
                     }
                 }

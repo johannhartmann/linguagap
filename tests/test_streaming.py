@@ -7,7 +7,15 @@ import numpy as np
 import pytest
 
 from app.backends import get_asr_backend, get_translation_backend
-from app.streaming import StreamingSession, get_metrics, run_asr, run_translation
+from app.backends.types import ASRResult, ASRSegment
+from app.streaming import (
+    WINDOW_SEC,
+    StreamingSession,
+    get_metrics,
+    run_asr,
+    run_asr_german_channel,
+    run_translation,
+)
 
 
 class TestStreamingSession:
@@ -140,6 +148,54 @@ class TestRunASR:
         assert all_segs == []
         assert newly_final == []
         mock_get_backend.assert_not_called()
+
+
+class TestRunASRGermanChannel:
+    """Tests for deterministic desktop-channel ASR."""
+
+    def setup_method(self):
+        get_asr_backend.cache_clear()
+
+    def teardown_method(self):
+        get_asr_backend.cache_clear()
+
+    @patch("app.streaming.get_asr_backend")
+    def test_forces_german_role_and_language(self, mock_get_backend):
+        session = StreamingSession(sample_rate=16000, src_lang="en")
+        session.foreign_lang = "en"
+
+        # Strong signal to avoid silence gating in _transcribe_channel.
+        audio_data = np.full(16000, 5000, dtype=np.int16).tobytes()
+        session.add_german_audio(audio_data)
+
+        backend = MagicMock()
+        backend.get_bilingual_prompt.return_value = None
+        backend.transcribe.return_value = ASRResult(
+            segments=[ASRSegment(start=0.0, end=0.8, text="Guten Tag", language="en")],
+            detected_language="en",
+            language_probability=0.9,
+        )
+        backend.post_process.return_value = [ASRSegment(0.0, 0.8, "Guten Tag", "en")]
+        mock_get_backend.return_value = backend
+
+        all_segments, _ = run_asr_german_channel(session)
+
+        assert len(all_segments) == 1
+        assert all_segments[0].speaker_role == "german"
+        assert all_segments[0].speaker_id == "SPEAKER_00"
+        assert all_segments[0].src_lang == "de"
+        assert session.detected_lang == "de"
+
+    def test_channel_window_is_bounded(self):
+        session = StreamingSession(sample_rate=16000, src_lang="en")
+        chunk = np.full(16000, 5000, dtype=np.int16).tobytes()
+
+        # Add more than WINDOW_SEC seconds to german channel.
+        for _ in range(int(WINDOW_SEC) + 3):
+            session.add_german_audio(chunk)
+
+        samples, _ = session.get_german_window_audio()
+        assert len(samples) <= int(WINDOW_SEC * session.sample_rate)
 
 
 class TestRunTranslation:

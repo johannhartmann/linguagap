@@ -292,16 +292,13 @@
                     }
                 } else {
                     // Enforce foreign-only display for foreign speaker too.
-                    const foreignSourceReliable = !!foreignLang && segLang === foreignLang;
-                    if (foreignSourceReliable) {
+                    const translation = translations[foreignLang] || '';
+                    if (translation) {
+                        html = `<div class="bubble-source">${escapeHtml(translation)}</div>`;
+                    } else if (foreignLang && segLang === foreignLang) {
                         html = `<div class="bubble-source">${escapeHtml(seg.src)}</div>`;
                     } else {
-                        const translation = translations[foreignLang] || '';
-                        if (translation) {
-                            html = `<div class="bubble-source">${escapeHtml(translation)}</div>`;
-                        } else {
-                            html = `<div class="bubble-source" style="opacity:0.5">...</div>`;
-                        }
+                        html = `<div class="bubble-source" style="opacity:0.5">...</div>`;
                     }
                 }
 
