@@ -124,6 +124,7 @@ class StreamingSession:
         )
         self.segment_tracker = SegmentTracker()
         self.dropped_frames = 0
+        self.trimmed_samples = 0  # Track total samples trimmed from buffer start
         self.translations: dict[int, dict[str, str]] = {}  # segment_id -> {lang -> translation}
         # Speaker tracking (embedding-based) and language tracking
         self.speaker_tracker = SpeakerTracker(sample_rate=sample_rate)
@@ -135,6 +136,8 @@ class StreamingSession:
         self.foreign_audio_buffer: deque[bytes] = deque()
         self.german_total_samples: int = 0
         self.foreign_total_samples: int = 0
+        self.german_trimmed_samples: int = 0
+        self.foreign_trimmed_samples: int = 0
         self.viewer_last_audio_time: float = 0.0
 
     def add_audio(self, pcm16_bytes: bytes):
@@ -154,13 +157,15 @@ class StreamingSession:
             trimmed_bytes = all_bytes[excess_bytes:]
             self.audio_buffer.clear()
             self.audio_buffer.append(trimmed_bytes)
+            self.trimmed_samples += excess_samples
             self.dropped_frames += 1
 
     def add_german_audio(self, pcm16_bytes: bytes):
         """Add audio from the main page (German speaker) to the german channel buffer."""
         self.german_audio_buffer.append(pcm16_bytes)
         self.german_total_samples += len(pcm16_bytes) // 2
-        self._enforce_max_buffer_channel(self.german_audio_buffer)
+        trimmed = self._enforce_max_buffer_channel(self.german_audio_buffer)
+        self.german_trimmed_samples += trimmed
         # Also add to combined buffer for get_current_time() / get_buffered_seconds()
         self.add_audio(pcm16_bytes)
 
@@ -169,12 +174,13 @@ class StreamingSession:
         self.foreign_audio_buffer.append(pcm16_bytes)
         self.foreign_total_samples += len(pcm16_bytes) // 2
         self.viewer_last_audio_time = time.time()
-        self._enforce_max_buffer_channel(self.foreign_audio_buffer)
+        trimmed = self._enforce_max_buffer_channel(self.foreign_audio_buffer)
+        self.foreign_trimmed_samples += trimmed
         # Also add to combined buffer for get_current_time() / get_buffered_seconds()
         self.add_audio(pcm16_bytes)
 
-    def _enforce_max_buffer_channel(self, buffer: deque[bytes]):
-        """Trim a per-channel buffer to MAX_BUFFER_SEC."""
+    def _enforce_max_buffer_channel(self, buffer: deque[bytes]) -> int:
+        """Trim a per-channel buffer to MAX_BUFFER_SEC. Returns samples trimmed."""
         max_samples = int(MAX_BUFFER_SEC * self.sample_rate)
         all_bytes = b"".join(buffer)
         total_samples = len(all_bytes) // 2
@@ -185,6 +191,8 @@ class StreamingSession:
             trimmed_bytes = all_bytes[excess_bytes:]
             buffer.clear()
             buffer.append(trimmed_bytes)
+            return excess_samples
+        return 0
 
     def get_german_window_audio(self) -> tuple[np.ndarray, float]:
         """Get the German channel audio buffer as a float32 array."""
@@ -192,7 +200,8 @@ class StreamingSession:
         if not all_bytes:
             return np.array([], dtype=np.float32), 0.0
         samples = np.frombuffer(all_bytes, dtype=np.int16).astype(np.float32) / 32768.0
-        return samples, 0.0
+        window_start = self.german_trimmed_samples / self.sample_rate
+        return samples, window_start
 
     def get_foreign_window_audio(self) -> tuple[np.ndarray, float]:
         """Get the foreign channel audio buffer as a float32 array."""
@@ -200,7 +209,8 @@ class StreamingSession:
         if not all_bytes:
             return np.array([], dtype=np.float32), 0.0
         samples = np.frombuffer(all_bytes, dtype=np.int16).astype(np.float32) / 32768.0
-        return samples, 0.0
+        window_start = self.foreign_trimmed_samples / self.sample_rate
+        return samples, window_start
 
     def is_dual_channel(self) -> bool:
         """Check if viewer is actively sending audio (within last 5 seconds)."""
@@ -222,7 +232,8 @@ class StreamingSession:
         """
         all_bytes = b"".join(self.audio_buffer)
         samples = np.frombuffer(all_bytes, dtype=np.int16).astype(np.float32) / 32768.0
-        return samples, 0.0
+        window_start = self.trimmed_samples / self.sample_rate
+        return samples, window_start
 
     def get_current_time(self) -> float:
         return self.total_samples / self.sample_rate
@@ -525,8 +536,8 @@ def run_asr_dual_channel(session: StreamingSession) -> tuple[list[Segment], list
     tick_start = time.time()
     now_sec = session.get_current_time()
 
-    german_audio, _ = session.get_german_window_audio()
-    foreign_audio, _ = session.get_foreign_window_audio()
+    german_audio, german_offset = session.get_german_window_audio()
+    foreign_audio, foreign_offset = session.get_foreign_window_audio()
 
     if len(german_audio) < 1600 and len(foreign_audio) < 1600:
         return list(session.segment_tracker.finalized_segments), []
@@ -545,6 +556,14 @@ def run_asr_dual_channel(session: StreamingSession) -> tuple[list[Segment], list
     foreign_results = _transcribe_channel(
         backend, foreign_audio, session.foreign_lang, "SPEAKER_01"
     )
+
+    # Offset segment timestamps to absolute time
+    for seg in german_results:
+        seg["start"] += german_offset
+        seg["end"] += german_offset
+    for seg in foreign_results:
+        seg["start"] += foreign_offset
+        seg["end"] += foreign_offset
 
     # Auto-detect foreign language from results if not yet known
     if session.foreign_lang is None:
