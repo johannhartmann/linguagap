@@ -431,6 +431,7 @@
             // Pre-select language if server already knows it
             if (foreignLang && viewerLangSelect.querySelector(`option[value="${foreignLang}"]`)) {
                 viewerLangSelect.value = foreignLang;
+                viewerLangSelect.dispatchEvent(new Event('change'));
             }
             updateMicState();
         }
