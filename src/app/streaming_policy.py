@@ -202,8 +202,8 @@ class SegmentTracker:
                             return cs
         return None
 
-    def _overlaps_finalized(self, abs_start: float, abs_end: float, text: str = "") -> bool:
-        """Check if a segment duplicates any finalized segment.
+    def _is_duplicate_segment(self, abs_start: float, abs_end: float, text: str = "") -> bool:
+        """Check if a segment duplicates any existing segment (finalized or live).
 
         Uses two strategies:
             1. Time-based: bidirectional >50% overlap
@@ -213,24 +213,39 @@ class SegmentTracker:
         same speech to be re-detected at shifted absolute positions. E.g.
         "Hallo Johann" might appear at [10.2-14.5] then [8.8-10.6] then
         [7.6-9.4] as the window slides — these don't overlap in time but
-        are clearly the same speech.
+        are clearly the same speech. Hallucinations also repeat text rapidly.
         """
-        for seg in self.finalized_segments:
+        normalized_text = self._normalize_text(text) if text else ""
+        
+        all_existing_segments = self.finalized_segments + [cs.segment for cs in self.cumulative_segments]
+        
+        for seg in all_existing_segments:
             # Check 1: Time-based overlap (bidirectional)
             overlap1 = self._calc_overlap_ratio(abs_start, abs_end, seg.abs_start, seg.abs_end)
             overlap2 = self._calc_overlap_ratio(seg.abs_start, seg.abs_end, abs_start, abs_end)
             if overlap1 > 0.5 or overlap2 > 0.5:
                 return True
 
-            # Check 2: Text-based deduplication for sliding window drift
-            # Only for non-trivial text to avoid filtering common short phrases
-            if text and seg.src and len(text) > 10:
-                if text == seg.src:
-                    return True
-                # Check if one is a significant substring of the other
-                shorter, longer = (text, seg.src) if len(text) <= len(seg.src) else (seg.src, text)
-                if shorter in longer and len(shorter) / len(longer) > 0.6:
-                    return True
+            # Check 2: Text-based deduplication for sliding window drift and hallucinations
+            if normalized_text and seg.src:
+                seg_text_norm = self._normalize_text(seg.src)
+                
+                # Identical text in a short time proximity (within 5 seconds)
+                # Catching Whisper hallucinations and re-emitted segments.
+                if normalized_text == seg_text_norm:
+                    if abs(abs_start - seg.abs_start) < 5.0:
+                        return True
+                
+                # Substring check for partial redetections
+                if len(normalized_text) > 8 and len(seg_text_norm) > 8:
+                    shorter, longer = (
+                        (normalized_text, seg_text_norm) 
+                        if len(normalized_text) <= len(seg_text_norm) 
+                        else (seg_text_norm, normalized_text)
+                    )
+                    if shorter in longer and len(shorter) / len(longer) > 0.6:
+                        if abs(abs_start - seg.abs_start) < 4.0:
+                            return True
         return False
 
     def _find_mergeable_segment(
@@ -301,8 +316,8 @@ class SegmentTracker:
             if not src_text or len(src_text) < 2:
                 continue
 
-            # Skip if overlaps with already finalized segment (time or text match)
-            if self._overlaps_finalized(abs_start, abs_end, src_text):
+            # Skip if overlaps with already finalized or live segment (time or text match)
+            if self._is_duplicate_segment(abs_start, abs_end, src_text):
                 continue
 
             seg_lang = seg.get("lang", src_lang)
