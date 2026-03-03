@@ -167,9 +167,9 @@ class TestBilingualDialogue:
         expected_languages = {t.language for t in sample_scenario.turns}
 
         # At minimum, we should detect the two languages used
-        assert (
-            len(detected_languages) >= 2
-        ), f"Expected at least 2 languages ({expected_languages}), got: {detected_languages}"
+        assert len(detected_languages) >= 2, (
+            f"Expected at least 2 languages ({expected_languages}), got: {detected_languages}"
+        )
 
         # Evaluate language detection
         expected_segments = [
@@ -261,9 +261,9 @@ class TestBilingualDialogue:
             foreign_lang=sample_scenario.foreign_lang,
         )
 
-        assert summary_eval.passed(
-            min_score=3
-        ), f"Summary quality too low: {summary_eval.score}/5\nReasoning: {summary_eval.reasoning}"
+        assert summary_eval.passed(min_score=3), (
+            f"Summary quality too low: {summary_eval.score}/5\nReasoning: {summary_eval.reasoning}"
+        )
 
 
 @pytest.mark.e2e
@@ -314,9 +314,9 @@ class TestLanguagePairs:
             language=f"German + {TARGET_LANGUAGES[foreign_lang]}",
         )
 
-        assert transcription_eval.passed(
-            min_score=3
-        ), f"Transcription failed for {foreign_lang}: {transcription_eval.score}/5"
+        assert transcription_eval.passed(min_score=3), (
+            f"Transcription failed for {foreign_lang}: {transcription_eval.score}/5"
+        )
 
 
 @pytest.mark.e2e
@@ -432,6 +432,6 @@ class TestFullSuite:
         report.save_html(report_dir / "e2e_report.html")
 
         # Assert overall pass rate
-        assert (
-            report.overall_pass_rate >= 60
-        ), f"Overall pass rate too low: {report.overall_pass_rate:.1f}%"
+        assert report.overall_pass_rate >= 60, (
+            f"Overall pass rate too low: {report.overall_pass_rate:.1f}%"
+        )

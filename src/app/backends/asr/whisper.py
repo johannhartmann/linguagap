@@ -6,12 +6,15 @@ hallucination filtering, delooping, bilingual prompts, and language support.
 
 from __future__ import annotations
 
+import logging
 import os
 
 import numpy as np
 
 from app.backends.base import ASRBackend
 from app.backends.types import ASRResult, ASRSegment
+
+logger = logging.getLogger(__name__)
 
 ASR_MODEL = os.getenv("ASR_MODEL", "deepdml/faster-whisper-large-v3-turbo-ct2")
 ASR_DEVICE = os.getenv("ASR_DEVICE", "cuda")
@@ -251,21 +254,35 @@ class WhisperASRBackend(ASRBackend):
             return
         from faster_whisper import WhisperModel
 
-        print(f"  Loading WhisperModel: {ASR_MODEL}")
-        print(f"  Device: {ASR_DEVICE}, Compute type: {ASR_COMPUTE_TYPE}")
+        logger.info("  Loading WhisperModel: %s", ASR_MODEL)
+        logger.info("  Device: %s, Compute type: %s", ASR_DEVICE, ASR_COMPUTE_TYPE)
         self._model = WhisperModel(
             ASR_MODEL,
             device=ASR_DEVICE,
             compute_type=ASR_COMPUTE_TYPE,
         )
-        print("  WhisperModel loaded")
+        logger.info("  WhisperModel loaded")
 
     def warmup(self) -> None:
         self.load_model()
-        print("  Running test transcription...")
+        logger.debug("  Running test transcription...")
         silence = np.zeros(16000, dtype=np.float32)
         list(self._model.transcribe(silence))
-        print("  ASR warmup complete")
+        logger.info("  ASR warmup complete")
+
+    def transcribe_file(self, path: str) -> ASRResult:
+        """Transcribe audio from a file path using faster-whisper's native support."""
+        self.load_model()
+        segments, info = self._model.transcribe(path)
+        result_segments = [
+            ASRSegment(start=seg.start, end=seg.end, text=seg.text, language=info.language)
+            for seg in segments
+        ]
+        return ASRResult(
+            segments=result_segments,
+            detected_language=info.language,
+            language_probability=info.language_probability,
+        )
 
     def transcribe(
         self,
@@ -281,7 +298,9 @@ class WhisperASRBackend(ASRBackend):
         if language and language != "unknown" and language not in self._supported_languages:
             whisper_lang = self._language_fallbacks.get(language)
             if whisper_lang is None:
-                print(f"  Language {language} not supported by Whisper, using multilingual")
+                logger.warning(
+                    "  Language %s not supported by Whisper, using multilingual", language
+                )
 
         use_multilingual = whisper_lang is None or whisper_lang == "unknown"
 
@@ -338,13 +357,13 @@ class WhisperASRBackend(ASRBackend):
             # Apply delooping
             delooped = self._deloop_text(text)
             if delooped != text:
-                print(f"  DELOOP: '{text[:40]}...' -> '{delooped[:40]}...'")
+                logger.debug("  DELOOP: '%s...' -> '%s...'", text[:40], delooped[:40])
                 text = delooped
 
             # Check hallucinations
             is_hal, reason = self._is_hallucination(text, duration)
             if is_hal:
-                print(f"  SKIP hallucination ({reason}): {text[:50]}")
+                logger.debug("  SKIP hallucination (%s): %s", reason, text[:50])
                 continue
 
             if text != seg.text:
@@ -366,7 +385,7 @@ class WhisperASRBackend(ASRBackend):
                     and prev_norm == cur_norm
                     and seg.start - prev.end <= 1.0
                 ):
-                    print(f"  SKIP duplicate segment: {seg.text[:50]}")
+                    logger.debug("  SKIP duplicate segment: %s", seg.text[:50])
                     continue
 
             result.append(seg)

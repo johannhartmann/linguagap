@@ -25,8 +25,11 @@ Why time-based finalization?
     predictably when they're safely in the past.
 """
 
+import logging
 import os
 from dataclasses import dataclass, field
+
+logger = logging.getLogger(__name__)
 
 STABILITY_SEC = float(os.getenv("STABILITY_SEC", "1.25"))
 
@@ -331,9 +334,12 @@ class SegmentTracker:
                     match.segment.abs_end = abs_end
                     match.last_updated = now_sec
                     match.stable_since = None  # Reset stability since text changed
-                    print(
-                        f"  MERGED: [{match.segment.abs_start:.1f}-{abs_end:.1f}] "
-                        f"'{old_text[:20]}...' + '{src_text[:20]}...'"
+                    logger.debug(
+                        "  MERGED: [%.1f-%.1f] '%s...' + '%s...'",
+                        match.segment.abs_start,
+                        abs_end,
+                        old_text[:20],
+                        src_text[:20],
                     )
                 else:
                     # Update existing cumulative segment (overlap case)
@@ -365,8 +371,12 @@ class SegmentTracker:
                             match.stable_since = now_sec
             else:
                 # Create new cumulative segment
-                print(
-                    f"  NEW SEG: [{abs_start:.1f}-{abs_end:.1f}] '{src_text[:30]}' (total: {len(self.cumulative_segments) + 1})"
+                logger.debug(
+                    "  NEW SEG: [%.1f-%.1f] '%s' (total: %d)",
+                    abs_start,
+                    abs_end,
+                    src_text[:30],
+                    len(self.cumulative_segments) + 1,
                 )
                 new_segment = Segment(
                     id=self.next_id,
@@ -401,9 +411,11 @@ class SegmentTracker:
                 cs.segment.final = True
                 self.finalized_segments.append(cs.segment)
                 newly_finalized.append(cs.segment)
-                print(
-                    f"  FINALIZED (time): [{cs.segment.abs_start:.1f}-{cs.segment.abs_end:.1f}] "
-                    f"{cs.segment.src[:50]}"
+                logger.debug(
+                    "  FINALIZED (time): [%.1f-%.1f] %s",
+                    cs.segment.abs_start,
+                    cs.segment.abs_end,
+                    cs.segment.src[:50],
                 )
             else:
                 still_live.append(cs)
@@ -418,7 +430,7 @@ class SegmentTracker:
         all_segments = self.finalized_segments + sorted(live_segments, key=lambda s: s.abs_start)
         return all_segments, newly_finalized
 
-    def force_finalize_all(self, _live_segments: list[Segment]) -> list[Segment]:
+    def force_finalize_all(self) -> list[Segment]:
         """
         Force-finalize any remaining live segments.
         Call this when recording stops to ensure all segments get translated.
@@ -431,9 +443,11 @@ class SegmentTracker:
             cs.segment.final = True
             self.finalized_segments.append(cs.segment)
             newly_finalized.append(cs.segment)
-            print(
-                f"  FORCE-FINALIZED: [{cs.segment.abs_start:.1f}-{cs.segment.abs_end:.1f}] "
-                f"{cs.segment.src[:50]}"
+            logger.debug(
+                "  FORCE-FINALIZED: [%.1f-%.1f] %s",
+                cs.segment.abs_start,
+                cs.segment.abs_end,
+                cs.segment.src[:50],
             )
 
         self.cumulative_segments = []

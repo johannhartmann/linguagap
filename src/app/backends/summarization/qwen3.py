@@ -9,10 +9,13 @@ stripped from the final output.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 
 from app.backends.base import SummarizationBackend
+
+logger = logging.getLogger(__name__)
 
 SUMM_MODEL_REPO = os.getenv("SUMM_MODEL_REPO", "Qwen/Qwen3-4B-GGUF")
 SUMM_MODEL_FILE = os.getenv("SUMM_MODEL_FILE", "Qwen3-4B-Q4_K_M.gguf")
@@ -50,12 +53,12 @@ class Qwen3SummarizationBackend(SummarizationBackend):
         from huggingface_hub import hf_hub_download
         from llama_cpp import Llama
 
-        print(f"Downloading summarization model: {SUMM_MODEL_REPO}/{SUMM_MODEL_FILE}")
+        logger.info("Downloading summarization model: %s/%s", SUMM_MODEL_REPO, SUMM_MODEL_FILE)
         model_path = hf_hub_download(  # nosec B615
             repo_id=SUMM_MODEL_REPO,
             filename=SUMM_MODEL_FILE,
         )
-        print(f"Loading summarization model from: {model_path}")
+        logger.info("Loading summarization model from: %s", model_path)
         self._llm = Llama(
             model_path=model_path,
             n_gpu_layers=SUMM_N_GPU_LAYERS,
@@ -64,7 +67,7 @@ class Qwen3SummarizationBackend(SummarizationBackend):
             verbose=False,
             use_mmap=False,
         )
-        print("Summarization model loaded")
+        logger.info("Summarization model loaded")
 
     def warmup(self) -> None:
         self.load_model()
@@ -73,7 +76,7 @@ class Qwen3SummarizationBackend(SummarizationBackend):
             messages=[{"role": "user", "content": "Hello"}],
             max_tokens=16,
         )
-        print("  Summarization warmup complete")
+        logger.info("  Summarization warmup complete")
 
     def summarize_bilingual(
         self,
@@ -81,10 +84,10 @@ class Qwen3SummarizationBackend(SummarizationBackend):
         foreign_lang: str,
     ) -> tuple[str, str]:
         """Generate both foreign and German summaries in a single LLM call."""
-        from app.mt import LANG_NAMES
+        from app.languages import LANG_NAMES
 
         if foreign_lang not in LANG_NAMES:
-            print(f"Warning: Unsupported language '{foreign_lang}' for summary, using 'English'")
+            logger.warning("Unsupported language '%s' for summary, using 'English'", foreign_lang)
             foreign_lang = "en"
 
         self.load_model()

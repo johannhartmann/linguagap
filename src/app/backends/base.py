@@ -39,6 +39,21 @@ class ASRBackend(ABC):
             ASRResult with segments and detected language.
         """
 
+    def transcribe_file(self, path: str) -> ASRResult:
+        """Transcribe audio from a file path.
+
+        Default implementation loads audio and delegates to transcribe().
+        Backends may override for native file-path support.
+        """
+        import soundfile as sf
+
+        audio, sr = sf.read(path, dtype="float32")
+        if sr != 16000:
+            import resampy
+
+            audio = resampy.resample(audio, sr, 16000)
+        return self.transcribe(audio)
+
     def post_process(self, segments: list[ASRSegment]) -> list[ASRSegment]:
         """Backend-specific post-processing (e.g. hallucination filtering).
 

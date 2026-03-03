@@ -28,21 +28,24 @@ Threading model:
 import asyncio
 import contextlib
 import json
+import logging
 import os
 import time
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import asdict
+from dataclasses import asdict, dataclass, field
 
 import numpy as np
 from fastapi import WebSocket
 
 from app.backends import get_asr_backend, get_summarization_backend, get_translation_backend
 from app.lang_id import SpeakerLanguageTracker, detect_language_from_audio
-from app.mt import LANG_INFO
+from app.languages import LANG_INFO
 from app.session_registry import SessionEntry, registry
 from app.speaker_tracker import SpeakerSegment, SpeakerTracker
 from app.streaming_policy import Segment, SegmentTracker
+
+logger = logging.getLogger(__name__)
 
 WINDOW_SEC = float(os.getenv("WINDOW_SEC", "8.0"))
 TICK_SEC = float(os.getenv("TICK_SEC", "0.5"))
@@ -85,6 +88,59 @@ def _resolve_segment_role(
             return "foreign"
 
     return _role_from_lang(segment.src_lang)
+
+
+def _serialize_segments(session: "StreamingSession", segments: list[Segment]) -> list[dict]:
+    """Convert Segment objects to dicts with resolved roles and translations."""
+    dual_channel = session.is_dual_channel()
+    result = []
+    for seg in segments:
+        seg_dict = asdict(seg)
+        speaker_role = _resolve_segment_role(session, seg, dual_channel)
+        seg_dict["speaker_role"] = speaker_role
+        if speaker_role == "german":
+            seg_dict["src_lang"] = "de"
+        elif (
+            speaker_role == "foreign" and session.foreign_lang and session.foreign_lang in LANG_INFO
+        ):
+            seg_dict["src_lang"] = session.foreign_lang
+        seg_dict["translations"] = session.translations.get(seg.id, {})
+        result.append(seg_dict)
+    return result
+
+
+def _resolve_translation_pair(
+    segment: Segment,
+    role: str | None,
+    foreign_lang: str | None,
+) -> tuple[str, str] | None:
+    """Determine (src_lang, tgt_lang) for a segment, or None to skip translation."""
+    foreign = (
+        foreign_lang
+        if (foreign_lang and foreign_lang != "unknown" and foreign_lang in LANG_INFO)
+        else None
+    )
+
+    if role == "german":
+        if not foreign:
+            return None
+        return "de", foreign
+
+    if role == "foreign":
+        if not foreign:
+            return None
+        if segment.src_lang == "de":
+            return "de", foreign
+        if segment.src_lang in LANG_INFO and segment.src_lang != "de":
+            return segment.src_lang, "de"
+        if foreign in LANG_INFO and segment.src_lang in {"unknown", None, ""}:
+            return foreign, "de"
+        return None
+
+    # No role — fallback
+    src = segment.src_lang
+    tgt = foreign if (src == "de" and foreign) else "de"
+    return src, tgt
 
 
 def _is_effective_silence(
@@ -132,6 +188,25 @@ async def broadcast_to_viewers(entry: SessionEntry, message: dict) -> None:
         entry.viewers.discard(viewer_ws)
 
 
+async def _maybe_broadcast(session_token: str | None, message: dict) -> None:
+    """Broadcast to viewers if session_token is set and session exists."""
+    if session_token:
+        entry = await registry.get(session_token)
+        if entry:
+            await broadcast_to_viewers(entry, message)
+
+
+@dataclass
+class ChannelBuffer:
+    """Audio buffer for a single channel (German or foreign speaker)."""
+
+    audio: deque[bytes] = field(default_factory=deque)
+    total_samples: int = 0
+    trimmed_samples: int = 0
+    start_offset_sec: float = 0.0
+    started: bool = False
+
+
 class StreamingSession:
     """
     Manages state for a single streaming transcription session.
@@ -172,16 +247,8 @@ class StreamingSession:
         self.speaker_roles: dict[str, str] = {}  # speaker_id -> "german" | "foreign"
 
         # Dual-channel buffers (German mic on main page, foreign mic on viewer)
-        self.german_audio_buffer: deque[bytes] = deque()
-        self.foreign_audio_buffer: deque[bytes] = deque()
-        self.german_total_samples: int = 0
-        self.foreign_total_samples: int = 0
-        self.german_trimmed_samples: int = 0
-        self.foreign_trimmed_samples: int = 0
-        self.german_start_offset_sec: float = 0.0
-        self.foreign_start_offset_sec: float = 0.0
-        self.german_started: bool = False
-        self.foreign_started: bool = False
+        self.german_channel = ChannelBuffer()
+        self.foreign_channel = ChannelBuffer()
         self.viewer_last_audio_time: float = 0.0
         self.dual_channel_locked: bool = False
 
@@ -190,93 +257,76 @@ class StreamingSession:
         self.total_samples += len(pcm16_bytes) // 2
         self._enforce_max_buffer()
 
-    def _enforce_max_buffer(self):
-        max_samples = int(MAX_BUFFER_SEC * self.sample_rate)
-        all_bytes = b"".join(self.audio_buffer)
-        total_samples = len(all_bytes) // 2
-
-        if total_samples > max_samples:
-            excess_samples = total_samples - max_samples
-            excess_bytes = excess_samples * 2
-
-            trimmed_bytes = all_bytes[excess_bytes:]
-            self.audio_buffer.clear()
-            self.audio_buffer.append(trimmed_bytes)
-            self.trimmed_samples += excess_samples
+    def _enforce_max_buffer(self) -> None:
+        trimmed = self._trim_buffer(self.audio_buffer)
+        if trimmed > 0:
+            self.trimmed_samples += trimmed
             self.dropped_frames += 1
 
-    def add_german_audio(self, pcm16_bytes: bytes):
-        """Add audio from the main page (German speaker) to the german channel buffer."""
-        if not self.german_started:
-            chunk_sec = (len(pcm16_bytes) // 2) / self.sample_rate
-            elapsed = max(0.0, time.time() - self.start_time)
-            self.german_start_offset_sec = max(0.0, elapsed - chunk_sec)
-            self.german_started = True
-        self.german_audio_buffer.append(pcm16_bytes)
-        self.german_total_samples += len(pcm16_bytes) // 2
-        trimmed = self._enforce_max_buffer_channel(self.german_audio_buffer)
-        self.german_trimmed_samples += trimmed
-        # Also add to combined buffer for get_current_time() / get_buffered_seconds()
-        self.add_audio(pcm16_bytes)
-
-    def add_foreign_audio(self, pcm16_bytes: bytes):
-        """Add audio from the viewer (foreign speaker) to the foreign channel buffer."""
-        if not self.foreign_started:
-            chunk_sec = (len(pcm16_bytes) // 2) / self.sample_rate
-            elapsed = max(0.0, time.time() - self.start_time)
-            self.foreign_start_offset_sec = max(0.0, elapsed - chunk_sec)
-            self.foreign_started = True
-        self.foreign_audio_buffer.append(pcm16_bytes)
-        self.foreign_total_samples += len(pcm16_bytes) // 2
-        self.viewer_last_audio_time = time.time()
-        self.dual_channel_locked = True
-        trimmed = self._enforce_max_buffer_channel(self.foreign_audio_buffer)
-        self.foreign_trimmed_samples += trimmed
-        # Also add to combined buffer for get_current_time() / get_buffered_seconds()
-        self.add_audio(pcm16_bytes)
-
-    def _enforce_max_buffer_channel(self, buffer: deque[bytes]) -> int:
-        """Trim a per-channel buffer to MAX_BUFFER_SEC. Returns samples trimmed."""
+    def _trim_buffer(self, buffer: deque[bytes]) -> int:
+        """Trim a buffer to MAX_BUFFER_SEC. Returns number of samples trimmed."""
         max_samples = int(MAX_BUFFER_SEC * self.sample_rate)
         all_bytes = b"".join(buffer)
         total_samples = len(all_bytes) // 2
 
         if total_samples > max_samples:
             excess_samples = total_samples - max_samples
-            excess_bytes = excess_samples * 2
-            trimmed_bytes = all_bytes[excess_bytes:]
+            trimmed_bytes = all_bytes[excess_samples * 2 :]
             buffer.clear()
             buffer.append(trimmed_bytes)
             return excess_samples
         return 0
 
-    def get_german_window_audio(self) -> tuple[np.ndarray, float]:
-        """Get the German channel audio buffer as a float32 array."""
-        all_bytes = b"".join(self.german_audio_buffer)
+    def _add_channel_audio(self, pcm16_bytes: bytes, channel: ChannelBuffer) -> None:
+        """Add audio to a channel buffer with first-chunk offset tracking."""
+        if not channel.started:
+            chunk_sec = (len(pcm16_bytes) // 2) / self.sample_rate
+            elapsed = max(0.0, time.time() - self.start_time)
+            channel.start_offset_sec = max(0.0, elapsed - chunk_sec)
+            channel.started = True
+        channel.audio.append(pcm16_bytes)
+        channel.total_samples += len(pcm16_bytes) // 2
+        trimmed = self._trim_buffer(channel.audio)
+        channel.trimmed_samples += trimmed
+        self.add_audio(pcm16_bytes)
+
+    def add_german_audio(self, pcm16_bytes: bytes) -> None:
+        """Add audio from the main page (German speaker) to the german channel buffer."""
+        self._add_channel_audio(pcm16_bytes, self.german_channel)
+
+    def add_foreign_audio(self, pcm16_bytes: bytes) -> None:
+        """Add audio from the viewer (foreign speaker) to the foreign channel buffer."""
+        self._add_channel_audio(pcm16_bytes, self.foreign_channel)
+        self.viewer_last_audio_time = time.time()
+        self.dual_channel_locked = True
+
+    def _get_channel_window_audio(self, channel: ChannelBuffer) -> tuple[np.ndarray, float]:
+        """Get windowed audio from a channel buffer as float32 array."""
+        all_bytes = b"".join(channel.audio)
         if not all_bytes:
             return np.array([], dtype=np.float32), 0.0
         samples = np.frombuffer(all_bytes, dtype=np.int16).astype(np.float32) / 32768.0
         max_window_samples = int(WINDOW_SEC * self.sample_rate)
         if len(samples) > max_window_samples:
             samples = samples[-max_window_samples:]
-        window_start = self.german_start_offset_sec + (
-            max(0, self.german_total_samples - len(samples)) / self.sample_rate
+        window_start = channel.start_offset_sec + (
+            max(0, channel.total_samples - len(samples)) / self.sample_rate
         )
         return samples, window_start
 
+    def get_german_window_audio(self) -> tuple[np.ndarray, float]:
+        """Get the German channel audio buffer as a float32 array."""
+        return self._get_channel_window_audio(self.german_channel)
+
     def get_foreign_window_audio(self) -> tuple[np.ndarray, float]:
         """Get the foreign channel audio buffer as a float32 array."""
-        all_bytes = b"".join(self.foreign_audio_buffer)
-        if not all_bytes:
-            return np.array([], dtype=np.float32), 0.0
-        samples = np.frombuffer(all_bytes, dtype=np.int16).astype(np.float32) / 32768.0
-        max_window_samples = int(WINDOW_SEC * self.sample_rate)
-        if len(samples) > max_window_samples:
-            samples = samples[-max_window_samples:]
-        window_start = self.foreign_start_offset_sec + (
-            max(0, self.foreign_total_samples - len(samples)) / self.sample_rate
-        )
-        return samples, window_start
+        return self._get_channel_window_audio(self.foreign_channel)
+
+    def resolve_foreign_lang(self) -> None:
+        """Set foreign_lang from user selection if not yet auto-detected."""
+        if self.foreign_lang is None and self.src_lang not in ("auto", "de"):
+            self.foreign_lang = self.src_lang
+            logger.info("Foreign language set from user selection: %s", self.foreign_lang)
 
     def is_dual_channel(self) -> bool:
         """Use dual-channel mode once foreign mic audio has been received at least once."""
@@ -303,19 +353,19 @@ class StreamingSession:
 
     def get_current_time(self) -> float:
         if self.is_dual_channel():
-            german_end = self.german_start_offset_sec + (
-                self.german_total_samples / self.sample_rate
+            german_end = self.german_channel.start_offset_sec + (
+                self.german_channel.total_samples / self.sample_rate
             )
-            foreign_end = self.foreign_start_offset_sec + (
-                self.foreign_total_samples / self.sample_rate
+            foreign_end = self.foreign_channel.start_offset_sec + (
+                self.foreign_channel.total_samples / self.sample_rate
             )
             return max(german_end, foreign_end)
         return self.total_samples / self.sample_rate
 
     def get_buffered_seconds(self) -> float:
         if self.is_dual_channel():
-            german_sec = len(b"".join(self.german_audio_buffer)) / 2 / self.sample_rate
-            foreign_sec = len(b"".join(self.foreign_audio_buffer)) / 2 / self.sample_rate
+            german_sec = len(b"".join(self.german_channel.audio)) / 2 / self.sample_rate
+            foreign_sec = len(b"".join(self.foreign_channel.audio)) / 2 / self.sample_rate
             return max(german_sec, foreign_sec)
         all_bytes = b"".join(self.audio_buffer)
         return len(all_bytes) / 2 / self.sample_rate
@@ -334,15 +384,17 @@ def run_speaker_detection(
         _metrics["diar_times"].append(detect_time)
 
         if speaker_segments:
-            print(
-                f"Speaker detection: {len(speaker_segments)} segments in {detect_time * 1000:.1f}ms"
+            logger.debug(
+                "Speaker detection: %d segments in %.1fms",
+                len(speaker_segments),
+                detect_time * 1000,
             )
             for seg in speaker_segments[:3]:
-                print(f"  - [{seg.start:.2f}-{seg.end:.2f}] {seg.speaker_id}")
+                logger.debug("  - [%.2f-%.2f] %s", seg.start, seg.end, seg.speaker_id)
 
         return speaker_segments
     except Exception as e:
-        print(f"Speaker detection error: {e}")
+        logger.error("Speaker detection error: %s", e)
         return []
 
 
@@ -405,7 +457,7 @@ def _extract_segment_audio(
 
     segment_duration = diar_seg.end - diar_seg.start
     if segment_duration < 0.5:
-        print(f"  SKIP short diar segment: {segment_duration:.2f}s")
+        logger.debug("  SKIP short diar segment: %.2fs", segment_duration)
         return None, 0.0
 
     if end_sample - start_sample < int(0.5 * sample_rate):
@@ -490,7 +542,7 @@ def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
     # Debug audio stats
     audio_rms = float(np.sqrt(np.mean(audio**2)))
     audio_max = float(np.max(np.abs(audio)))
-    print(f"Pipeline: audio_len={len(audio)}, rms={audio_rms:.4f}, max={audio_max:.4f}")
+    logger.debug("Pipeline: audio_len=%d, rms=%.4f, max=%.4f", len(audio), audio_rms, audio_max)
 
     # STEP 1: Run speaker detection to identify speaker segments (embedding-based)
     detect_start = time.time()
@@ -499,10 +551,10 @@ def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
     detect_time = time.time() - detect_start
 
     if not diar_segments:
-        print("No speaker segments, falling back to full-window ASR")
+        logger.debug("No speaker segments, falling back to full-window ASR")
         return _run_asr_fallback(session, audio, window_start, now_sec)
 
-    print(f"Speaker detection: {len(diar_segments)} segments in {detect_time * 1000:.1f}ms")
+    logger.debug("Speaker detection: %d segments in %.1fms", len(diar_segments), detect_time * 1000)
 
     # STEP 2: Detect language per speaker from raw audio (BEFORE ASR)
     speaker_languages = _detect_speaker_languages(session, audio, diar_segments, window_start)
@@ -545,9 +597,11 @@ def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
         # Skip segments that start right at window boundary (likely truncated from earlier)
         segment_rel_start = diar_seg.start - window_start
         if segment_rel_start < 0.5 and (diar_seg.end - diar_seg.start) < 1.0:
-            print(
-                f"  SKIP boundary segment: {diar_seg.speaker_id} "
-                f"[{diar_seg.start:.2f}-{diar_seg.end:.2f}] (truncated)"
+            logger.debug(
+                "  SKIP boundary segment: %s [%.2f-%.2f] (truncated)",
+                diar_seg.speaker_id,
+                diar_seg.start,
+                diar_seg.end,
             )
             continue
 
@@ -567,12 +621,9 @@ def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
     asr_time = time.time() - asr_start
     _metrics["asr_times"].append(asr_time)
 
-    print(f"Per-speaker ASR: {len(hyp_segments)} segments in {asr_time * 1000:.1f}ms")
+    logger.debug("Per-speaker ASR: %d segments in %.1fms", len(hyp_segments), asr_time * 1000)
 
-    # Set foreign language from user selection if not yet detected
-    if session.foreign_lang is None and session.src_lang not in ("auto", "de"):
-        session.foreign_lang = session.src_lang
-        print(f"Foreign language set from user selection: {session.foreign_lang}")
+    session.resolve_foreign_lang()
 
     # Keep language assignment aligned with stable speaker role.
     if session.foreign_lang:
@@ -587,9 +638,13 @@ def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
         seg["speaker_role"] = seg.get("speaker_role") or _role_from_lang(seg.get("lang"))
 
     for seg in hyp_segments[:3]:
-        print(
-            f"  - [{seg['start']:.1f}-{seg['end']:.1f}] {seg['speaker_id']} "
-            f"lang={seg['lang']}: {seg['text'][:40]}"
+        logger.debug(
+            "  - [%.1f-%.1f] %s lang=%s: %s",
+            seg["start"],
+            seg["end"],
+            seg["speaker_id"],
+            seg["lang"],
+            seg["text"][:40],
         )
 
     # Determine detected language for session from actual ASR results
@@ -677,11 +732,9 @@ def run_asr_german_channel(session: StreamingSession) -> tuple[list[Segment], li
 
     asr_time = time.time() - asr_start
     _metrics["asr_times"].append(asr_time)
-    print(f"German-channel ASR: {len(german_results)} segments in {asr_time * 1000:.1f}ms")
+    logger.debug("German-channel ASR: %d segments in %.1fms", len(german_results), asr_time * 1000)
 
-    if session.foreign_lang is None and session.src_lang not in ("auto", "de"):
-        session.foreign_lang = session.src_lang
-        print(f"Foreign language set from user selection: {session.foreign_lang}")
+    session.resolve_foreign_lang()
 
     session.detected_lang = "de"
     all_segments, newly_finalized = session.segment_tracker.update_from_hypothesis(
@@ -718,9 +771,10 @@ def run_asr_dual_channel(session: StreamingSession) -> tuple[list[Segment], list
 
     backend = get_asr_backend()
 
-    print(
-        f"Dual-channel pipeline: german={len(german_audio)} samples, "
-        f"foreign={len(foreign_audio)} samples"
+    logger.debug(
+        "Dual-channel pipeline: german=%d samples, foreign=%d samples",
+        len(german_audio),
+        len(foreign_audio),
     )
 
     asr_start = time.time()
@@ -756,7 +810,7 @@ def run_asr_dual_channel(session: StreamingSession) -> tuple[list[Segment], list
             lang = seg.get("lang")
             if lang and lang not in ("unknown", "de") and lang in LANG_INFO:
                 session.foreign_lang = lang
-                print(f"Dual-channel: foreign language detected as {lang}")
+                logger.info("Dual-channel: foreign language detected as %s", lang)
                 break
 
     # Only fill unknown labels; do not overwrite explicit "de"/other detections.
@@ -775,7 +829,7 @@ def run_asr_dual_channel(session: StreamingSession) -> tuple[list[Segment], list
     asr_time = time.time() - asr_start
     _metrics["asr_times"].append(asr_time)
 
-    print(f"Dual-channel ASR: {len(hyp_segments)} segments in {asr_time * 1000:.1f}ms")
+    logger.debug("Dual-channel ASR: %d segments in %.1fms", len(hyp_segments), asr_time * 1000)
 
     session.detected_lang = session.foreign_lang or "unknown"
 
@@ -823,15 +877,19 @@ def _detect_speaker_languages(
 
         for group in language_confusion_groups:
             if detected in group and user_hint in group:
-                print(f"    Correcting {detected} → {user_hint} (user hint, confusion group)")
+                logger.debug(
+                    "    Correcting %s → %s (user hint, confusion group)", detected, user_hint
+                )
                 return user_hint
 
         if detected not in ("de", "unknown") and user_hint not in ("de", "unknown"):
-            print(f"    Correcting {detected} → {user_hint} (user hint, foreign speaker)")
+            logger.debug("    Correcting %s → %s (user hint, foreign speaker)", detected, user_hint)
             return user_hint
 
         if detected == "de" and confidence < 0.9 and user_hint not in ("de", "unknown"):
-            print(f"    Correcting {detected} → {user_hint} (user hint, low confidence de)")
+            logger.debug(
+                "    Correcting %s → %s (user hint, low confidence de)", detected, user_hint
+            )
             return user_hint
 
         return detected
@@ -840,7 +898,7 @@ def _detect_speaker_languages(
         speaker_audio = extract_speaker_audio(audio, diar_segments, speaker_id, window_start)
 
         if len(speaker_audio) < 8000:
-            print(f"  {speaker_id}: audio too short ({len(speaker_audio) / 16000:.2f}s)")
+            logger.debug("  %s: audio too short (%.2fs)", speaker_id, len(speaker_audio) / 16000)
             continue
 
         detected_lang, confidence = session.language_tracker.get_speaker_language(
@@ -854,11 +912,11 @@ def _detect_speaker_languages(
             session.language_tracker.set_speaker_language(speaker_id, lang, confidence)
 
         speaker_languages[speaker_id] = (lang, confidence)
-        print(f"  {speaker_id} → {lang} (confidence={confidence:.2f})")
+        logger.debug("  %s → %s (confidence=%.2f)", speaker_id, lang, confidence)
 
         if lang not in ("unknown", "de") and lang in LANG_INFO and session.foreign_lang is None:
             session.foreign_lang = lang
-            print(f"Foreign language detected: {lang}")
+            logger.info("Foreign language detected: %s", lang)
 
     return speaker_languages
 
@@ -879,9 +937,11 @@ def _run_asr_fallback(
     asr_time = time.time() - asr_start
     _metrics["asr_times"].append(asr_time)
 
-    print(
-        f"Fallback ASR: {len(filtered)} segs, "
-        f"lang={asr_result.detected_language}, {asr_time * 1000:.1f}ms"
+    logger.debug(
+        "Fallback ASR: %d segs, lang=%s, %.1fms",
+        len(filtered),
+        asr_result.detected_language,
+        asr_time * 1000,
     )
 
     hyp_segments = []
@@ -891,7 +951,7 @@ def _run_asr_fallback(
         seg_end_sample = int(seg.end * 16000)
         segment_audio = audio[seg_start_sample : min(seg_end_sample, len(audio))]
 
-        speechbrain_lang, confidence = detect_language_from_audio(segment_audio, 16000)  # noqa: F841
+        speechbrain_lang, _ = detect_language_from_audio(segment_audio, 16000)
         segment_lang = (
             speechbrain_lang if speechbrain_lang != "unknown" else asr_result.detected_language
         )
@@ -902,7 +962,7 @@ def _run_asr_fallback(
             and session.foreign_lang is None
         ):
             session.foreign_lang = segment_lang
-            print(f"Foreign language detected: {segment_lang}")
+            logger.info("Foreign language detected: %s", segment_lang)
 
         hyp_segments.append(
             {
@@ -917,10 +977,7 @@ def _run_asr_fallback(
 
     session.detected_lang = asr_result.detected_language
 
-    # Set foreign language from user selection if not yet detected
-    if session.foreign_lang is None and session.src_lang not in ("auto", "de"):
-        session.foreign_lang = session.src_lang
-        print(f"Foreign language set from user selection: {session.foreign_lang}")
+    session.resolve_foreign_lang()
 
     # Do not force all fallback segments to foreign language; keep detected labels.
     for seg in hyp_segments:
@@ -946,17 +1003,11 @@ def run_translation(text: str, src_lang: str, tgt_lang: str) -> str:
     return result
 
 
-async def handle_websocket(websocket: WebSocket):
-    """
-    Main WebSocket handler for real-time streaming transcription.
+class WebSocketHandler:
+    """Manages the lifecycle of a single WebSocket streaming session.
 
-    Handles the complete lifecycle of a streaming session:
-        1. Receive config message with session parameters
-        2. Start ASR loop (runs every TICK_SEC, transcribes audio windows)
-        3. Start MT loop (translates finalized segments asynchronously)
-        4. Receive binary audio frames, buffer them
-        5. Handle stop requests (drain translations, send final segments)
-        6. Clean up and notify viewers on disconnect
+    Coordinates ASR and MT async loops, handles incoming messages (config,
+    audio, request_summary), and broadcasts updates to viewers.
 
     Message protocol:
         Client → Server:
@@ -968,430 +1019,416 @@ async def handle_websocket(websocket: WebSocket):
             - {"type": "config_ack", "status": "active"}
             - {"type": "segments", "segments": [...], "src_lang": "...", "foreign_lang": "..."}
             - {"type": "translation", "segment_id": N, "tgt_lang": "de", "text": "..."}
-
-    The handler spawns two async tasks that run concurrently:
-        - asr_loop: Processes audio every TICK_SEC, sends segment updates
-        - mt_loop: Consumes translation queue, sends translation updates
     """
-    await websocket.accept()
 
-    session: StreamingSession | None = None
-    session_token: str | None = None
-    asr_task: asyncio.Task | None = None
-    mt_task: asyncio.Task | None = None
-    running = True
-    translation_queue: asyncio.Queue[Segment] = asyncio.Queue()
+    def __init__(self, websocket: WebSocket) -> None:
+        self.websocket = websocket
+        self.session: StreamingSession | None = None
+        self.session_token: str | None = None
+        self._asr_task: asyncio.Task | None = None
+        self._mt_task: asyncio.Task | None = None
+        self._running = True
+        self._translation_queue: asyncio.Queue[Segment] = asyncio.Queue()
+        self._msg_count = 0
+        self._bytes_received = 0
 
-    async def asr_loop():
-        """ASR loop - runs independently, sends segments immediately."""
-        nonlocal running
-        tick_count = 0
-        last_segment_hash = None  # Track last sent state to avoid redundant sends
-        while running:
-            await asyncio.sleep(TICK_SEC)
-            if session is not None and running:
-                tick_count += 1
-                if tick_count <= 3 or tick_count % 20 == 0:
-                    print(f"ASR tick #{tick_count}: {session.get_buffered_seconds():.1f}s buffered")
-                loop = asyncio.get_event_loop()
-                try:
-                    asr_fn = run_asr_dual_channel if session.is_dual_channel() else run_asr
-                    if not session.is_dual_channel():
-                        if (
-                            session.src_lang not in ("auto", "de")
-                            and session.foreign_lang
-                            and session.foreign_lang in LANG_INFO
-                        ):
-                            asr_fn = run_asr_german_channel
-                        else:
-                            asr_fn = run_asr
-                    all_segments, newly_finalized = await loop.run_in_executor(
-                        _executor, asr_fn, session
+    # ------------------------------------------------------------------
+    # Public entry point
+    # ------------------------------------------------------------------
+
+    async def run(self) -> None:
+        """Accept the WebSocket and run the message loop until disconnect."""
+        await self.websocket.accept()
+        try:
+            while True:
+                message = await self.websocket.receive()
+                self._msg_count += 1
+
+                if message["type"] == "websocket.disconnect":
+                    logger.info(
+                        "WebSocket disconnect after %d msgs, %d bytes",
+                        self._msg_count,
+                        self._bytes_received,
                     )
-
-                    if running:
-                        # Build segments with translations where available
-                        segments_data = []
-                        dual_channel = session.is_dual_channel()
-                        for seg in all_segments:
-                            seg_dict = asdict(seg)
-                            speaker_role = _resolve_segment_role(session, seg, dual_channel)
-                            seg_dict["speaker_role"] = speaker_role
-                            if speaker_role == "german":
-                                seg_dict["src_lang"] = "de"
-                            elif (
-                                speaker_role == "foreign"
-                                and session.foreign_lang
-                                and session.foreign_lang in LANG_INFO
-                            ):
-                                seg_dict["src_lang"] = session.foreign_lang
-                            seg_dict["translations"] = session.translations.get(seg.id, {})
-                            segments_data.append(seg_dict)
-
-                        # Only send if segments changed (avoid redundant updates)
-                        # Hash: (id, src, lang, role, final, translations) for each segment
-                        current_hash = tuple(
-                            (
-                                s["id"],
-                                s["src"],
-                                s.get("src_lang"),
-                                s.get("speaker_role"),
-                                s["final"],
-                                tuple(sorted(s["translations"].items())),
-                            )
-                            for s in segments_data
-                        )
-                        if current_hash != last_segment_hash:
-                            last_segment_hash = current_hash
-
-                            # Send ASR results
-                            segments_msg = {
-                                "type": "segments",
-                                "t": session.get_current_time(),
-                                "src_lang": session.detected_lang or "unknown",
-                                "foreign_lang": session.foreign_lang,
-                                "dual_channel": dual_channel,
-                                "segments": segments_data,
-                            }
-                            await websocket.send_text(json.dumps(segments_msg))
-
-                            # Broadcast to viewers
-                            if session_token:
-                                entry = await registry.get(session_token)
-                                if entry:
-                                    await broadcast_to_viewers(entry, segments_msg)
-
-                        # Queue newly finalized segments for translation
-                        for seg in newly_finalized:
-                            print(f"Queuing segment {seg.id} for translation: {seg.src[:50]}")
-                            await translation_queue.put(seg)
-
-                        if all_segments:
-                            final_count = sum(1 for s in all_segments if s.final)
-                            live_count = len(all_segments) - final_count
-                            print(f"Segments: {final_count} final, {live_count} live")
-
-                except Exception as e:
-                    print(f"ASR tick error: {e}")
-
-    async def mt_loop():
-        """Translation loop - processes queue, sends updates when ready."""
-        nonlocal running
-        while running:
-            try:
-                # Wait for a segment to translate (with timeout to check running)
-                try:
-                    segment = await asyncio.wait_for(translation_queue.get(), timeout=0.5)
-                except TimeoutError:
-                    continue
-
-                if not running or session is None:
                     break
 
-                # Run translation in executor - bidirectional
-                loop = asyncio.get_event_loop()
+                await self._handle_message(message)
 
-                try:
-                    # Use explicit speaker role when available to keep translation direction stable.
-                    foreign = session.foreign_lang
-                    if not foreign or foreign == "unknown" or foreign not in LANG_INFO:
-                        foreign = None
-                    role = _resolve_segment_role(session, segment, session.is_dual_channel())
+        except Exception as e:
+            logger.error("WebSocket error: %s", e)
+        finally:
+            await self._cleanup()
 
-                    if role == "german":
-                        if not foreign:
-                            translation_queue.task_done()
-                            continue
-                        seg_src_lang = "de"
-                        tgt_lang = foreign
-                    elif role == "foreign":
-                        if not foreign:
-                            translation_queue.task_done()
-                            continue
-                        if segment.src_lang == "de":
-                            # Foreign-side segment recognized as German: translate to foreign for UI.
-                            seg_src_lang = "de"
-                            tgt_lang = foreign
-                        elif segment.src_lang in LANG_INFO and segment.src_lang != "de":
-                            seg_src_lang = segment.src_lang
-                            tgt_lang = "de"
-                        elif (
-                            session.foreign_lang
-                            and session.foreign_lang in LANG_INFO
-                            and segment.src_lang in {"unknown", None, ""}
-                        ):
-                            seg_src_lang = session.foreign_lang
-                            tgt_lang = "de"
-                        else:
-                            translation_queue.task_done()
-                            continue
-                    else:
-                        seg_src_lang = segment.src_lang
-                        tgt_lang = foreign if (seg_src_lang == "de" and foreign) else "de"
+    # ------------------------------------------------------------------
+    # Message dispatch
+    # ------------------------------------------------------------------
 
-                    # Skip translation if source language is unsupported
-                    if seg_src_lang not in LANG_INFO:
-                        print(
-                            f"Skipping translation for segment {segment.id}: "
-                            f"unsupported source language '{seg_src_lang}'"
-                        )
-                        translation_queue.task_done()
-                        continue
+    async def _handle_message(self, message: dict) -> None:
+        if "text" in message:
+            data = json.loads(message["text"])
+            msg_type = data.get("type")
+            if msg_type == "config":
+                await self._handle_config(data)
+            elif msg_type == "request_summary":
+                await self._handle_request_summary()
+        elif "bytes" in message:
+            self._handle_audio(message["bytes"])
 
-                    if session.translations.get(segment.id, {}).get(tgt_lang):
-                        translation_queue.task_done()
-                        continue
+    # ------------------------------------------------------------------
+    # Config
+    # ------------------------------------------------------------------
 
-                    print(
-                        f"Translating segment {segment.id} ({seg_src_lang}→{tgt_lang}): {segment.src[:50]}"
+    async def _handle_config(self, data: dict) -> None:
+        sample_rate = data.get("sample_rate", 16000)
+        src_lang = data.get("src_lang", "auto")
+        foreign_lang = data.get("foreign_lang")
+
+        self.session_token = data.get("token")
+        if not self.session_token:
+            logger.error("No token provided in config message")
+            return
+
+        self.session = StreamingSession(sample_rate=sample_rate, src_lang=src_lang)
+        if foreign_lang and foreign_lang not in ("auto", "de", "unknown"):
+            self.session.foreign_lang = foreign_lang
+
+        self._asr_task = asyncio.create_task(self._asr_loop())
+        self._mt_task = asyncio.create_task(self._mt_loop())
+
+        await registry.activate(self.session_token, self.session, self.websocket)
+        logger.info(
+            "Session activated: sample_rate=%d, src_lang=%s, foreign_lang=%s, token=%s...",
+            sample_rate,
+            src_lang,
+            foreign_lang or "auto",
+            self.session_token[:8],
+        )
+
+        await self._send_json({"type": "config_ack", "status": "active"})
+
+        entry = await registry.get(self.session_token)
+        if entry and entry.viewers:
+            await broadcast_to_viewers(
+                entry,
+                {
+                    "type": "session_active",
+                    "foreign_lang": self.session.foreign_lang,
+                    "segments": [],
+                },
+            )
+
+    # ------------------------------------------------------------------
+    # Audio
+    # ------------------------------------------------------------------
+
+    def _handle_audio(self, audio_bytes: bytes) -> None:
+        if self.session is not None:
+            self._bytes_received += len(audio_bytes)
+            self.session.add_german_audio(audio_bytes)
+            if self._msg_count % 50 == 0:
+                logger.debug(
+                    "Audio: %d bytes, %.1fs buffered",
+                    self._bytes_received,
+                    self.session.get_buffered_seconds(),
+                )
+
+    # ------------------------------------------------------------------
+    # Request summary (stop recording + summarize)
+    # ------------------------------------------------------------------
+
+    async def _handle_request_summary(self) -> None:
+        await self._cancel_task("_asr_task")
+        logger.debug("ASR loop stopped for stop request")
+
+        if self.session is None:
+            return
+
+        # Finalize remaining segments
+        now_sec = self.session.get_current_time()
+        all_segs, time_finalized = self.session.segment_tracker.update_from_hypothesis(
+            [], 0.0, now_sec, "unknown"
+        )
+
+        for seg in time_finalized:
+            logger.debug("Queuing time-finalized segment %d: %s", seg.id, seg.src[:50])
+            await self._translation_queue.put(seg)
+
+        live_segs = [s for s in all_segs if not s.final]
+        if live_segs:
+            logger.debug("Force-finalizing %d live segments", len(live_segs))
+            newly_final = self.session.segment_tracker.force_finalize_all()
+            for seg in newly_final:
+                logger.debug("Queuing force-finalized segment %d: %s", seg.id, seg.src[:50])
+                await self._translation_queue.put(seg)
+
+        # Wait for translations to complete
+        try:
+            await asyncio.wait_for(self._translation_queue.join(), timeout=60)
+        except TimeoutError:
+            logger.warning(
+                "Translation queue join timed out, %d items remaining",
+                self._translation_queue.qsize(),
+            )
+
+        # Send final segments with all translations
+        finalized = self.session.segment_tracker.finalized_segments
+        if finalized:
+            segments_data = _serialize_segments(self.session, list(finalized))
+            await self._send_json(
+                {
+                    "type": "segments",
+                    "t": self.session.get_current_time(),
+                    "src_lang": self.session.detected_lang or "unknown",
+                    "foreign_lang": self.session.foreign_lang or "en",
+                    "segments": segments_data,
+                }
+            )
+
+        await self._run_summarization(finalized)
+
+        self._running = False
+        logger.info("Recording stopped, closing connection")
+        await self.websocket.close()
+
+    # ------------------------------------------------------------------
+    # Summarization
+    # ------------------------------------------------------------------
+
+    async def _run_summarization(self, finalized: list[Segment]) -> None:
+        summ_backend = get_summarization_backend()
+        if summ_backend is None or not finalized:
+            return
+
+        assert self.session is not None
+        foreign_lang = self.session.foreign_lang or "en"
+        summ_segments = [
+            {
+                "src": seg.src,
+                "src_lang": seg.src_lang,
+                "translations": self.session.translations.get(seg.id, {}),
+            }
+            for seg in finalized
+        ]
+
+        await self._send_json(
+            {
+                "type": "summary_progress",
+                "step": "summarize",
+                "message": "Generating summaries...",
+            }
+        )
+
+        try:
+            loop = asyncio.get_event_loop()
+            foreign_summary, german_summary = await loop.run_in_executor(
+                _executor,
+                summ_backend.summarize_bilingual,
+                summ_segments,
+                foreign_lang,
+            )
+            summary_msg = {
+                "type": "summary",
+                "foreign_summary": foreign_summary,
+                "german_summary": german_summary,
+                "foreign_lang": foreign_lang,
+            }
+            await self._send_json(summary_msg)
+            await _maybe_broadcast(self.session_token, summary_msg)
+        except Exception as e:
+            logger.error("Summarization error: %s", e)
+
+    # ------------------------------------------------------------------
+    # ASR loop
+    # ------------------------------------------------------------------
+
+    async def _asr_loop(self) -> None:
+        """Process audio windows every TICK_SEC and send segment updates."""
+        tick_count = 0
+        last_segment_hash = None
+        while self._running:
+            await asyncio.sleep(TICK_SEC)
+            if self.session is None or not self._running:
+                continue
+
+            tick_count += 1
+            if tick_count <= 3 or tick_count % 20 == 0:
+                logger.debug(
+                    "ASR tick #%d: %.1fs buffered",
+                    tick_count,
+                    self.session.get_buffered_seconds(),
+                )
+            loop = asyncio.get_event_loop()
+            try:
+                if self.session.is_dual_channel():
+                    asr_fn = run_asr_dual_channel
+                elif (
+                    self.session.src_lang not in ("auto", "de")
+                    and self.session.foreign_lang
+                    and self.session.foreign_lang in LANG_INFO
+                ):
+                    asr_fn = run_asr_german_channel
+                else:
+                    asr_fn = run_asr
+                all_segments, newly_finalized = await loop.run_in_executor(
+                    _executor, asr_fn, self.session
+                )
+
+                if not self._running:
+                    continue
+
+                segments_data = _serialize_segments(self.session, all_segments)
+
+                # Only send if segments changed (avoid redundant updates)
+                current_hash = tuple(
+                    (
+                        s["id"],
+                        s["src"],
+                        s.get("src_lang"),
+                        s.get("speaker_role"),
+                        s["final"],
+                        tuple(sorted(s["translations"].items())),
                     )
-                    translation = await loop.run_in_executor(
-                        _executor, run_translation, segment.src, seg_src_lang, tgt_lang
-                    )
-                    print(f"Translation done {segment.id}: {translation[:50]}")
+                    for s in segments_data
+                )
+                if current_hash != last_segment_hash:
+                    last_segment_hash = current_hash
+                    segments_msg = {
+                        "type": "segments",
+                        "t": self.session.get_current_time(),
+                        "src_lang": self.session.detected_lang or "unknown",
+                        "foreign_lang": self.session.foreign_lang,
+                        "dual_channel": self.session.is_dual_channel(),
+                        "segments": segments_data,
+                    }
+                    await self._send_and_broadcast(segments_msg)
 
-                    # Store translation in dict
-                    if segment.id not in session.translations:
-                        session.translations[segment.id] = {}
-                    session.translations[segment.id][tgt_lang] = translation
+                for seg in newly_finalized:
+                    logger.debug("Queuing segment %d for translation: %s", seg.id, seg.src[:50])
+                    await self._translation_queue.put(seg)
 
-                    # Mark task as done for queue.join() to work
-                    translation_queue.task_done()
-
-                    if running:
-                        # Send translation update
-                        translation_msg = {
-                            "type": "translation",
-                            "segment_id": segment.id,
-                            "tgt_lang": tgt_lang,
-                            "text": translation,
-                        }
-                        await websocket.send_text(json.dumps(translation_msg))
-
-                        # Broadcast to viewers
-                        if session_token:
-                            entry = await registry.get(session_token)
-                            if entry:
-                                await broadcast_to_viewers(entry, translation_msg)
-                except Exception as e:
-                    print(f"Translation error for segment {segment.id}: {e}")
-                    # Still mark as done even on error
-                    translation_queue.task_done()
+                if all_segments:
+                    final_count = sum(1 for s in all_segments if s.final)
+                    live_count = len(all_segments) - final_count
+                    logger.debug("Segments: %d final, %d live", final_count, live_count)
 
             except Exception as e:
-                print(f"MT loop error: {e}")
+                logger.error("ASR tick error: %s", e)
 
-    try:
-        msg_count = 0
-        bytes_received = 0
-        while True:
-            message = await websocket.receive()
-            msg_count += 1
+    # ------------------------------------------------------------------
+    # MT loop
+    # ------------------------------------------------------------------
 
-            if message["type"] == "websocket.disconnect":
-                print(f"WebSocket disconnect after {msg_count} msgs, {bytes_received} bytes")
+    async def _mt_loop(self) -> None:
+        """Consume the translation queue and send updates when ready."""
+        while self._running:
+            try:
+                segment = await asyncio.wait_for(
+                    self._translation_queue.get(),
+                    timeout=0.5,
+                )
+            except TimeoutError:
+                continue
+            except Exception as e:
+                logger.error("MT loop error: %s", e)
+                continue
+
+            if not self._running or self.session is None:
+                self._translation_queue.task_done()
                 break
 
-            if "text" in message:
-                data = json.loads(message["text"])
-                if data.get("type") == "config":
-                    sample_rate = data.get("sample_rate", 16000)
-                    src_lang = data.get("src_lang", "auto")
-                    foreign_lang = data.get("foreign_lang")  # Optional hint for non-German language
-                    # Use client-provided token (generated on page load)
-                    session_token = data.get("token")
-                    if not session_token:
-                        print("Error: No token provided in config message")
-                        continue
+            try:
+                role = _resolve_segment_role(
+                    self.session,
+                    segment,
+                    self.session.is_dual_channel(),
+                )
+                pair = _resolve_translation_pair(
+                    segment,
+                    role,
+                    self.session.foreign_lang,
+                )
 
-                    session = StreamingSession(sample_rate=sample_rate, src_lang=src_lang)
-                    # Set foreign language hint if provided (improves ASR for known language pairs)
-                    if foreign_lang and foreign_lang not in ("auto", "de", "unknown"):
-                        session.foreign_lang = foreign_lang
-                    asr_task = asyncio.create_task(asr_loop())
-                    mt_task = asyncio.create_task(mt_loop())
+                if pair is None:
+                    continue
+                seg_src_lang, tgt_lang = pair
 
-                    # Activate the session with the client-provided token
-                    await registry.activate(session_token, session, websocket)
-                    print(
-                        f"Session activated: sample_rate={sample_rate}, src_lang={src_lang}, "
-                        f"foreign_lang={foreign_lang or 'auto'}, token={session_token[:8]}..."
+                if seg_src_lang not in LANG_INFO:
+                    logger.warning(
+                        "Skipping translation for segment %d: unsupported source language '%s'",
+                        segment.id,
+                        seg_src_lang,
                     )
+                    continue
 
-                    # Send config acknowledgment
-                    await websocket.send_text(
-                        json.dumps(
-                            {
-                                "type": "config_ack",
-                                "status": "active",
-                            }
-                        )
-                    )
+                if self.session.translations.get(segment.id, {}).get(tgt_lang):
+                    continue
 
-                    # Notify waiting viewers that session is now active
-                    entry = await registry.get(session_token)
-                    if entry and entry.viewers:
-                        segments_data = []
-                        await broadcast_to_viewers(
-                            entry,
-                            {
-                                "type": "session_active",
-                                "foreign_lang": session.foreign_lang,
-                                "segments": segments_data,
-                            },
-                        )
+                logger.debug(
+                    "Translating segment %d (%s→%s): %s",
+                    segment.id,
+                    seg_src_lang,
+                    tgt_lang,
+                    segment.src[:50],
+                )
+                loop = asyncio.get_event_loop()
+                translation = await loop.run_in_executor(
+                    _executor,
+                    run_translation,
+                    segment.src,
+                    seg_src_lang,
+                    tgt_lang,
+                )
+                logger.debug("Translation done %d: %s", segment.id, translation[:50])
 
-                elif data.get("type") == "request_summary":
-                    # Stop ASR loop
-                    if asr_task:
-                        asr_task.cancel()
-                        with contextlib.suppress(asyncio.CancelledError):
-                            await asr_task
-                        asr_task = None
-                        print("ASR loop stopped for stop request")
+                if segment.id not in self.session.translations:
+                    self.session.translations[segment.id] = {}
+                self.session.translations[segment.id][tgt_lang] = translation
 
-                    if session is not None:
-                        # Finalize remaining segments
-                        now_sec = session.get_current_time()
-                        all_segs, time_finalized = session.segment_tracker.update_from_hypothesis(
-                            [], 0.0, now_sec, "unknown"
-                        )
+                if self._running:
+                    translation_msg = {
+                        "type": "translation",
+                        "segment_id": segment.id,
+                        "tgt_lang": tgt_lang,
+                        "text": translation,
+                    }
+                    await self._send_and_broadcast(translation_msg)
 
-                        for seg in time_finalized:
-                            print(f"Queuing time-finalized segment {seg.id}: {seg.src[:50]}")
-                            await translation_queue.put(seg)
+            except Exception as e:
+                logger.error("Translation error for segment %d: %s", segment.id, e)
+            finally:
+                self._translation_queue.task_done()
 
-                        live_segs = [s for s in all_segs if not s.final]
-                        if live_segs:
-                            print(f"Force-finalizing {len(live_segs)} live segments")
-                            newly_final = session.segment_tracker.force_finalize_all(live_segs)
-                            for seg in newly_final:
-                                print(f"Queuing force-finalized segment {seg.id}: {seg.src[:50]}")
-                                await translation_queue.put(seg)
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
 
-                        # Wait for translations to complete
-                        try:
-                            await asyncio.wait_for(translation_queue.join(), timeout=60)
-                        except TimeoutError:
-                            print(
-                                f"Warning: translation queue join timed out, "
-                                f"{translation_queue.qsize()} items remaining"
-                            )
+    async def _send_json(self, message: dict) -> None:
+        await self.websocket.send_text(json.dumps(message))
 
-                        # Send final segments with all translations
-                        finalized = session.segment_tracker.finalized_segments
-                        if finalized:
-                            segments_data = []
-                            dual_channel = session.is_dual_channel()
-                            for seg in finalized:
-                                seg_dict = asdict(seg)
-                                seg_dict["speaker_role"] = _resolve_segment_role(
-                                    session, seg, dual_channel
-                                )
-                                seg_dict["translations"] = session.translations.get(seg.id, {})
-                                segments_data.append(seg_dict)
+    async def _send_and_broadcast(self, message: dict) -> None:
+        await self._send_json(message)
+        await _maybe_broadcast(self.session_token, message)
 
-                            await websocket.send_text(
-                                json.dumps(
-                                    {
-                                        "type": "segments",
-                                        "t": session.get_current_time(),
-                                        "src_lang": session.detected_lang or "unknown",
-                                        "foreign_lang": session.foreign_lang or "en",
-                                        "segments": segments_data,
-                                    }
-                                )
-                            )
-
-                        # Run summarization if backend is configured
-                        summ_backend = get_summarization_backend()
-                        if summ_backend is not None and finalized:
-                            foreign_lang = session.foreign_lang or "en"
-                            summ_segments = [
-                                {
-                                    "src": seg.src,
-                                    "src_lang": seg.src_lang,
-                                    "translations": session.translations.get(seg.id, {}),
-                                }
-                                for seg in finalized
-                            ]
-                            await websocket.send_text(
-                                json.dumps(
-                                    {
-                                        "type": "summary_progress",
-                                        "step": "summarize",
-                                        "message": "Generating summaries...",
-                                    }
-                                )
-                            )
-                            try:
-                                loop = asyncio.get_event_loop()
-                                foreign_summary, german_summary = await loop.run_in_executor(
-                                    _executor,
-                                    summ_backend.summarize_bilingual,
-                                    summ_segments,
-                                    foreign_lang,
-                                )
-                                await websocket.send_text(
-                                    json.dumps(
-                                        {
-                                            "type": "summary",
-                                            "foreign_summary": foreign_summary,
-                                            "german_summary": german_summary,
-                                            "foreign_lang": foreign_lang,
-                                        }
-                                    )
-                                )
-                                # Broadcast summary to viewers
-                                if session_token:
-                                    entry = await registry.get(session_token)
-                                    if entry:
-                                        await broadcast_to_viewers(
-                                            entry,
-                                            {
-                                                "type": "summary",
-                                                "foreign_summary": foreign_summary,
-                                                "german_summary": german_summary,
-                                                "foreign_lang": foreign_lang,
-                                            },
-                                        )
-                            except Exception as e:
-                                print(f"Summarization error: {e}")
-
-                        running = False
-                        print("Recording stopped, closing connection")
-                        await websocket.close()
-
-            elif "bytes" in message:
-                if session is not None:
-                    audio_bytes = message["bytes"]
-                    bytes_received += len(audio_bytes)
-                    session.add_german_audio(audio_bytes)
-                    if msg_count % 50 == 0:
-                        print(
-                            f"Audio: {bytes_received} bytes, {session.get_buffered_seconds():.1f}s buffered"
-                        )
-
-    except Exception as e:
-        print(f"WebSocket error: {e}")
-    finally:
-        running = False
-
-        # Notify viewers that session has ended and unregister
-        if session_token:
-            entry = await registry.get(session_token)
-            if entry:
-                await broadcast_to_viewers(entry, {"type": "session_ended"})
-            await registry.unregister(session_token)
-
-        if asr_task:
-            asr_task.cancel()
+    async def _cancel_task(self, attr: str) -> None:
+        task: asyncio.Task | None = getattr(self, attr)
+        if task is not None:
+            task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
-                await asr_task
-        if mt_task:
-            mt_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await mt_task
+                await task
+            setattr(self, attr, None)
+
+    async def _cleanup(self) -> None:
+        self._running = False
+        await _maybe_broadcast(self.session_token, {"type": "session_ended"})
+        await registry.unregister(self.session_token)
+        await self._cancel_task("_asr_task")
+        await self._cancel_task("_mt_task")
+
+
+async def handle_websocket(websocket: WebSocket) -> None:
+    """Main WebSocket handler — thin wrapper around WebSocketHandler."""
+    handler = WebSocketHandler(websocket)
+    await handler.run()
 
 
 async def handle_viewer_websocket(websocket: WebSocket, token: str) -> None:
@@ -1404,7 +1441,7 @@ async def handle_viewer_websocket(websocket: WebSocket, token: str) -> None:
         await registry.reserve(token)
         await registry.add_viewer(token, websocket)
 
-    print(f"Viewer connected to session {token[:8]}...")
+    logger.info("Viewer connected to session %s...", token[:8])
 
     try:
         # Check if session is already active
@@ -1412,16 +1449,9 @@ async def handle_viewer_websocket(websocket: WebSocket, token: str) -> None:
         if entry and entry.is_active:
             # Session is active, send current state
             session = entry.session
-            segments_data = []
             live_segments = [cs.segment for cs in session.segment_tracker.cumulative_segments]
             all_segments = list(session.segment_tracker.finalized_segments) + live_segments
-            for seg in all_segments:
-                seg_dict = asdict(seg)
-                seg_dict["speaker_role"] = _resolve_segment_role(
-                    session, seg, session.is_dual_channel()
-                )
-                seg_dict["translations"] = session.translations.get(seg.id, {})
-                segments_data.append(seg_dict)
+            segments_data = _serialize_segments(session, all_segments)
 
             await websocket.send_text(
                 json.dumps(
@@ -1485,9 +1515,10 @@ async def handle_viewer_websocket(websocket: WebSocket, token: str) -> None:
                                         cached_session = entry.session
                                 if cached_session is not None:
                                     if cached_session.foreign_lang != viewer_foreign_lang:
-                                        print(
-                                            "Viewer updated foreign language: "
-                                            f"{cached_session.foreign_lang} -> {viewer_foreign_lang}"
+                                        logger.info(
+                                            "Viewer updated foreign language: %s -> %s",
+                                            cached_session.foreign_lang,
+                                            viewer_foreign_lang,
                                         )
                                         # Reset cached role/lang inferences to re-lock speakers with new hint.
                                         cached_session.speaker_roles.clear()
@@ -1505,7 +1536,7 @@ async def handle_viewer_websocket(websocket: WebSocket, token: str) -> None:
                     break
 
     except Exception as e:
-        print(f"Viewer websocket error: {e}")
+        logger.error("Viewer websocket error: %s", e)
     finally:
         await registry.remove_viewer(token, websocket)
-        print(f"Viewer disconnected from session {token[:8]}...")
+        logger.info("Viewer disconnected from session %s...", token[:8])

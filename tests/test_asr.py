@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock, patch
 
 from app.backends import get_asr_backend
+from app.backends.types import ASRResult, ASRSegment
 
 
 class TestASRBackendConfig:
@@ -33,20 +34,12 @@ class TestTranscribeWavPath:
     @patch("app.asr.get_asr_backend")
     def test_transcribe_returns_dict(self, mock_get_backend):
         mock_backend = MagicMock()
-        mock_model = MagicMock()
-        mock_backend._model = mock_model
+        mock_backend.transcribe_file.return_value = ASRResult(
+            segments=[ASRSegment(start=0.0, end=1.5, text="Hello world", language="en")],
+            detected_language="en",
+            language_probability=0.95,
+        )
         mock_get_backend.return_value = mock_backend
-
-        mock_segment = MagicMock()
-        mock_segment.start = 0.0
-        mock_segment.end = 1.5
-        mock_segment.text = "Hello world"
-
-        mock_info = MagicMock()
-        mock_info.language = "en"
-        mock_info.language_probability = 0.95
-
-        mock_model.transcribe.return_value = ([mock_segment], mock_info)
 
         from app.asr import transcribe_wav_path
 
@@ -61,25 +54,15 @@ class TestTranscribeWavPath:
     @patch("app.asr.get_asr_backend")
     def test_transcribe_segments_format(self, mock_get_backend):
         mock_backend = MagicMock()
-        mock_model = MagicMock()
-        mock_backend._model = mock_model
+        mock_backend.transcribe_file.return_value = ASRResult(
+            segments=[
+                ASRSegment(start=0.0, end=1.5, text="First segment", language="en"),
+                ASRSegment(start=2.0, end=3.5, text="Second segment", language="en"),
+            ],
+            detected_language="en",
+            language_probability=0.9,
+        )
         mock_get_backend.return_value = mock_backend
-
-        mock_segment1 = MagicMock()
-        mock_segment1.start = 0.0
-        mock_segment1.end = 1.5
-        mock_segment1.text = "First segment"
-
-        mock_segment2 = MagicMock()
-        mock_segment2.start = 2.0
-        mock_segment2.end = 3.5
-        mock_segment2.text = "Second segment"
-
-        mock_info = MagicMock()
-        mock_info.language = "en"
-        mock_info.language_probability = 0.9
-
-        mock_model.transcribe.return_value = ([mock_segment1, mock_segment2], mock_info)
 
         from app.asr import transcribe_wav_path
 
@@ -93,15 +76,12 @@ class TestTranscribeWavPath:
     @patch("app.asr.get_asr_backend")
     def test_transcribe_empty_audio(self, mock_get_backend):
         mock_backend = MagicMock()
-        mock_model = MagicMock()
-        mock_backend._model = mock_model
+        mock_backend.transcribe_file.return_value = ASRResult(
+            segments=[],
+            detected_language="en",
+            language_probability=0.5,
+        )
         mock_get_backend.return_value = mock_backend
-
-        mock_info = MagicMock()
-        mock_info.language = "en"
-        mock_info.language_probability = 0.5
-
-        mock_model.transcribe.return_value = ([], mock_info)
 
         from app.asr import transcribe_wav_path
 
@@ -111,20 +91,17 @@ class TestTranscribeWavPath:
         assert result["language"] == "en"
 
     @patch("app.asr.get_asr_backend")
-    def test_transcribe_calls_model(self, mock_get_backend):
+    def test_transcribe_calls_backend(self, mock_get_backend):
         mock_backend = MagicMock()
-        mock_model = MagicMock()
-        mock_backend._model = mock_model
+        mock_backend.transcribe_file.return_value = ASRResult(
+            segments=[],
+            detected_language="en",
+            language_probability=0.9,
+        )
         mock_get_backend.return_value = mock_backend
-
-        mock_info = MagicMock()
-        mock_info.language = "en"
-        mock_info.language_probability = 0.9
-
-        mock_model.transcribe.return_value = ([], mock_info)
 
         from app.asr import transcribe_wav_path
 
         transcribe_wav_path("/test/audio.wav")
 
-        mock_model.transcribe.assert_called_once_with("/test/audio.wav")
+        mock_backend.transcribe_file.assert_called_once_with("/test/audio.wav")

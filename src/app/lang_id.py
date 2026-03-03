@@ -5,11 +5,14 @@ Provides per-speaker language detection that runs once per new speaker,
 caching the result for subsequent segments from the same speaker.
 """
 
+import logging
 import os
 
 import numpy as np
 import torch
 import torchaudio
+
+logger = logging.getLogger(__name__)
 
 # Monkey-patch for torchaudio 2.x which removed list_audio_backends
 if not hasattr(torchaudio, "list_audio_backends"):
@@ -84,7 +87,7 @@ def detect_language_from_audio(
         return lang_code, confidence
 
     except Exception as e:
-        print(f"Language detection error: {e}")
+        logger.error("Language detection error: %s", e)
         return "unknown", 0.0
 
 
@@ -129,7 +132,7 @@ class SpeakerLanguageTracker:
             if confidence >= self.confidence_threshold:
                 self.speaker_languages[speaker_id] = lang
                 self.speaker_confidences[speaker_id] = confidence
-                print(f"Detected language for {speaker_id}: {lang} ({confidence:.2f})")
+                logger.info("Detected language for %s: %s (%.2f)", speaker_id, lang, confidence)
                 return lang, confidence
 
         return "unknown", 0.0
@@ -139,10 +142,6 @@ class SpeakerLanguageTracker:
         self.speaker_languages[speaker_id] = language
         self.speaker_confidences[speaker_id] = confidence
 
-    def get_all_speakers(self) -> dict[str, str]:
-        """Get all speaker -> language mappings."""
-        return self.speaker_languages.copy()
-
     def clear_cache(self) -> None:
         """Clear all cached language detections.
 
@@ -150,7 +149,7 @@ class SpeakerLanguageTracker:
         """
         self.speaker_languages.clear()
         self.speaker_confidences.clear()
-        print("  Language tracker cache cleared")
+        logger.debug("  Language tracker cache cleared")
 
 
 def warmup_lang_id():
@@ -158,9 +157,9 @@ def warmup_lang_id():
     if not LANG_ID_ENABLED:
         return
 
-    print("Warming up language ID model...")
+    logger.info("Warming up language ID model...")
     try:
         _ = get_lang_model()
-        print("Language ID model loaded")
+        logger.info("Language ID model loaded")
     except Exception as e:
-        print(f"Language ID warmup failed: {e}")
+        logger.error("Language ID warmup failed: %s", e)

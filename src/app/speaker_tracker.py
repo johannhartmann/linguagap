@@ -20,11 +20,14 @@ Pipeline:
     5. Return speaker segments with consistent IDs
 """
 
+import logging
 import os
 from dataclasses import dataclass, field
 
 import numpy as np
 import torch
+
+logger = logging.getLogger(__name__)
 
 SPEAKER_MODEL = os.getenv("SPEAKER_MODEL", "speechbrain/spkrec-ecapa-voxceleb")
 SPEAKER_DEVICE = os.getenv("SPEAKER_DEVICE", "cuda")
@@ -54,13 +57,13 @@ def get_speaker_model():
     if _speaker_model is None:
         from speechbrain.inference import EncoderClassifier
 
-        print(f"Loading speaker embedding model: {SPEAKER_MODEL}")
+        logger.info("Loading speaker embedding model: %s", SPEAKER_MODEL)
         _speaker_model = EncoderClassifier.from_hparams(
             source=SPEAKER_MODEL,
             savedir=os.path.join(os.getenv("HF_HOME", "/data/hf"), "speechbrain_spk"),
             run_opts={"device": SPEAKER_DEVICE if torch.cuda.is_available() else "cpu"},
         )
-        print("Speaker embedding model loaded")
+        logger.info("Speaker embedding model loaded")
     return _speaker_model
 
 
@@ -115,7 +118,7 @@ class SpeakerTracker:
             embedding = model.encode_batch(signal)
             return embedding.squeeze().cpu().numpy()
         except Exception as e:
-            print(f"Embedding extraction error: {e}")
+            logger.error("Embedding extraction error: %s", e)
             return None
 
     def _cosine_similarity(self, emb1: np.ndarray, emb2: np.ndarray) -> float:
@@ -149,7 +152,9 @@ class SpeakerTracker:
                 best_match = speaker
 
         if best_match:
-            print(f"  Matched speaker {best_match.speaker_id} (similarity={best_similarity:.3f})")
+            logger.debug(
+                "  Matched speaker %s (similarity=%.3f)", best_match.speaker_id, best_similarity
+            )
 
         return best_match
 
@@ -163,7 +168,7 @@ class SpeakerTracker:
             embedding=embedding,
         )
         self.known_speakers.append(speaker)
-        print(f"  Registered new speaker: {speaker_id}")
+        logger.info("  Registered new speaker: %s", speaker_id)
         return speaker
 
     def _energy_vad(self, audio: np.ndarray) -> list[tuple[int, int]]:
@@ -284,10 +289,10 @@ class SpeakerTracker:
         speech_regions = self._energy_vad(audio)
 
         if not speech_regions:
-            print("  No speech detected by VAD")
+            logger.debug("  No speech detected by VAD")
             return []
 
-        print(f"  VAD found {len(speech_regions)} speech regions")
+        logger.debug("  VAD found %d speech regions", len(speech_regions))
 
         # Step 2: For each region, extract embedding and match/register speaker
         segments = []
@@ -331,7 +336,7 @@ class SpeakerTracker:
 
         # Merge adjacent segments from same speaker
         merged = self._merge_adjacent_same_speaker(segments)
-        print(f"  Speaker tracking: {len(segments)} regions → {len(merged)} segments")
+        logger.debug("  Speaker tracking: %d regions → %d segments", len(segments), len(merged))
 
         return merged
 
@@ -348,7 +353,7 @@ class SpeakerTracker:
             if speaker.speaker_id == speaker_id:
                 speaker.language = language
                 speaker.language_confidence = confidence
-                print(f"  Set {speaker_id} language: {language} ({confidence:.2f})")
+                logger.debug("  Set %s language: %s (%.2f)", speaker_id, language, confidence)
                 return
 
     def reset(self) -> None:
@@ -359,7 +364,7 @@ class SpeakerTracker:
         """
         self.known_speakers.clear()
         self.next_speaker_idx = 0
-        print("  Speaker tracker reset")
+        logger.debug("  Speaker tracker reset")
 
 
 def warmup_speaker_model():
@@ -367,12 +372,12 @@ def warmup_speaker_model():
     if not SPEAKER_ENABLED:
         return
 
-    print("Warming up speaker embedding model...")
+    logger.info("Warming up speaker embedding model...")
     try:
         model = get_speaker_model()
         # Quick inference to fully initialize
         dummy = torch.zeros(1, 16000)
         _ = model.encode_batch(dummy)
-        print("Speaker embedding model warmed up")
+        logger.info("Speaker embedding model warmed up")
     except Exception as e:
-        print(f"Speaker model warmup failed: {e}")
+        logger.error("Speaker model warmup failed: %s", e)

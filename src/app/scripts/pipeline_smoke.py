@@ -1,8 +1,11 @@
+import logging
 import tempfile
 
 import httpx
 
 from app.scripts.asr_smoke import generate_silence_wav
+
+logger = logging.getLogger(__name__)
 
 
 def main():
@@ -22,13 +25,13 @@ def main():
     assert response.status_code == 200, f"Expected 200, got {response.status_code}"
 
     result = response.json()
-    print(f"Response: {result}")
+    logger.info("Response: %s", result)
 
     assert "src_lang_detected" in result
     assert "segments" in result
     assert isinstance(result["segments"], list)
 
-    print("\nPipeline smoke test passed!")
+    logger.info("Pipeline smoke test passed!")
 
 
 if __name__ == "__main__":

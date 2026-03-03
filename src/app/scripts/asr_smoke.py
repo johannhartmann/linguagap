@@ -1,10 +1,13 @@
 import json
+import logging
 import tempfile
 import wave
 
 import numpy as np
 
 from app.asr import transcribe_wav_path
+
+logger = logging.getLogger(__name__)
 
 
 def generate_silence_wav(path: str, duration_sec: float = 2.0, sample_rate: int = 16000):
@@ -25,11 +28,11 @@ def main():
     generate_silence_wav(wav_path, duration_sec=2.0)
     result = transcribe_wav_path(wav_path)
 
-    print(json.dumps(result, indent=2))
+    logger.info("ASR result: %s", json.dumps(result, indent=2))
 
     assert "language" in result
     assert "segments" in result
-    print("\nASR smoke test passed!")
+    logger.info("ASR smoke test passed!")
 
 
 if __name__ == "__main__":

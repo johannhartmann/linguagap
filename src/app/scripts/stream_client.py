@@ -1,9 +1,12 @@
 import asyncio
 import contextlib
 import json
+import logging
 
 import numpy as np
 import websockets
+
+logger = logging.getLogger(__name__)
 
 
 async def main():
@@ -15,10 +18,9 @@ async def main():
     samples_per_frame = int(sample_rate * frame_duration_ms / 1000)
     total_frames = int(total_duration_sec * 1000 / frame_duration_ms)
 
-    print(f"Connecting to {uri}")
-    print(f"Streaming {total_duration_sec}s of silence at {sample_rate}Hz")
-    print(f"Frame size: {samples_per_frame} samples ({frame_duration_ms}ms)")
-    print()
+    logger.info("Connecting to %s", uri)
+    logger.info("Streaming %ds of silence at %dHz", total_duration_sec, sample_rate)
+    logger.info("Frame size: %d samples (%dms)", samples_per_frame, frame_duration_ms)
 
     messages_received = []
     seen_segment_ids = set()
@@ -30,8 +32,7 @@ async def main():
             "src_lang": "auto",
         }
         await ws.send(json.dumps(config))
-        print(f"Sent config: {config}")
-        print()
+        logger.info("Sent config: %s", config)
 
         async def receive_messages():
             try:
@@ -41,8 +42,11 @@ async def main():
 
                     if data.get("type") == "segments":
                         segments = data.get("segments", [])
-                        print(
-                            f"t={data['t']:.2f}s, lang={data['src_lang']}, {len(segments)} segment(s):"
+                        logger.debug(
+                            "t=%.2fs, lang=%s, %d segment(s):",
+                            data["t"],
+                            data["src_lang"],
+                            len(segments),
                         )
                         for seg in segments:
                             seg_id = seg["id"]
@@ -50,15 +54,15 @@ async def main():
                             src = seg["src"][:30] + "..." if len(seg["src"]) > 30 else seg["src"]
                             de = seg["de"][:30] + "..." if len(seg["de"]) > 30 else seg["de"]
                             status = "FINAL" if final else "LIVE"
-                            print(f"  [{seg_id}] {status}: '{src}' -> '{de}'")
+                            logger.debug("  [%s] %s: '%s' -> '%s'", seg_id, status, src, de)
                             seen_segment_ids.add(seg_id)
                     else:
-                        print(f"Received: {data}")
+                        logger.debug("Received: %s", data)
 
             except websockets.exceptions.ConnectionClosed:
                 pass
             except Exception as e:
-                print(f"Receive error: {e}")
+                logger.error("Receive error: %s", e)
 
         receiver = asyncio.create_task(receive_messages())
 
@@ -68,18 +72,18 @@ async def main():
             await asyncio.sleep(frame_duration_ms / 1000)
 
             if (i + 1) % 10 == 0:
-                print(f"--- Sent {(i + 1) * frame_duration_ms / 1000:.1f}s of audio ---")
+                logger.debug("--- Sent %.1fs of audio ---", (i + 1) * frame_duration_ms / 1000)
 
-        print("\nFinished streaming, waiting for final responses...")
+        logger.info("Finished streaming, waiting for final responses...")
         await asyncio.sleep(10)
 
         receiver.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await receiver
 
-    print(f"\nTotal messages received: {len(messages_received)}")
-    print(f"Unique segment IDs seen: {sorted(seen_segment_ids)}")
-    print("Stream client test completed!")
+    logger.info("Total messages received: %d", len(messages_received))
+    logger.info("Unique segment IDs seen: %s", sorted(seen_segment_ids))
+    logger.info("Stream client test completed!")
 
 
 if __name__ == "__main__":

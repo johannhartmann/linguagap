@@ -21,6 +21,7 @@ Startup:
     diarization, and language ID models.
 """
 
+import logging
 import os
 import tempfile
 from contextlib import asynccontextmanager
@@ -37,6 +38,8 @@ from app.mt import translate_texts
 from app.scripts.asr_smoke import generate_silence_wav
 from app.speaker_tracker import warmup_speaker_model
 from app.streaming import get_metrics, handle_viewer_websocket, handle_websocket
+
+logger = logging.getLogger(__name__)
 
 
 def warmup_models():
@@ -62,21 +65,21 @@ def warmup_models():
     warmup_speaker_model()
     warmup_lang_id()
 
-    print("Warming up ASR backend...")
+    logger.info("Warming up ASR backend...")
     asr = get_asr_backend()
     asr.warmup()
-    print("ASR backend ready")
+    logger.info("ASR backend ready")
 
-    print("Warming up MT backend...")
+    logger.info("Warming up MT backend...")
     mt = get_translation_backend()
     mt.warmup()
-    print("MT backend ready")
+    logger.info("MT backend ready")
 
     summ = get_summarization_backend()
     if summ is not None:
-        print("Warming up summarization backend...")
+        logger.info("Warming up summarization backend...")
         summ.warmup()
-        print("Summarization backend ready")
+        logger.info("Summarization backend ready")
 
 
 @asynccontextmanager
@@ -116,9 +119,11 @@ async def asr_smoke():
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
         wav_path = f.name
 
-    generate_silence_wav(wav_path, duration_sec=2.0)
-    result = transcribe_wav_path(wav_path)
-    return result
+    try:
+        generate_silence_wav(wav_path, duration_sec=2.0)
+        return transcribe_wav_path(wav_path)
+    finally:
+        os.unlink(wav_path)
 
 
 @app.get("/mt_smoke")
@@ -139,36 +144,37 @@ async def transcribe_translate(
         f.write(content)
         audio_path = f.name
 
-    asr_result = transcribe_wav_path(audio_path)
+    try:
+        asr_result = transcribe_wav_path(audio_path)
 
-    detected_lang = asr_result["language"]
-    if src_lang == "auto":
-        src_lang = detected_lang
+        detected_lang = asr_result["language"]
+        if src_lang == "auto":
+            src_lang = detected_lang
 
-    segments = []
-    for i, seg in enumerate(asr_result["segments"]):
-        src_text = seg["text"].strip()
-        if src_text:
-            de_text = translate_texts([src_text], src_lang=src_lang, tgt_lang="de")[0]
-        else:
-            de_text = ""
+        segments = []
+        for i, seg in enumerate(asr_result["segments"]):
+            src_text = seg["text"].strip()
+            if src_text:
+                de_text = translate_texts([src_text], src_lang=src_lang, tgt_lang="de")[0]
+            else:
+                de_text = ""
 
-        segments.append(
-            {
-                "id": i,
-                "start": seg["start"],
-                "end": seg["end"],
-                "src": src_text,
-                "de": de_text,
-            }
-        )
+            segments.append(
+                {
+                    "id": i,
+                    "start": seg["start"],
+                    "end": seg["end"],
+                    "src": src_text,
+                    "de": de_text,
+                }
+            )
 
-    os.unlink(audio_path)
-
-    return {
-        "src_lang_detected": detected_lang,
-        "segments": segments,
-    }
+        return {
+            "src_lang_detected": detected_lang,
+            "segments": segments,
+        }
+    finally:
+        os.unlink(audio_path)
 
 
 @app.websocket("/ws")
