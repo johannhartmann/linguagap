@@ -120,6 +120,11 @@ class SegmentTracker:
         speaker_role: str | None = None,
     ) -> bool:
         """Check whether two segments can represent the same utterance."""
+        # Same speaker_id is always compatible — Whisper's language detection
+        # can flip between ticks, but the speaker identity is stable.
+        if existing.speaker_id and speaker_id and existing.speaker_id == speaker_id:
+            return True
+
         if (
             existing.speaker_id
             and speaker_id
@@ -216,9 +221,11 @@ class SegmentTracker:
         are clearly the same speech. Hallucinations also repeat text rapidly.
         """
         normalized_text = self._normalize_text(text) if text else ""
-        
-        all_existing_segments = self.finalized_segments + [cs.segment for cs in self.cumulative_segments]
-        
+
+        all_existing_segments = self.finalized_segments + [
+            cs.segment for cs in self.cumulative_segments
+        ]
+
         for seg in all_existing_segments:
             # Check 1: Time-based overlap (bidirectional)
             overlap1 = self._calc_overlap_ratio(abs_start, abs_end, seg.abs_start, seg.abs_end)
@@ -229,23 +236,25 @@ class SegmentTracker:
             # Check 2: Text-based deduplication for sliding window drift and hallucinations
             if normalized_text and seg.src:
                 seg_text_norm = self._normalize_text(seg.src)
-                
+
                 # Identical text in a short time proximity (within 5 seconds)
                 # Catching Whisper hallucinations and re-emitted segments.
-                if normalized_text == seg_text_norm:
-                    if abs(abs_start - seg.abs_start) < 5.0:
-                        return True
-                
+                if normalized_text == seg_text_norm and abs(abs_start - seg.abs_start) < 5.0:
+                    return True
+
                 # Substring check for partial redetections
                 if len(normalized_text) > 8 and len(seg_text_norm) > 8:
                     shorter, longer = (
-                        (normalized_text, seg_text_norm) 
-                        if len(normalized_text) <= len(seg_text_norm) 
+                        (normalized_text, seg_text_norm)
+                        if len(normalized_text) <= len(seg_text_norm)
                         else (seg_text_norm, normalized_text)
                     )
-                    if shorter in longer and len(shorter) / len(longer) > 0.6:
-                        if abs(abs_start - seg.abs_start) < 4.0:
-                            return True
+                    if (
+                        shorter in longer
+                        and len(shorter) / len(longer) > 0.6
+                        and abs(abs_start - seg.abs_start) < 4.0
+                    ):
+                        return True
         return False
 
     def _find_mergeable_segment(

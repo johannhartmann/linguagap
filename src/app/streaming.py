@@ -84,7 +84,7 @@ def _resolve_segment_role(
             return "german"
         if segment.speaker_id == "SPEAKER_01":
             return "foreign"
-        # If we are in dual-channel mode but don't have a known speaker ID, 
+        # If we are in dual-channel mode but don't have a known speaker ID,
         # it might be a fallback segment - still, do NOT guess by language
         # to prevent UI flipping.
         return None
@@ -103,8 +103,8 @@ def _serialize_segments(session: "StreamingSession", segments: list[Segment]) ->
         seg_dict = asdict(seg)
         speaker_role = _resolve_segment_role(session, seg, dual_channel)
         seg_dict["speaker_role"] = speaker_role
-        
-        # Override src_lang if role is certain, to prevent Whisper's 
+
+        # Override src_lang if role is certain, to prevent Whisper's
         # misdetections from breaking the translation logic.
         if speaker_role == "german":
             seg_dict["src_lang"] = "de"
@@ -112,7 +112,7 @@ def _serialize_segments(session: "StreamingSession", segments: list[Segment]) ->
             speaker_role == "foreign" and session.foreign_lang and session.foreign_lang in LANG_INFO
         ):
             seg_dict["src_lang"] = session.foreign_lang
-            
+
         seg_dict["translations"] = session.translations.get(seg.id, {})
         result.append(seg_dict)
     return result
@@ -138,27 +138,10 @@ def _resolve_translation_pair(
     if role == "foreign":
         if not foreign:
             return None
-        if segment.src_lang == "de":
-            return "de", foreign
-        
-        # If the foreign speaker speaks, we translate their text to German (for the Web UI).
-        # We ALSO need to ensure the Viewer UI gets the text. The viewer UI expects
-        # `translations[foreign_lang]`. If segment.src_lang is slightly off (e.g. "fa" instead of "ar"),
-        # we still want to provide "de", but wait - we can only return one translation pair here!
-        # If we return (segment.src_lang, "de"), the MT loop translates to German.
-        # But wait - if segment.src_lang != foreign, the viewer UI will hide the text!
-        # We should just return (segment.src_lang, "de") and handle the viewer UI display
-        # by making sure `src_lang` is explicitly set to `foreign_lang` in `_serialize_segments`
-        # if the role is foreign (which we already did in the previous patch!).
-        # Since we already force `seg_dict["src_lang"] = session.foreign_lang` in `_serialize_segments`,
-        # the viewer UI will see `segLang === foreignLang` and display `seg.src`!
-        # So this part is actually fine as long as `src_lang` is overridden in serialization.
-        
-        if segment.src_lang in LANG_INFO and segment.src_lang != "de":
-            return segment.src_lang, "de"
-        if foreign in LANG_INFO and segment.src_lang in {"unknown", None, ""}:
-            return foreign, "de"
-        return None
+        # Foreign channel always translates to German.
+        # Use the session's foreign_lang, not segment.src_lang which may be wrong
+        # (Whisper's language detection is unreliable).
+        return foreign, "de"
 
     # No role — fallback
     src = segment.src_lang
@@ -817,6 +800,7 @@ def run_asr_dual_channel(session: StreamingSession) -> tuple[list[Segment], list
         session.foreign_lang,
         "SPEAKER_01",
         "foreign",
+        force_lang=session.foreign_lang,
     )
 
     # Offset segment timestamps to absolute time
@@ -827,7 +811,8 @@ def run_asr_dual_channel(session: StreamingSession) -> tuple[list[Segment], list
         seg["start"] += foreign_offset
         seg["end"] += foreign_offset
 
-    # Auto-detect foreign language from results if not yet known
+    # force_lang on both channels ensures correct labels.
+    # Only fall back to Whisper detection if foreign_lang was never configured.
     if session.foreign_lang is None:
         for seg in foreign_results:
             lang = seg.get("lang")
@@ -835,16 +820,6 @@ def run_asr_dual_channel(session: StreamingSession) -> tuple[list[Segment], list
                 session.foreign_lang = lang
                 logger.info("Dual-channel: foreign language detected as %s", lang)
                 break
-
-    # Only fill unknown labels; do not overwrite explicit "de"/other detections.
-    if session.foreign_lang:
-        for seg in foreign_results:
-            if seg.get("lang") in {None, "", "unknown"}:
-                seg["lang"] = session.foreign_lang
-    else:
-        for seg in foreign_results:
-            if seg.get("lang") in {None, ""}:
-                seg["lang"] = "unknown"
 
     hyp_segments = german_results + foreign_results
     hyp_segments.sort(key=lambda s: s["start"])
@@ -1287,11 +1262,11 @@ class WebSocketHandler:
                 else:
                     # Before the remote viewer joins, the web UI is the ONLY source of audio.
                     # Since the web UI is STRICTLY the German speaker's device, we must
-                    # process this audio exclusively as German. Falling back to `run_asr` 
-                    # with diarization would cause the German speaker to be misidentified 
+                    # process this audio exclusively as German. Falling back to `run_asr`
+                    # with diarization would cause the German speaker to be misidentified
                     # as 'foreign' if Whisper misdetects the language.
                     asr_fn = run_asr_german_channel
-                
+
                 all_segments, newly_finalized = await loop.run_in_executor(
                     _executor, asr_fn, self.session
                 )
