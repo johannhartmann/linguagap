@@ -210,7 +210,11 @@ class SegmentTracker:
         return None
 
     def _is_duplicate_segment(
-        self, abs_start: float, abs_end: float, text: str = "", segments_to_check: list[Segment] | None = None
+        self,
+        abs_start: float,
+        abs_end: float,
+        text: str = "",
+        segments_to_check: list[Segment] | None = None,
     ) -> bool:
         """Check if a segment duplicates any segment in the provided list.
 
@@ -225,7 +229,7 @@ class SegmentTracker:
         are clearly the same speech.
         """
         normalized_text = self._normalize_text(text) if text else ""
-        
+
         if segments_to_check is None:
             segments_to_check = self.finalized_segments
 
@@ -251,7 +255,7 @@ class SegmentTracker:
                             return True
 
                 # Substring check for partial redetections
-                if len(normalized_text) > 8 and len(seg_text_norm) > 8:
+                if len(normalized_text) > 4 and len(seg_text_norm) > 4:
                     shorter, longer = (
                         (normalized_text, seg_text_norm)
                         if len(normalized_text) <= len(seg_text_norm)
@@ -380,14 +384,14 @@ class SegmentTracker:
                     new_len = len(src_text)
                     if new_len < old_len * 0.7:
                         # New text is significantly shorter - keep existing, just update times
-                        match.segment.abs_start = min(match.segment.abs_start, abs_start)
-                        match.segment.abs_end = max(match.segment.abs_end, abs_end)
+                        match.segment.abs_start = abs_start
+                        match.segment.abs_end = abs_end
                         match.last_updated = now_sec
                     else:
-                        # Normal update - replace text
+                        # Normal update - replace text and timestamps from latest hypothesis
                         text_changed = match.segment.src != src_text
-                        match.segment.abs_start = min(match.segment.abs_start, abs_start)
-                        match.segment.abs_end = max(match.segment.abs_end, abs_end)
+                        match.segment.abs_start = abs_start
+                        match.segment.abs_end = abs_end
                         match.segment.src = src_text
                         match.segment.src_lang = seg_lang
                         if speaker_id:
@@ -405,7 +409,9 @@ class SegmentTracker:
                 # Before creating a new segment, check if it's a duplicate of another LIVE segment.
                 # This prevents drift from creating dual live segments.
                 live_segments = [cs.segment for cs in self.cumulative_segments]
-                if self._is_duplicate_segment(abs_start, abs_end, src_text, segments_to_check=live_segments):
+                if self._is_duplicate_segment(
+                    abs_start, abs_end, src_text, segments_to_check=live_segments
+                ):
                     continue
 
                 # Create new cumulative segment

@@ -379,6 +379,12 @@ class WhisperASRBackend(ASRBackend):
             text = seg.text.strip()
             if len(text) < 2:
                 continue
+            if seg.no_speech_prob > 0.6:
+                logger.debug("  SKIP no_speech (%.2f): %s", seg.no_speech_prob, text[:50])
+                continue
+            if seg.avg_logprob < -1.0:
+                logger.debug("  SKIP low_logprob (%.2f): %s", seg.avg_logprob, text[:50])
+                continue
             result_segments.append(
                 ASRSegment(
                     start=seg.start,
@@ -469,7 +475,7 @@ class WhisperASRBackend(ASRBackend):
         text: str,
         min_ngram: int = 2,
         max_ngram: int = 6,
-        min_repeats: int = 3,
+        min_repeats: int = 2,
     ) -> str:
         """Remove repeated n-gram patterns from text."""
         if not text or not text.strip():

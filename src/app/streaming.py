@@ -783,7 +783,7 @@ def run_asr_dual_channel(session: StreamingSession) -> tuple[list[Segment], list
     german_rms = float(np.sqrt(np.mean(german_audio**2))) if len(german_audio) > 0 else 0.0
     foreign_rms = float(np.sqrt(np.mean(foreign_audio**2))) if len(foreign_audio) > 0 else 0.0
 
-    CROSSTALK_RATIO = 3.0 # One must be 3x louder to suppress the other
+    CROSSTALK_RATIO = 3.0  # One must be 3x louder to suppress the other
     if german_rms > foreign_rms * CROSSTALK_RATIO and foreign_rms < 0.05:
         logger.debug("Suppressing foreign channel (crosstalk from german)")
         foreign_audio = np.array([], dtype=np.float32)
@@ -836,6 +836,15 @@ def run_asr_dual_channel(session: StreamingSession) -> tuple[list[Segment], list
                 session.foreign_lang = lang
                 logger.info("Dual-channel: foreign language detected as %s", lang)
                 break
+
+    # Filter cross-channel bleed: drop foreign segments that duplicate german ones
+    if german_results and foreign_results:
+        german_texts = {" ".join(seg["text"].lower().split()) for seg in german_results}
+        foreign_results = [
+            seg
+            for seg in foreign_results
+            if " ".join(seg["text"].lower().split()) not in german_texts
+        ]
 
     hyp_segments = german_results + foreign_results
     hyp_segments.sort(key=lambda s: s["start"])
