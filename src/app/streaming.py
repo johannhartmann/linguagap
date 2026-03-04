@@ -150,7 +150,7 @@ def _resolve_translation_pair(
 
 
 def _is_effective_silence(
-    audio: np.ndarray, rms_threshold: float = 0.02, peak_threshold: float = 0.04
+    audio: np.ndarray, rms_threshold: float = 0.003, peak_threshold: float = 0.02
 ) -> bool:
     """Detect near-silent buffers that should not be sent to ASR."""
     if len(audio) == 0:

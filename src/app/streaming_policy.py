@@ -210,7 +210,7 @@ class SegmentTracker:
         return None
 
     def _is_duplicate_segment(self, abs_start: float, abs_end: float, text: str = "") -> bool:
-        """Check if a segment duplicates any existing segment (finalized or live).
+        """Check if a segment duplicates any finalized segment.
 
         Uses two strategies:
             1. Time-based: bidirectional >50% overlap
@@ -220,32 +220,32 @@ class SegmentTracker:
         same speech to be re-detected at shifted absolute positions. E.g.
         "Hallo Johann" might appear at [10.2-14.5] then [8.8-10.6] then
         [7.6-9.4] as the window slides — these don't overlap in time but
-        are clearly the same speech. Hallucinations also repeat text rapidly.
+        are clearly the same speech.
         """
         normalized_text = self._normalize_text(text) if text else ""
 
-        all_existing_segments = self.finalized_segments + [
-            cs.segment for cs in self.cumulative_segments
-        ]
-
-        for seg in all_existing_segments:
+        for seg in self.finalized_segments:
             # Check 1: Time-based overlap (bidirectional)
             overlap1 = self._calc_overlap_ratio(abs_start, abs_end, seg.abs_start, seg.abs_end)
             overlap2 = self._calc_overlap_ratio(seg.abs_start, seg.abs_end, abs_start, abs_end)
             if overlap1 > 0.5 or overlap2 > 0.5:
                 return True
 
-            # Check 2: Text-based deduplication for sliding window drift and hallucinations
+            # Check 2: Text-based deduplication for sliding window drift
             if normalized_text and seg.src:
                 seg_text_norm = self._normalize_text(seg.src)
 
-                # Identical text in a short time proximity (within 10 seconds)
-                # This is common with sliding windows where the same phrase is
-                # detected again and again as the window moves.
-                if normalized_text == seg_text_norm and abs(abs_start - seg.abs_start) < 10.0:
-                    return True
+                if normalized_text == seg_text_norm:
+                    if len(normalized_text) < 6:
+                        # Very short words (Ja, Okay): only drop if extremely close (within 2s)
+                        if abs(abs_start - seg.abs_start) < 2.0:
+                            return True
+                    else:
+                        # Longer phrases: drop if within 5s (sliding window drift)
+                        if abs(abs_start - seg.abs_start) < 5.0:
+                            return True
 
-                # Substring check for partial redetections (higher threshold of 0.7)
+                # Substring check for partial redetections
                 if len(normalized_text) > 8 and len(seg_text_norm) > 8:
                     shorter, longer = (
                         (normalized_text, seg_text_norm)

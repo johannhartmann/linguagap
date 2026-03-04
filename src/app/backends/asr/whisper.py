@@ -377,7 +377,7 @@ class WhisperASRBackend(ASRBackend):
         result_segments = []
         for seg in segments:
             text = seg.text.strip()
-            if not text:
+            if len(text) < 2:
                 continue
             result_segments.append(
                 ASRSegment(
