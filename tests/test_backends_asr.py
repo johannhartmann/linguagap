@@ -154,6 +154,8 @@ class TestWhisperASRBackendTranscribe:
         mock_seg.start = 0.0
         mock_seg.end = 1.5
         mock_seg.text = "Hello world"
+        mock_seg.no_speech_prob = 0.1
+        mock_seg.avg_logprob = -0.3
 
         mock_info = MagicMock()
         mock_info.language = "en"
@@ -178,6 +180,8 @@ class TestWhisperASRBackendTranscribe:
         mock_seg.start = 0.0
         mock_seg.end = 0.5
         mock_seg.text = "A"  # Too short (< 2 chars)
+        mock_seg.no_speech_prob = 0.1
+        mock_seg.avg_logprob = -0.3
 
         mock_info = MagicMock()
         mock_info.language = "en"
