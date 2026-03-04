@@ -14,6 +14,8 @@ class ASRSegment:
     text: str
     language: str  # ISO 639-1
     confidence: float = 1.0
+    avg_logprob: float = 0.0
+    no_speech_prob: float = 0.0
 
 
 @dataclass(frozen=True)

@@ -209,8 +209,10 @@ class SegmentTracker:
                 return cs
         return None
 
-    def _is_duplicate_segment(self, abs_start: float, abs_end: float, text: str = "") -> bool:
-        """Check if a segment duplicates any finalized segment.
+    def _is_duplicate_segment(
+        self, abs_start: float, abs_end: float, text: str = "", segments_to_check: list[Segment] | None = None
+    ) -> bool:
+        """Check if a segment duplicates any segment in the provided list.
 
         Uses two strategies:
             1. Time-based: bidirectional >50% overlap
@@ -223,8 +225,11 @@ class SegmentTracker:
         are clearly the same speech.
         """
         normalized_text = self._normalize_text(text) if text else ""
+        
+        if segments_to_check is None:
+            segments_to_check = self.finalized_segments
 
-        for seg in self.finalized_segments:
+        for seg in segments_to_check:
             # Check 1: Time-based overlap (bidirectional)
             overlap1 = self._calc_overlap_ratio(abs_start, abs_end, seg.abs_start, seg.abs_end)
             overlap2 = self._calc_overlap_ratio(seg.abs_start, seg.abs_end, abs_start, abs_end)
@@ -397,6 +402,12 @@ class SegmentTracker:
                             # Text is same as before - mark when it became stable
                             match.stable_since = now_sec
             else:
+                # Before creating a new segment, check if it's a duplicate of another LIVE segment.
+                # This prevents drift from creating dual live segments.
+                live_segments = [cs.segment for cs in self.cumulative_segments]
+                if self._is_duplicate_segment(abs_start, abs_end, src_text, segments_to_check=live_segments):
+                    continue
+
                 # Create new cumulative segment
                 logger.debug(
                     "  NEW SEG: [%.1f-%.1f] '%s' (total: %d)",

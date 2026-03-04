@@ -359,7 +359,7 @@ class WhisperASRBackend(ASRBackend):
             vad_filter=True,
             vad_parameters={
                 "threshold": 0.5,
-                "min_silence_duration_ms": 500,
+                "min_silence_duration_ms": 300,
                 "min_speech_duration_ms": 400,
                 "speech_pad_ms": 250,
             },
@@ -385,8 +385,8 @@ class WhisperASRBackend(ASRBackend):
                     end=seg.end,
                     text=text,
                     language=info.language,
-                    # faster-whisper segments have avg_logprob and other metrics
-                    # we can use these for even better filtering if needed
+                    avg_logprob=seg.avg_logprob,
+                    no_speech_prob=seg.no_speech_prob,
                 )
             )
 
@@ -418,6 +418,14 @@ class WhisperASRBackend(ASRBackend):
                 logger.debug("  SKIP hallucination (%s): %s", reason, text[:50])
                 continue
 
+            # Check Whisper's internal confidence metrics
+            if hasattr(seg, "no_speech_prob") and seg.no_speech_prob > 0.6:
+                logger.debug("  SKIP (no_speech_prob=%.2f): %s", seg.no_speech_prob, text[:50])
+                continue
+            if hasattr(seg, "avg_logprob") and seg.avg_logprob < -1.0:
+                logger.debug("  SKIP (avg_logprob=%.2f): %s", seg.avg_logprob, text[:50])
+                continue
+
             if text != seg.text:
                 seg = ASRSegment(
                     start=seg.start,
@@ -425,6 +433,8 @@ class WhisperASRBackend(ASRBackend):
                     text=text,
                     language=seg.language,
                     confidence=seg.confidence,
+                    avg_logprob=getattr(seg, "avg_logprob", 0.0),
+                    no_speech_prob=getattr(seg, "no_speech_prob", 0.0),
                 )
 
             # Suppress immediate duplicate phrases from the same ASR pass.

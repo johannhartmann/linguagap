@@ -175,7 +175,6 @@ class TestRunASRGermanChannel:
             detected_language="en",
             language_probability=0.9,
         )
-        backend.post_process.return_value = [ASRSegment(0.0, 0.8, "Guten Tag", "en")]
         mock_get_backend.return_value = backend
 
         all_segments, _ = run_asr_german_channel(session)

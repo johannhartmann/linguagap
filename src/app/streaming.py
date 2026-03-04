@@ -150,7 +150,7 @@ def _resolve_translation_pair(
 
 
 def _is_effective_silence(
-    audio: np.ndarray, rms_threshold: float = 0.003, peak_threshold: float = 0.02
+    audio: np.ndarray, rms_threshold: float = 0.02, peak_threshold: float = 0.05
 ) -> bool:
     """Detect near-silent buffers that should not be sent to ASR."""
     if len(audio) == 0:
@@ -493,7 +493,7 @@ def _transcribe_speaker_segment(
 
     prompt = backend.get_bilingual_prompt(language) if language else None
     asr_result = backend.transcribe(segment_audio, language=language, initial_prompt=prompt)
-    filtered = backend.post_process(asr_result.segments)
+    filtered = asr_result.segments
 
     results = []
     for seg in filtered:
@@ -691,7 +691,7 @@ def _transcribe_channel(
 
     prompt = backend.get_bilingual_prompt(language) if language else None
     asr_result = backend.transcribe(audio, language=language, initial_prompt=prompt)
-    filtered = backend.post_process(asr_result.segments)
+    filtered = asr_result.segments
 
     return [
         {
@@ -946,7 +946,7 @@ def _run_asr_fallback(
     asr_start = time.time()
 
     asr_result = backend.transcribe(audio)
-    filtered = backend.post_process(asr_result.segments)
+    filtered = asr_result.segments
 
     asr_time = time.time() - asr_start
     _metrics["asr_times"].append(asr_time)
