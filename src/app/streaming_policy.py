@@ -384,14 +384,14 @@ class SegmentTracker:
                     new_len = len(src_text)
                     if new_len < old_len * 0.7:
                         # New text is significantly shorter - keep existing, just update times
-                        match.segment.abs_start = abs_start
-                        match.segment.abs_end = abs_end
+                        match.segment.abs_start = min(match.segment.abs_start, abs_start)
+                        match.segment.abs_end = max(match.segment.abs_end, abs_end)
                         match.last_updated = now_sec
                     else:
                         # Normal update - replace text and timestamps from latest hypothesis
                         text_changed = match.segment.src != src_text
-                        match.segment.abs_start = abs_start
-                        match.segment.abs_end = abs_end
+                        match.segment.abs_start = min(match.segment.abs_start, abs_start)
+                        match.segment.abs_end = max(match.segment.abs_end, abs_end)
                         match.segment.src = src_text
                         match.segment.src_lang = seg_lang
                         if speaker_id:
