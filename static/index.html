@@ -756,7 +756,12 @@
                     channelCount: 1,
                     sampleRate: { ideal: 48000 },
                     echoCancellation: true,
-                    noiseSuppression: true
+                    noiseSuppression: true,
+                    autoGainControl: true,
+                    // Legacy Chrome constraints that often help with aggressive room echo
+                    googEchoCancellation: true,
+                    googNoiseSuppression: true,
+                    googHighpassFilter: true
                 };
 
                 // Use selected input device if specified
