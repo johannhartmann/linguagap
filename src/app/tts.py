@@ -131,8 +131,8 @@ def synthesize_speech(text: str, lang: str = "en") -> bytes:
         k: v.to(model.device) if isinstance(v, torch.Tensor) else v for k, v in inputs.items()
     }
 
-    # Generate audio
-    with torch.no_grad():
+    # Generate audio (disable inductor to avoid JIT compilation latency)
+    with torch.no_grad(), torch.compiler.disable():
         outputs = model.generate(**inputs, cfg_scale=TTS_CFG_SCALE)
 
     # Convert float32 audio to PCM16 bytes

@@ -59,6 +59,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-venv \
     ca-certificates \
     libgomp1 \
+    g++ \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
