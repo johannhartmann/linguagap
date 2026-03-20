@@ -110,6 +110,7 @@ def _make_wav(pcm16_bytes: bytes, sample_rate: int = TTS_SAMPLE_RATE) -> bytes:
     return header + pcm16_bytes
 
 
+@torch.compiler.disable()
 def synthesize_speech(text: str, lang: str = "en") -> bytes:
     """
     Generate speech audio from text.
@@ -131,8 +132,8 @@ def synthesize_speech(text: str, lang: str = "en") -> bytes:
         k: v.to(model.device) if isinstance(v, torch.Tensor) else v for k, v in inputs.items()
     }
 
-    # Generate audio (disable inductor to avoid JIT compilation latency)
-    with torch.no_grad(), torch.compiler.disable():
+    # Generate audio
+    with torch.no_grad():
         outputs = model.generate(**inputs, cfg_scale=TTS_CFG_SCALE)
 
     # Convert float32 audio to PCM16 bytes
