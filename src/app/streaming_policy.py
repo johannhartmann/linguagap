@@ -112,6 +112,42 @@ class SegmentTracker:
     def _normalize_text(text: str) -> str:
         return " ".join(text.lower().split())
 
+    def _strip_finalized_prefix(self, text: str) -> str:
+        """Strip text from hypothesis that already belongs to a finalized segment.
+
+        Whisper's sliding window can re-transcribe already-finalized audio,
+        producing hypotheses like "Do you work in Germany? How long would you
+        like to work in Germany?" when only the second sentence is new.
+        """
+        if not self.finalized_segments or not text:
+            return text
+
+        text_norm = self._normalize_text(text)
+
+        # Check the most recent finalized segments (reverse order, limit scope)
+        for seg in reversed(self.finalized_segments[-10:]):
+            seg_norm = self._normalize_text(seg.src)
+            if not seg_norm or len(seg_norm) < 6:
+                continue
+
+            # Check if the hypothesis starts with finalized text (normalized)
+            if text_norm.startswith(seg_norm):
+                # Strip the finalized prefix from the original text
+                # Find the split point by matching word count
+                prefix_word_count = len(seg_norm.split())
+                words = text.split()
+                if prefix_word_count < len(words):
+                    stripped = " ".join(words[prefix_word_count:]).strip()
+                    if stripped:
+                        logger.debug(
+                            "  STRIP PREFIX: '%s' -> '%s'",
+                            text[:40],
+                            stripped[:40],
+                        )
+                        return stripped
+
+        return text
+
     def _is_compatible_segment(
         self,
         existing: Segment,
@@ -334,6 +370,12 @@ class SegmentTracker:
             abs_end = window_start + seg["end"]
             src_text = seg["text"].strip()
 
+            if not src_text or len(src_text) < 2:
+                continue
+
+            # Strip prefixes that belong to already-finalized segments
+            # (Whisper sliding window re-transcribes old audio)
+            src_text = self._strip_finalized_prefix(src_text)
             if not src_text or len(src_text) < 2:
                 continue
 

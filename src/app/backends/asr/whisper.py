@@ -372,6 +372,8 @@ class WhisperASRBackend(ASRBackend):
             multilingual=use_multilingual,
             language_detection_threshold=0.5,
             initial_prompt=initial_prompt,
+            repetition_penalty=1.1,
+            no_repeat_ngram_size=3,
         )
 
         result_segments = []

@@ -472,6 +472,16 @@ def _extract_segment_audio(
     return audio[start_sample:end_sample], padded_start
 
 
+def _build_prompt(backend, language: str | None, finalized_text: str = "") -> str | None:
+    """Build ASR prompt from bilingual hint + recent finalized transcript."""
+    prompt = backend.get_bilingual_prompt(language) if language else None
+    if finalized_text:
+        # Whisper prompt is limited to ~224 tokens; keep last ~200 chars
+        context = finalized_text[-200:].strip()
+        prompt = f"{prompt} {context}" if prompt else context
+    return prompt
+
+
 def _transcribe_speaker_segment(
     backend,
     audio: np.ndarray,
@@ -480,6 +490,7 @@ def _transcribe_speaker_segment(
     window_start: float,
     sample_rate: int = 16000,
     padding_sec: float = 0.3,
+    finalized_text: str = "",
 ) -> list[dict]:
     """Transcribe a single speaker segment via the ASR backend.
 
@@ -491,7 +502,7 @@ def _transcribe_speaker_segment(
     if segment_audio is None:
         return []
 
-    prompt = backend.get_bilingual_prompt(language) if language else None
+    prompt = _build_prompt(backend, language, finalized_text)
     asr_result = backend.transcribe(segment_audio, language=language, initial_prompt=prompt)
     filtered = asr_result.segments
 
@@ -595,6 +606,9 @@ def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
     asr_start = time.time()
     hyp_segments: list[dict] = []
 
+    # Build context from recent finalized segments for prompt conditioning
+    finalized_text = " ".join(s.src for s in session.segment_tracker.finalized_segments[-5:])
+
     for diar_seg in diar_segments:
         speaker_id = diar_seg.speaker_id
         lang, confidence = speaker_languages.get(speaker_id, ("unknown", 0.0))
@@ -619,7 +633,14 @@ def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
             use_lang = lang if confidence > 0.5 and lang != "unknown" else None
 
         # Transcribe via backend (includes post_process: delooping + hallucination filtering)
-        seg_results = _transcribe_speaker_segment(backend, audio, use_lang, diar_seg, window_start)
+        seg_results = _transcribe_speaker_segment(
+            backend,
+            audio,
+            use_lang,
+            diar_seg,
+            window_start,
+            finalized_text=finalized_text,
+        )
         for seg in seg_results:
             seg["speaker_role"] = speaker_role
         hyp_segments.extend(seg_results)
@@ -682,6 +703,7 @@ def _transcribe_channel(
     speaker_id: str,
     speaker_role: str,
     force_lang: str | None = None,
+    finalized_text: str = "",
 ) -> list[dict]:
     """Transcribe a full channel buffer via the ASR backend."""
     if len(audio) < 1600:
@@ -689,7 +711,7 @@ def _transcribe_channel(
     if _is_effective_silence(audio):
         return []
 
-    prompt = backend.get_bilingual_prompt(language) if language else None
+    prompt = _build_prompt(backend, language, finalized_text)
     asr_result = backend.transcribe(audio, language=language, initial_prompt=prompt)
     filtered = asr_result.segments
 
@@ -723,6 +745,7 @@ def run_asr_german_channel(session: StreamingSession) -> tuple[list[Segment], li
     backend = get_asr_backend()
     asr_start = time.time()
 
+    finalized_text = " ".join(s.src for s in session.segment_tracker.finalized_segments[-5:])
     german_results = _transcribe_channel(
         backend,
         german_audio,
@@ -730,6 +753,7 @@ def run_asr_german_channel(session: StreamingSession) -> tuple[list[Segment], li
         "SPEAKER_00",
         "german",
         force_lang="de",
+        finalized_text=finalized_text,
     )
 
     for seg in german_results:
@@ -801,6 +825,8 @@ def run_asr_dual_channel(session: StreamingSession) -> tuple[list[Segment], list
 
     asr_start = time.time()
 
+    finalized_text = " ".join(s.src for s in session.segment_tracker.finalized_segments[-5:])
+
     # Transcribe both channels via backend
     german_results = _transcribe_channel(
         backend,
@@ -809,6 +835,7 @@ def run_asr_dual_channel(session: StreamingSession) -> tuple[list[Segment], list
         "SPEAKER_00",
         "german",
         force_lang="de",
+        finalized_text=finalized_text,
     )
     foreign_results = _transcribe_channel(
         backend,
@@ -817,6 +844,7 @@ def run_asr_dual_channel(session: StreamingSession) -> tuple[list[Segment], list
         "SPEAKER_01",
         "foreign",
         force_lang=session.foreign_lang,
+        finalized_text=finalized_text,
     )
 
     # Offset segment timestamps to absolute time
