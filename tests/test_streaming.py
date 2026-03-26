@@ -12,7 +12,6 @@ from app.streaming import (
     WINDOW_SEC,
     StreamingSession,
     get_metrics,
-    run_asr,
     run_asr_german_channel,
     run_translation,
 )
@@ -125,29 +124,6 @@ class TestMetrics:
         assert isinstance(metrics.get("avg_mt_time_ms", 0), int | float)
         assert isinstance(metrics.get("avg_tick_time_ms", 0), int | float)
         assert isinstance(metrics.get("sample_count", 0), int)
-
-
-class TestRunASR:
-    """Tests for run_asr function."""
-
-    def setup_method(self):
-        get_asr_backend.cache_clear()
-
-    def teardown_method(self):
-        get_asr_backend.cache_clear()
-
-    @patch("app.streaming.get_asr_backend")
-    def test_run_asr_short_audio(self, mock_get_backend):
-        """Test run_asr with very short audio returns early."""
-        session = StreamingSession(sample_rate=16000)
-        audio_data = np.zeros(50, dtype=np.int16).tobytes()
-        session.add_audio(audio_data)
-
-        all_segs, newly_final = run_asr(session)
-
-        assert all_segs == []
-        assert newly_final == []
-        mock_get_backend.assert_not_called()
 
 
 class TestRunASRGermanChannel:

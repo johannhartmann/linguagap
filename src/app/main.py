@@ -35,10 +35,8 @@ from pydantic import BaseModel
 
 from app.asr import transcribe_wav_path
 from app.backends import get_asr_backend, get_summarization_backend, get_translation_backend
-from app.lang_id import warmup_lang_id
 from app.mt import translate_texts
 from app.scripts.asr_smoke import generate_silence_wav
-from app.speaker_tracker import warmup_speaker_model
 from app.streaming import get_metrics, handle_viewer_websocket, handle_websocket
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
@@ -54,20 +52,14 @@ def warmup_models():
     would experience significant latency (minutes for large models).
 
     Models warmed up:
-        - Speaker embeddings (SpeechBrain ECAPA): ~1 GB VRAM
-        - Language ID (SpeechBrain): ~1 GB VRAM
         - ASR (via backend): ~2-3 GB VRAM
         - Translation (via backend): ~8 GB VRAM
         - Summarization (optional, via backend): ~4 GB VRAM
+        - TTS (optional, KugelAudio 4-bit): ~4 GB VRAM
 
     Total warmup time is typically 5-10 minutes depending on network speed
     for model downloads and GPU initialization.
     """
-    # Load SpeechBrain models FIRST - they use CUDNN which must initialize
-    # before llama-cpp-python's cuBLAS takes over CUDA context
-    warmup_speaker_model()
-    warmup_lang_id()
-
     logger.info("Warming up ASR backend...")
     asr = get_asr_backend()
     asr.warmup()

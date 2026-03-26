@@ -26,13 +26,9 @@ dependencies = [
     "httpx>=0.27.0",
     "websockets>=12.0",
     "huggingface-hub>=0.20.0",
-    # Speaker diarization and language identification
     # PyTorch 2.8+ required for Blackwell GPUs (sm_120), needs CUDA 12.9 + cuDNN 9.8+
     "torch>=2.8.0",
     "torchaudio>=2.8.0",
-    "pyannote.audio>=4.0.0", # 4.x required for PyTorch 2.6+ (weights_only=True fix)
-    "omegaconf>=2.3.0", # Required by pyannote for loading pretrained models
-    "speechbrain>=1.0.0",
     "hf-transfer>=0.1.9",
 ]
 

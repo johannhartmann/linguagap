@@ -39,10 +39,8 @@ import numpy as np
 from fastapi import WebSocket
 
 from app.backends import get_asr_backend, get_summarization_backend, get_translation_backend
-from app.lang_id import SpeakerLanguageTracker, detect_language_from_audio
 from app.languages import LANG_INFO
 from app.session_registry import SessionEntry, registry
-from app.speaker_tracker import SpeakerSegment, SpeakerTracker
 from app.streaming_policy import Segment, SegmentTracker
 
 logger = logging.getLogger(__name__)
@@ -72,7 +70,9 @@ def _role_from_lang(lang: str | None) -> str | None:
 
 
 def _resolve_segment_role(
-    session: "StreamingSession", segment: Segment, dual_channel: bool
+    session: "StreamingSession",  # noqa: ARG001
+    segment: Segment,
+    dual_channel: bool,
 ) -> str | None:
     """Resolve the role for a segment, preferring explicit role metadata."""
     if segment.speaker_role in {"german", "foreign"}:
@@ -88,9 +88,6 @@ def _resolve_segment_role(
         # it might be a fallback segment - still, do NOT guess by language
         # to prevent UI flipping.
         return None
-
-    if segment.speaker_id and segment.speaker_id in session.speaker_roles:
-        return session.speaker_roles[segment.speaker_id]
 
     return _role_from_lang(segment.src_lang)
 
@@ -228,8 +225,6 @@ class StreamingSession:
         foreign_lang: The non-German language in the conversation
         segment_tracker: Tracks segment finalization state
         translations: Cached translations keyed by segment_id and language
-        diarizer: Speaker diarization pipeline
-        language_tracker: Per-speaker language detection cache
     """
 
     def __init__(self, sample_rate: int = 16000, src_lang: str = "auto"):
@@ -246,11 +241,6 @@ class StreamingSession:
         self.dropped_frames = 0
         self.trimmed_samples = 0  # Track total samples trimmed from buffer start
         self.translations: dict[int, dict[str, str]] = {}  # segment_id -> {lang -> translation}
-        # Speaker tracking (embedding-based) and language tracking
-        self.speaker_tracker = SpeakerTracker(sample_rate=sample_rate)
-        self.language_tracker = SpeakerLanguageTracker()  # Kept for compatibility
-        self.last_diar_segments: list[SpeakerSegment] = []  # Cache for merging with ASR
-        self.speaker_roles: dict[str, str] = {}  # speaker_id -> "german" | "foreign"
 
         # Dual-channel buffers (German mic on main page, foreign mic on viewer)
         self.german_channel = ChannelBuffer()
@@ -377,101 +367,6 @@ class StreamingSession:
         return len(all_bytes) / 2 / self.sample_rate
 
 
-def run_speaker_detection(
-    session: StreamingSession,
-    audio: np.ndarray,
-    window_start: float,
-) -> list[SpeakerSegment]:
-    """Run speaker detection using embedding-based tracking."""
-    detect_start = time.time()
-    try:
-        speaker_segments = session.speaker_tracker.process_audio(audio, window_start)
-        detect_time = time.time() - detect_start
-        _metrics["diar_times"].append(detect_time)
-
-        if speaker_segments:
-            logger.debug(
-                "Speaker detection: %d segments in %.1fms",
-                len(speaker_segments),
-                detect_time * 1000,
-            )
-            for seg in speaker_segments[:3]:
-                logger.debug("  - [%.2f-%.2f] %s", seg.start, seg.end, seg.speaker_id)
-
-        return speaker_segments
-    except Exception as e:
-        logger.error("Speaker detection error: %s", e)
-        return []
-
-
-def extract_speaker_audio(
-    audio: np.ndarray,
-    diar_segments: list[SpeakerSegment],
-    speaker_id: str,
-    window_start: float,
-    sample_rate: int = 16000,
-) -> np.ndarray:
-    """Extract and concatenate all audio for a specific speaker.
-
-    Args:
-        audio: Full audio window as float32 array
-        diar_segments: Diarization segments with absolute times
-        speaker_id: Target speaker ID to extract
-        window_start: Absolute start time of the audio window
-        sample_rate: Audio sample rate
-
-    Returns:
-        Concatenated audio from all speaker segments
-    """
-    chunks = []
-    for seg in diar_segments:
-        if seg.speaker_id == speaker_id:
-            # Convert absolute times to window-relative sample indices
-            start_rel = seg.start - window_start
-            end_rel = seg.end - window_start
-            start_sample = int(max(0, start_rel) * sample_rate)
-            end_sample = int(min(len(audio) / sample_rate, end_rel) * sample_rate)
-
-            if end_sample > start_sample and start_sample < len(audio):
-                chunks.append(audio[start_sample : min(end_sample, len(audio))])
-
-    if chunks:
-        return np.concatenate(chunks)
-    return np.array([], dtype=audio.dtype)
-
-
-def _extract_segment_audio(
-    audio: np.ndarray,
-    diar_seg: SpeakerSegment,
-    window_start: float,
-    sample_rate: int = 16000,
-    padding_sec: float = 0.3,
-) -> tuple[np.ndarray | None, float]:
-    """Extract audio for a diarization segment with padding.
-
-    Returns:
-        Tuple of (segment_audio, padded_start) or (None, 0.0) if too short.
-    """
-    start_rel = diar_seg.start - window_start
-    end_rel = diar_seg.end - window_start
-
-    padded_start = max(0, start_rel - padding_sec)
-    padded_end = min(len(audio) / sample_rate, end_rel + padding_sec)
-
-    start_sample = int(padded_start * sample_rate)
-    end_sample = int(padded_end * sample_rate)
-
-    segment_duration = diar_seg.end - diar_seg.start
-    if segment_duration < 0.5:
-        logger.debug("  SKIP short diar segment: %.2fs", segment_duration)
-        return None, 0.0
-
-    if end_sample - start_sample < int(0.5 * sample_rate):
-        return None, 0.0
-
-    return audio[start_sample:end_sample], padded_start
-
-
 def _build_prompt(backend, language: str | None, finalized_text: str = "") -> str | None:
     """Build ASR prompt from bilingual hint + recent finalized transcript."""
     prompt = backend.get_bilingual_prompt(language) if language else None
@@ -482,218 +377,12 @@ def _build_prompt(backend, language: str | None, finalized_text: str = "") -> st
     return prompt
 
 
-def _transcribe_speaker_segment(
-    backend,
-    audio: np.ndarray,
-    language: str | None,
-    diar_seg: SpeakerSegment,
-    window_start: float,
-    sample_rate: int = 16000,
-    padding_sec: float = 0.3,
-    finalized_text: str = "",
-) -> list[dict]:
-    """Transcribe a single speaker segment via the ASR backend.
-
-    Extracts audio with padding, delegates to backend.transcribe() + post_process().
-    """
-    segment_audio, padded_start = _extract_segment_audio(
-        audio, diar_seg, window_start, sample_rate, padding_sec
-    )
-    if segment_audio is None:
-        return []
-
-    prompt = _build_prompt(backend, language, finalized_text)
-    asr_result = backend.transcribe(segment_audio, language=language, initial_prompt=prompt)
-    filtered = asr_result.segments
-
-    results = []
-    for seg in filtered:
-        results.append(
-            {
-                "start": padded_start + seg.start,
-                "end": padded_start + seg.end,
-                "text": seg.text,
-                "speaker_id": diar_seg.speaker_id,
-                "lang": seg.language,
-            }
-        )
-    return results
-
-
-def run_asr(session: StreamingSession) -> tuple[list[Segment], list[Segment]]:
-    """
-    Run ASR with diarization-first approach.
-
-    This is the core transcription function called every TICK_SEC. It implements
-    a pipeline that prevents language detection errors in bilingual conversations:
-
-    Pipeline:
-        1. Run diarization to identify speaker segments (SPEAKER_00, SPEAKER_01)
-        2. Detect language per speaker using SpeechBrain on their audio
-        3. Transcribe each speaker's segment with the correct language hint
-
-    Why diarization-first?
-        Window-level language detection fails when a German speaker and Arabic
-        speaker alternate. The window might contain more Arabic audio, causing
-        Whisper to transcribe German speech as Arabic. By detecting language
-        per-speaker, each segment gets the correct language hint.
-
-    Args:
-        session: The streaming session with audio buffer and state
-
-    Returns:
-        Tuple of (all_segments, newly_finalized):
-        - all_segments: Complete transcript (finalized + live segments)
-        - newly_finalized: Segments that just became final (need translation)
-    """
-    tick_start = time.time()
-
-    audio, window_start = session.get_window_audio()
-    now_sec = session.get_current_time()
-
-    if len(audio) < 1600:
-        return list(session.segment_tracker.finalized_segments), []
-
-    backend = get_asr_backend()
-
-    # Debug audio stats
-    audio_rms = float(np.sqrt(np.mean(audio**2)))
-    audio_max = float(np.max(np.abs(audio)))
-    logger.debug("Pipeline: audio_len=%d, rms=%.4f, max=%.4f", len(audio), audio_rms, audio_max)
-
-    # STEP 1: Run speaker detection to identify speaker segments (embedding-based)
-    detect_start = time.time()
-    diar_segments = run_speaker_detection(session, audio, window_start)
-    session.last_diar_segments = diar_segments
-    detect_time = time.time() - detect_start
-
-    if not diar_segments:
-        logger.debug("No speaker segments, falling back to full-window ASR")
-        return _run_asr_fallback(session, audio, window_start, now_sec)
-
-    logger.debug("Speaker detection: %d segments in %.1fms", len(diar_segments), detect_time * 1000)
-
-    # STEP 2: Detect language per speaker from raw audio (BEFORE ASR)
-    speaker_languages = _detect_speaker_languages(session, audio, diar_segments, window_start)
-
-    # Build/maintain stable speaker roles so routing does not flip on noisy ticks.
-    for speaker_id, (lang, confidence) in speaker_languages.items():
-        if confidence < 0.5:
-            continue
-        if lang == "de":
-            session.speaker_roles[speaker_id] = "german"
-        elif (
-            lang not in ("unknown", "de")
-            and session.foreign_lang
-            and session.foreign_lang in LANG_INFO
-        ):
-            session.speaker_roles[speaker_id] = "foreign"
-
-    # If only one role is known and we have exactly two speakers, assign the opposite role.
-    unique_speakers = sorted({seg.speaker_id for seg in diar_segments})
-    if len(unique_speakers) == 2 and session.foreign_lang and session.foreign_lang in LANG_INFO:
-        roles = {sid: session.speaker_roles.get(sid) for sid in unique_speakers}
-        if list(roles.values()).count("german") == 1 and list(roles.values()).count(None) == 1:
-            for sid, role in roles.items():
-                if role is None:
-                    session.speaker_roles[sid] = "foreign"
-        elif list(roles.values()).count("foreign") == 1 and list(roles.values()).count(None) == 1:
-            for sid, role in roles.items():
-                if role is None:
-                    session.speaker_roles[sid] = "german"
-
-    # STEP 3: Transcribe per speaker with their detected language
-    asr_start = time.time()
-    hyp_segments: list[dict] = []
-
-    # Build context from recent finalized segments for prompt conditioning
-    finalized_text = " ".join(s.src for s in session.segment_tracker.finalized_segments[-5:])
-
-    for diar_seg in diar_segments:
-        speaker_id = diar_seg.speaker_id
-        lang, confidence = speaker_languages.get(speaker_id, ("unknown", 0.0))
-        speaker_role = session.speaker_roles.get(speaker_id)
-
-        # Skip segments that start right at window boundary (likely truncated from earlier)
-        segment_rel_start = diar_seg.start - window_start
-        if segment_rel_start < 0.5 and (diar_seg.end - diar_seg.start) < 1.0:
-            logger.debug(
-                "  SKIP boundary segment: %s [%.2f-%.2f] (truncated)",
-                diar_seg.speaker_id,
-                diar_seg.start,
-                diar_seg.end,
-            )
-            continue
-
-        if speaker_role == "german":
-            use_lang = "de"
-        elif speaker_role == "foreign" and session.foreign_lang:
-            use_lang = session.foreign_lang
-        else:
-            use_lang = lang if confidence > 0.5 and lang != "unknown" else None
-
-        # Transcribe via backend (includes post_process: delooping + hallucination filtering)
-        seg_results = _transcribe_speaker_segment(
-            backend,
-            audio,
-            use_lang,
-            diar_seg,
-            window_start,
-            finalized_text=finalized_text,
-        )
-        for seg in seg_results:
-            seg["speaker_role"] = speaker_role
-        hyp_segments.extend(seg_results)
-
-    asr_time = time.time() - asr_start
-    _metrics["asr_times"].append(asr_time)
-
-    logger.debug("Per-speaker ASR: %d segments in %.1fms", len(hyp_segments), asr_time * 1000)
-
-    session.resolve_foreign_lang()
-
-    # Keep language assignment aligned with stable speaker role.
-    if session.foreign_lang:
-        for seg in hyp_segments:
-            role = seg.get("speaker_role")
-            if role == "german":
-                seg["lang"] = "de"
-            elif role == "foreign" and seg.get("lang") in {None, "", "unknown"}:
-                seg["lang"] = session.foreign_lang
-
-    for seg in hyp_segments:
-        seg["speaker_role"] = seg.get("speaker_role") or _role_from_lang(seg.get("lang"))
-
-    for seg in hyp_segments[:3]:
-        logger.debug(
-            "  - [%.1f-%.1f] %s lang=%s: %s",
-            seg["start"],
-            seg["end"],
-            seg["speaker_id"],
-            seg["lang"],
-            seg["text"][:40],
-        )
-
-    # Determine detected language for session from actual ASR results
-    lang_counts: dict[str, int] = {}
-    for lang, _ in speaker_languages.values():
-        if lang != "unknown":
-            lang_counts[lang] = lang_counts.get(lang, 0) + 1
-    session.detected_lang = (
-        max(lang_counts, key=lambda k: lang_counts[k]) if lang_counts else "unknown"
-    )
-
-    all_segments, newly_finalized = session.segment_tracker.update_from_hypothesis(
-        hyp_segments=hyp_segments,
-        window_start=window_start,
-        now_sec=now_sec,
-        src_lang=session.detected_lang or "unknown",
-    )
-
-    tick_time = time.time() - tick_start
-    _metrics["tick_times"].append(tick_time)
-
-    return all_segments, newly_finalized
+# NOTE: run_speaker_detection, extract_speaker_audio, _extract_segment_audio,
+# _transcribe_speaker_segment, and run_asr (with diarization) were removed.
+# Speakers and languages are now fixed via dual-channel architecture:
+# - Desktop = German (SPEAKER_00)
+# - Viewer = Foreign language (SPEAKER_01)
+# See run_asr_german_channel() and run_asr_dual_channel().
 
 
 def _transcribe_channel(
@@ -893,153 +582,6 @@ def run_asr_dual_channel(session: StreamingSession) -> tuple[list[Segment], list
 
     tick_time = time.time() - tick_start
     _metrics["tick_times"].append(tick_time)
-
-    return all_segments, newly_finalized
-
-
-def _detect_speaker_languages(
-    session: StreamingSession,
-    audio: np.ndarray,
-    diar_segments: list[SpeakerSegment],
-    window_start: float,
-) -> dict[str, tuple[str, float]]:
-    """Detect language per speaker from raw audio using SpeechBrain.
-
-    Returns:
-        Dict mapping speaker_id -> (language_code, confidence)
-    """
-    speaker_languages: dict[str, tuple[str, float]] = {}
-    unique_speakers = {seg.speaker_id for seg in diar_segments}
-
-    # Language confusion groups - SpeechBrain often confuses these similar languages
-    language_confusion_groups = [
-        {"bg", "sl", "mk"},
-        {"sr", "bs", "hr"},
-        {"ku", "fa", "ps"},
-        {"uk", "ru", "be"},
-        {"cs", "sk"},
-        {"no", "da", "sv"},
-        {"id", "ms"},
-    ]
-
-    def correct_language_confusion(detected: str, user_hint: str | None, confidence: float) -> str:
-        if not user_hint or detected == user_hint:
-            return detected
-
-        for group in language_confusion_groups:
-            if detected in group and user_hint in group:
-                logger.debug(
-                    "    Correcting %s → %s (user hint, confusion group)", detected, user_hint
-                )
-                return user_hint
-
-        if detected not in ("de", "unknown") and user_hint not in ("de", "unknown"):
-            logger.debug("    Correcting %s → %s (user hint, foreign speaker)", detected, user_hint)
-            return user_hint
-
-        if detected == "de" and confidence < 0.9 and user_hint not in ("de", "unknown"):
-            logger.debug(
-                "    Correcting %s → %s (user hint, low confidence de)", detected, user_hint
-            )
-            return user_hint
-
-        return detected
-
-    for speaker_id in unique_speakers:
-        speaker_audio = extract_speaker_audio(audio, diar_segments, speaker_id, window_start)
-
-        if len(speaker_audio) < 8000:
-            logger.debug("  %s: audio too short (%.2fs)", speaker_id, len(speaker_audio) / 16000)
-            continue
-
-        detected_lang, confidence = session.language_tracker.get_speaker_language(
-            speaker_id, speaker_audio, 16000
-        )
-
-        lang = detected_lang
-        corrected = correct_language_confusion(lang, session.foreign_lang, confidence)
-        if corrected != lang:
-            lang = corrected
-            session.language_tracker.set_speaker_language(speaker_id, lang, confidence)
-
-        speaker_languages[speaker_id] = (lang, confidence)
-        logger.debug("  %s → %s (confidence=%.2f)", speaker_id, lang, confidence)
-
-        if lang not in ("unknown", "de") and lang in LANG_INFO and session.foreign_lang is None:
-            session.foreign_lang = lang
-            logger.info("Foreign language detected: %s", lang)
-
-    return speaker_languages
-
-
-def _run_asr_fallback(
-    session: StreamingSession,
-    audio: np.ndarray,
-    window_start: float,
-    now_sec: float,
-) -> tuple[list[Segment], list[Segment]]:
-    """Fallback ASR when diarization fails - uses full window with multilingual."""
-    backend = get_asr_backend()
-    asr_start = time.time()
-
-    asr_result = backend.transcribe(audio)
-    filtered = asr_result.segments
-
-    asr_time = time.time() - asr_start
-    _metrics["asr_times"].append(asr_time)
-
-    logger.debug(
-        "Fallback ASR: %d segs, lang=%s, %.1fms",
-        len(filtered),
-        asr_result.detected_language,
-        asr_time * 1000,
-    )
-
-    hyp_segments = []
-    for seg in filtered:
-        # Use SpeechBrain for segment language detection
-        seg_start_sample = int(seg.start * 16000)
-        seg_end_sample = int(seg.end * 16000)
-        segment_audio = audio[seg_start_sample : min(seg_end_sample, len(audio))]
-
-        speechbrain_lang, _ = detect_language_from_audio(segment_audio, 16000)
-        segment_lang = (
-            speechbrain_lang if speechbrain_lang != "unknown" else asr_result.detected_language
-        )
-
-        if (
-            segment_lang not in ("unknown", "de")
-            and segment_lang in LANG_INFO
-            and session.foreign_lang is None
-        ):
-            session.foreign_lang = segment_lang
-            logger.info("Foreign language detected: %s", segment_lang)
-
-        hyp_segments.append(
-            {
-                "start": seg.start,
-                "end": seg.end,
-                "text": seg.text,
-                "speaker_id": None,
-                "lang": segment_lang,
-                "speaker_role": _role_from_lang(segment_lang),
-            }
-        )
-
-    session.detected_lang = asr_result.detected_language
-
-    session.resolve_foreign_lang()
-
-    # Do not force all fallback segments to foreign language; keep detected labels.
-    for seg in hyp_segments:
-        seg["speaker_role"] = _role_from_lang(seg["lang"])
-
-    all_segments, newly_finalized = session.segment_tracker.update_from_hypothesis(
-        hyp_segments=hyp_segments,
-        window_start=window_start,
-        now_sec=now_sec,
-        src_lang=session.detected_lang or "unknown",
-    )
 
     return all_segments, newly_finalized
 
@@ -1572,8 +1114,6 @@ async def handle_viewer_websocket(websocket: WebSocket, token: str) -> None:
                                             viewer_foreign_lang,
                                         )
                                         # Reset cached role/lang inferences to re-lock speakers with new hint.
-                                        cached_session.speaker_roles.clear()
-                                        cached_session.language_tracker.clear_cache()
                                     cached_session.foreign_lang = viewer_foreign_lang
                         # pong is implicitly handled (no action needed)
                     except (json.JSONDecodeError, KeyError):
