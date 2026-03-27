@@ -53,7 +53,7 @@ def client(mock_models, tmp_path):  # noqa: ARG001
             client.post("/api/admin/logout")
             yield client
 
-        app.auth._accounts = None
+        auth_mod._accounts = None
 
 
 def _login(client: TestClient):

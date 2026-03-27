@@ -69,7 +69,7 @@ def client(mock_models, tmp_path):  # noqa: ARG001
             client.post("/api/login", json={"email": "test@example.com", "password": "TestPass#1"})
             yield client
 
-        app.auth._accounts = None
+        auth_mod._accounts = None
 
 
 class TestHealthEndpoint:

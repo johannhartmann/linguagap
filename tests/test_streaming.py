@@ -285,7 +285,7 @@ class TestWebSocketHandler:
                 )
                 yield client
 
-            app.auth._accounts = None
+            auth_mod._accounts = None
 
     def test_websocket_config_message(self, client, mock_models):  # noqa: ARG002
         """Test WebSocket accepts config message."""
