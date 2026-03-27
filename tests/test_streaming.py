@@ -258,9 +258,9 @@ class TestWebSocketHandler:
             mock_translate.return_value = ["Translated"]
             (tmp_path / "logos").mkdir(exist_ok=True)
 
-            import app.auth
+            import app.auth as auth_mod
 
-            app.auth._accounts = None
+            auth_mod._accounts = None
 
             from fastapi.testclient import TestClient
 

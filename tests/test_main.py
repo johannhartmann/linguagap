@@ -44,9 +44,9 @@ def client(mock_models, tmp_path):  # noqa: ARG001
         patch("app.auth.ADMIN_EMAIL", "admin@test.local"),
         patch("app.auth.ADMIN_PASSWORD", "testpass"),
     ):
-        import app.auth
+        import app.auth as auth_mod
 
-        app.auth._accounts = None
+        auth_mod._accounts = None
         (tmp_path / "logos").mkdir(exist_ok=True)
 
         from app.main import app
