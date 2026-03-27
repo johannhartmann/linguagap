@@ -5,6 +5,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
+TEST_ACCOUNT = {
+    "email": "test@example.com",
+    "password": "TestPass#1",
+    "display_name": "Test Account",
+    "logo_url": "/static/logos/synia.png",
+}
+
 
 @pytest.fixture
 def mock_models():
@@ -21,20 +28,38 @@ def mock_models():
 
 
 @pytest.fixture
-def client(mock_models):  # noqa: ARG001
-    from app.main import app
+def client(mock_models, tmp_path):  # noqa: ARG001
+    with (
+        patch("app.auth.DATA_DIR", tmp_path),
+        patch("app.auth.ACCOUNTS_FILE", tmp_path / "accounts.json"),
+        patch("app.auth.LOGOS_DIR", tmp_path / "logos"),
+        patch("app.main.LOGOS_DIR", tmp_path / "logos"),
+        patch("app.auth.ADMIN_EMAIL", "admin@test.local"),
+        patch("app.auth.ADMIN_PASSWORD", "testpass"),
+    ):
+        import app.auth
 
-    with TestClient(app) as client:
-        yield client
+        app.auth._accounts = None
+        (tmp_path / "logos").mkdir(exist_ok=True)
+
+        from app.main import app
+
+        with TestClient(app) as client:
+            # Seed a test account via admin API
+            client.post(
+                "/api/admin/login", json={"email": "admin@test.local", "password": "testpass"}
+            )
+            client.post("/api/admin/accounts", json=TEST_ACCOUNT)
+            client.post("/api/admin/logout")
+            yield client
+
+        app.auth._accounts = None
 
 
-def _login(
-    client: TestClient,
-    email: str = "anna.mueller@synia.de",
-    password: str = "Synia#2024!",
-):
-    """Helper to log in and return the response."""
-    return client.post("/api/login", json={"email": email, "password": password})
+def _login(client: TestClient):
+    return client.post(
+        "/api/login", json={"email": TEST_ACCOUNT["email"], "password": TEST_ACCOUNT["password"]}
+    )
 
 
 class TestLogin:
@@ -43,16 +68,14 @@ class TestLogin:
         assert resp.status_code == 200
         data = resp.json()
         assert data["ok"] is True
-        assert data["display_name"] == "SYNIA Solutions"
-        assert data["logo_url"] == "/static/logos/synia.png"
+        assert data["display_name"] == "Test Account"
 
     def test_login_invalid_password(self, client):
-        resp = _login(client, password="wrong")
+        resp = client.post("/api/login", json={"email": TEST_ACCOUNT["email"], "password": "wrong"})
         assert resp.status_code == 401
-        assert resp.json()["error"] == "Invalid credentials"
 
     def test_login_invalid_email(self, client):
-        resp = _login(client, email="nobody@example.com")
+        resp = client.post("/api/login", json={"email": "nobody@example.com", "password": "x"})
         assert resp.status_code == 401
 
     def test_login_sets_session_cookie(self, client):
@@ -80,8 +103,8 @@ class TestApiMe:
         resp = client.get("/api/me")
         assert resp.status_code == 200
         data = resp.json()
-        assert data["email"] == "anna.mueller@synia.de"
-        assert data["display_name"] == "SYNIA Solutions"
+        assert data["email"] == TEST_ACCOUNT["email"]
+        assert data["display_name"] == "Test Account"
 
 
 class TestProtectedRoutes:

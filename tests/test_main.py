@@ -34,17 +34,42 @@ def mock_models():
 
 
 @pytest.fixture
-def client(mock_models):  # noqa: ARG001
+def client(mock_models, tmp_path):  # noqa: ARG001
     """Create test client with mocked models, pre-authenticated."""
-    # Import app after mocking to avoid model loading
-    from app.main import app
+    with (
+        patch("app.auth.DATA_DIR", tmp_path),
+        patch("app.auth.ACCOUNTS_FILE", tmp_path / "accounts.json"),
+        patch("app.auth.LOGOS_DIR", tmp_path / "logos"),
+        patch("app.main.LOGOS_DIR", tmp_path / "logos"),
+        patch("app.auth.ADMIN_EMAIL", "admin@test.local"),
+        patch("app.auth.ADMIN_PASSWORD", "testpass"),
+    ):
+        import app.auth
 
-    with TestClient(app) as client:
-        # Authenticate for protected route tests
-        client.post(
-            "/api/login", json={"email": "anna.mueller@synia.de", "password": "Synia#2024!"}
-        )
-        yield client
+        app.auth._accounts = None
+        (tmp_path / "logos").mkdir(exist_ok=True)
+
+        from app.main import app
+
+        with TestClient(app) as client:
+            # Seed a test account via admin, then authenticate
+            client.post(
+                "/api/admin/login", json={"email": "admin@test.local", "password": "testpass"}
+            )
+            client.post(
+                "/api/admin/accounts",
+                json={
+                    "email": "test@example.com",
+                    "password": "TestPass#1",
+                    "display_name": "Test",
+                    "logo_url": "/static/logos/synia.png",
+                },
+            )
+            client.post("/api/admin/logout")
+            client.post("/api/login", json={"email": "test@example.com", "password": "TestPass#1"})
+            yield client
+
+        app.auth._accounts = None
 
 
 class TestHealthEndpoint:

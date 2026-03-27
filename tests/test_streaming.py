@@ -238,18 +238,29 @@ class TestWebSocketHandler:
             yield {"asr": mock_asr, "mt": mock_mt}
 
     @pytest.fixture
-    def client(self, mock_models):  # noqa: ARG002
+    def client(self, mock_models, tmp_path):  # noqa: ARG002
         """Create test client with mocked backends, pre-authenticated."""
         with (
             patch("app.main.get_asr_backend") as mock_asr,
             patch("app.main.get_translation_backend") as mock_mt,
             patch("app.main.get_summarization_backend") as mock_summ,
             patch("app.main.translate_texts") as mock_translate,
+            patch("app.auth.DATA_DIR", tmp_path),
+            patch("app.auth.ACCOUNTS_FILE", tmp_path / "accounts.json"),
+            patch("app.auth.LOGOS_DIR", tmp_path / "logos"),
+            patch("app.main.LOGOS_DIR", tmp_path / "logos"),
+            patch("app.auth.ADMIN_EMAIL", "admin@test.local"),
+            patch("app.auth.ADMIN_PASSWORD", "testpass"),
         ):
             mock_asr.return_value = MagicMock()
             mock_mt.return_value = MagicMock()
             mock_summ.return_value = None
             mock_translate.return_value = ["Translated"]
+            (tmp_path / "logos").mkdir(exist_ok=True)
+
+            import app.auth
+
+            app.auth._accounts = None
 
             from fastapi.testclient import TestClient
 
@@ -257,10 +268,24 @@ class TestWebSocketHandler:
 
             with TestClient(app) as client:
                 client.post(
-                    "/api/login",
-                    json={"email": "anna.mueller@synia.de", "password": "Synia#2024!"},
+                    "/api/admin/login", json={"email": "admin@test.local", "password": "testpass"}
+                )
+                client.post(
+                    "/api/admin/accounts",
+                    json={
+                        "email": "test@example.com",
+                        "password": "TestPass#1",
+                        "display_name": "Test",
+                        "logo_url": "/static/logos/synia.png",
+                    },
+                )
+                client.post("/api/admin/logout")
+                client.post(
+                    "/api/login", json={"email": "test@example.com", "password": "TestPass#1"}
                 )
                 yield client
+
+            app.auth._accounts = None
 
     def test_websocket_config_message(self, client, mock_models):  # noqa: ARG002
         """Test WebSocket accepts config message."""

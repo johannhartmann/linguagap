@@ -6,12 +6,17 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
+SEED_ACCOUNT = {
+    "email": "seed@example.com",
+    "password": "SeedPass#1",
+    "display_name": "Seed Account",
+    "logo_url": "/static/logos/synia.png",
+}
+
 
 @pytest.fixture
 def data_dir(tmp_path):
-    """Temporary data directory for persistent storage."""
-    logos_dir = tmp_path / "logos"
-    logos_dir.mkdir()
+    (tmp_path / "logos").mkdir()
     return tmp_path
 
 
@@ -38,7 +43,6 @@ def client(mock_models, data_dir):  # noqa: ARG001
         patch("app.auth.ADMIN_EMAIL", "admin@test.local"),
         patch("app.auth.ADMIN_PASSWORD", "testpass"),
     ):
-        # Reset account cache
         import app.auth
 
         app.auth._accounts = None
@@ -46,6 +50,10 @@ def client(mock_models, data_dir):  # noqa: ARG001
         from app.main import app
 
         with TestClient(app) as client:
+            # Seed one account for tests that need it
+            _admin_login(client)
+            client.post("/api/admin/accounts", json=SEED_ACCOUNT)
+            client.post("/api/admin/logout")
             yield client
 
         app.auth._accounts = None
@@ -55,8 +63,10 @@ def _admin_login(client, email="admin@test.local", password="testpass"):
     return client.post("/api/admin/login", json={"email": email, "password": password})
 
 
-def _user_login(client, email="anna.mueller@synia.de", password="Synia#2024!"):
-    return client.post("/api/login", json={"email": email, "password": password})
+def _user_login(client):
+    return client.post(
+        "/api/login", json={"email": SEED_ACCOUNT["email"], "password": SEED_ACCOUNT["password"]}
+    )
 
 
 class TestAdminAuth:
@@ -92,7 +102,7 @@ class TestAccountCRUD:
         assert resp.status_code == 200
         data = resp.json()
         assert isinstance(data, list)
-        assert len(data) == 10
+        assert len(data) == 1  # just the seeded account
 
     def test_create_account(self, client):
         _admin_login(client)
@@ -108,16 +118,15 @@ class TestAccountCRUD:
         assert resp.status_code == 200
         assert resp.json()["email"] == "new@example.com"
 
-        # Verify it was added
         accounts = client.get("/api/admin/accounts").json()
-        assert len(accounts) == 11
+        assert len(accounts) == 2
 
     def test_create_duplicate_email(self, client):
         _admin_login(client)
         resp = client.post(
             "/api/admin/accounts",
             json={
-                "email": "anna.mueller@synia.de",
+                "email": SEED_ACCOUNT["email"],
                 "password": "x",
                 "display_name": "x",
                 "logo_url": "/static/logos/synia.png",
@@ -128,16 +137,16 @@ class TestAccountCRUD:
     def test_update_account(self, client):
         _admin_login(client)
         resp = client.put(
-            "/api/admin/accounts/anna.mueller@synia.de",
+            f"/api/admin/accounts/{SEED_ACCOUNT['email']}",
             json={
-                "email": "anna.mueller@synia.de",
+                "email": SEED_ACCOUNT["email"],
                 "password": "NewPass!",
-                "display_name": "SYNIA Updated",
+                "display_name": "Updated Name",
                 "logo_url": "/static/logos/synia.png",
             },
         )
         assert resp.status_code == 200
-        assert resp.json()["display_name"] == "SYNIA Updated"
+        assert resp.json()["display_name"] == "Updated Name"
 
     def test_update_nonexistent(self, client):
         _admin_login(client)
@@ -154,10 +163,10 @@ class TestAccountCRUD:
 
     def test_delete_account(self, client):
         _admin_login(client)
-        resp = client.delete("/api/admin/accounts/anna.mueller@synia.de")
+        resp = client.delete(f"/api/admin/accounts/{SEED_ACCOUNT['email']}")
         assert resp.status_code == 200
         accounts = client.get("/api/admin/accounts").json()
-        assert len(accounts) == 9
+        assert len(accounts) == 0
 
     def test_delete_nonexistent(self, client):
         _admin_login(client)
