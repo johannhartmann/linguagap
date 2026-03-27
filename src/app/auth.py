@@ -25,11 +25,13 @@ _BUNDLED_ACCOUNTS = Path(__file__).parent / "demo_accounts.json"
 # Admin credentials
 # ---------------------------------------------------------------------------
 
-ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "verben@synia.com")
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "LinguaGap#Admin2024!")
+ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "admin@linguagap.local")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
 
 
 def verify_admin(email: str, password: str) -> bool:
+    if not ADMIN_PASSWORD:
+        return False
     return email == ADMIN_EMAIL and password == ADMIN_PASSWORD
 
 

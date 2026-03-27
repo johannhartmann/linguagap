@@ -55,6 +55,13 @@ spec:
                   name: {{ .Values.secrets.sessionSecret.secretName }}
                   key: {{ .Values.secrets.sessionSecret.secretKey }}
             {{- end }}
+            {{- if .Values.secrets.adminPassword.enabled }}
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.adminPassword.secretName }}
+                  key: {{ .Values.secrets.adminPassword.secretKey }}
+            {{- end }}
           livenessProbe:
             {{- toYaml .Values.livenessProbe | nindent 12 }}
           readinessProbe:

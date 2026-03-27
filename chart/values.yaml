@@ -88,7 +88,7 @@ env:
   TTS_CFG_SCALE: "3.0"
   # Auth config
   ADMIN_EMAIL: "verben@synia.com"
-  ADMIN_PASSWORD: ""  # Set via K8s secret in production
+  # ADMIN_PASSWORD: set via K8s secret, not in values.yaml
   DATA_DIR: /data
   # DEMO_ACCOUNTS: '[]'  # Optional: JSON array override for demo accounts
 
@@ -107,6 +107,12 @@ secrets:
     enabled: true
     secretName: linguagap-session-secret
     secretKey: secret
+    create: false
+    value: ""
+  adminPassword:
+    enabled: true
+    secretName: linguagap-admin-password
+    secretKey: password
     create: false
     value: ""
 

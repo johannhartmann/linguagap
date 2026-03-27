@@ -35,6 +35,8 @@ def client(mock_models, data_dir):  # noqa: ARG001
         patch("app.auth.ACCOUNTS_FILE", data_dir / "accounts.json"),
         patch("app.auth.LOGOS_DIR", data_dir / "logos"),
         patch("app.main.LOGOS_DIR", data_dir / "logos"),
+        patch("app.auth.ADMIN_EMAIL", "admin@test.local"),
+        patch("app.auth.ADMIN_PASSWORD", "testpass"),
     ):
         # Reset account cache
         import app.auth
@@ -49,7 +51,7 @@ def client(mock_models, data_dir):  # noqa: ARG001
         app.auth._accounts = None
 
 
-def _admin_login(client, email="verben@synia.com", password="LinguaGap#Admin2024!"):
+def _admin_login(client, email="admin@test.local", password="testpass"):
     return client.post("/api/admin/login", json={"email": email, "password": password})
 
 
