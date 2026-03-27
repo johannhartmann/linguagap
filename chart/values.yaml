@@ -87,7 +87,7 @@ env:
   TTS_MODEL_ID: kugelaudio/kugelaudio-0-open
   TTS_CFG_SCALE: "3.0"
   # Auth config
-  ADMIN_EMAIL: "admin@linguagap.local"
+  ADMIN_EMAIL: "verben@synia.com"
   ADMIN_PASSWORD: ""  # Set via K8s secret in production
   DATA_DIR: /data
   # DEMO_ACCOUNTS: '[]'  # Optional: JSON array override for demo accounts

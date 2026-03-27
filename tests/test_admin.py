@@ -49,7 +49,7 @@ def client(mock_models, data_dir):  # noqa: ARG001
         app.auth._accounts = None
 
 
-def _admin_login(client, email="admin@linguagap.local", password="admin"):
+def _admin_login(client, email="verben@synia.com", password="LinguaGap#Admin2024!"):
     return client.post("/api/admin/login", json={"email": email, "password": password})
 
 
