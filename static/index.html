@@ -288,6 +288,7 @@
         <header>
             <img id="brandLogo" src="/static/synia-logo.png" alt="SYNIA Solutions" class="logo">
             <p id="subtitle">Real-time Speech Transcription & Translation</p>
+            <a id="adminLink" class="logout-btn" href="/admin" style="display:none;text-decoration:none;margin-right:8px" title="Admin">Admin</a>
             <button id="logoutBtn" class="logout-btn" title="Logout">Logout</button>
             <select id="uiLangSelect" class="ui-lang-select" title="Interface Language">
                 <option value="de">🇩🇪 DE</option>
@@ -362,6 +363,9 @@
                         const logo = document.getElementById('brandLogo');
                         logo.src = user.logo_url;
                         logo.alt = user.display_name;
+                    }
+                    if (user.is_admin) {
+                        document.getElementById('adminLink').style.display = '';
                     }
                 }
             } catch (e) {

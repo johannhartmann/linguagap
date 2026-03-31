@@ -96,11 +96,16 @@ def reload_accounts() -> list[DemoAccount]:
     return get_accounts()
 
 
-def verify_credentials(email: str, password: str) -> DemoAccount | None:
+def verify_credentials(email: str, password: str) -> tuple[DemoAccount | None, bool]:
+    """Verify login credentials. Returns (account, is_admin)."""
+    if verify_admin(email, password):
+        return DemoAccount(
+            email=ADMIN_EMAIL, password="", display_name="Admin", logo_url="/static/synia-logo.png"
+        ), True
     for account in get_accounts():
         if account.email == email and account.password == password:
-            return account
-    return None
+            return account, False
+    return None, False
 
 
 def get_current_user(request: Request) -> dict | None:
@@ -110,5 +115,6 @@ def get_current_user(request: Request) -> dict | None:
             "email": email,
             "display_name": request.session.get("display_name", ""),
             "logo_url": request.session.get("logo_url", ""),
+            "is_admin": bool(request.session.get("is_admin")),
         }
     return None

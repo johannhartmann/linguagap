@@ -142,12 +142,14 @@ class LoginRequest(BaseModel):
 
 @app.post("/api/login")
 async def api_login(request: Request, body: LoginRequest):
-    account = verify_credentials(body.email, body.password)
+    account, is_admin = verify_credentials(body.email, body.password)
     if account is None:
         return JSONResponse({"error": "Invalid credentials"}, status_code=401)
     request.session["email"] = account.email
     request.session["display_name"] = account.display_name
     request.session["logo_url"] = account.logo_url
+    if is_admin:
+        request.session["is_admin"] = True
     return {"ok": True, "display_name": account.display_name, "logo_url": account.logo_url}
 
 
