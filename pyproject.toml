@@ -86,6 +86,14 @@ markers = [
     "slow: mark test as slow (deselect with '-m not slow')",
 ]
 
+[tool.uv]
+constraint-dependencies = [
+    "pyasn1>=0.6.3",
+    "requests>=2.33.0",
+    "cryptography>=46.0.6",
+    "pygments>=2.20.0",
+]
+
 [tool.coverage.run]
 source = ["src/app"]
 branch = true
