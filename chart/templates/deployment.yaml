@@ -7,6 +7,13 @@ metadata:
 spec:
   replicas: {{ .Values.replicaCount }}
   progressDeadlineSeconds: 1800
+  # Single-replica GPU workload: rolling-update would surge a 2nd pod that
+  # has nowhere to schedule (all 5 MPS GPU replicas on the data node are
+  # consumed by other namespaces). Recreate kills the old pod first, then
+  # starts the new one — accepts ~25 min downtime per deploy in exchange
+  # for never deadlocking on a busy cluster.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       {{- include "linguagap.selectorLabels" . | nindent 6 }}
