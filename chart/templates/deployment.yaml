@@ -72,6 +72,13 @@ spec:
             {{- if .Values.persistence.enabled }}
             - name: hf-cache
               mountPath: /data/hf
+            # Mount the same PVC's "state" subdirectory at /data/state so
+            # accounts.json and uploaded logos persist across pod restarts.
+            # DATA_DIR points here; the HF cache stays at the PVC root for
+            # backwards compatibility with the existing 40Gi volume.
+            - name: hf-cache
+              mountPath: /data/state
+              subPath: state
             {{- end }}
       volumes:
         {{- if .Values.persistence.enabled }}

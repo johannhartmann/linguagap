@@ -89,7 +89,9 @@ env:
   # Auth config
   ADMIN_EMAIL: "verben@synia.org"
   # ADMIN_PASSWORD: set via K8s secret, not in values.yaml
-  DATA_DIR: /data
+  # Persistent state directory: backed by the hf-cache PVC's "state" subPath.
+  # Holds accounts.json and the logos/ uploads directory.
+  DATA_DIR: /data/state
   # DEMO_ACCOUNTS: '[]'  # Optional: JSON array override for demo accounts
 
 # Secrets configuration
