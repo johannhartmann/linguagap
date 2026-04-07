@@ -183,14 +183,18 @@
         .dual-channel-badge.active {
             display: inline-block;
         }
-        /* QR Code sidebar styles */
+        /* QR Code sidebar styles — hidden until a session is recording */
         .qr-sidebar {
+            display: none;
             background: #fff;
             border-radius: 12px;
             padding: 20px;
             text-align: center;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             margin-bottom: 20px;
+        }
+        .main-layout.with-qr .qr-sidebar {
+            display: block;
         }
         .qr-sidebar h3 {
             font-size: 1rem;
@@ -220,11 +224,14 @@
         }
         .main-layout {
             display: grid;
-            grid-template-columns: 1fr 260px;
+            grid-template-columns: 1fr;
             gap: 20px;
         }
+        .main-layout.with-qr {
+            grid-template-columns: 1fr 260px;
+        }
         @media (max-width: 1024px) {
-            .main-layout {
+            .main-layout.with-qr {
                 grid-template-columns: 1fr;
             }
             .qr-sidebar {
@@ -952,6 +959,7 @@
                 muteBtn.classList.remove('muted');
                 languageSelect.disabled = true;
                 audioInputSelect.disabled = true;
+                document.querySelector('.main-layout').classList.add('with-qr');
 
             } catch (error) {
                 console.error('Error starting recording:', error);
@@ -964,6 +972,7 @@
             isMuted = false;
             muteBtn.style.display = 'none';
             muteBtn.classList.remove('muted');
+            document.querySelector('.main-layout').classList.remove('with-qr');
 
             // Stop audio capture
             if (processor) {
@@ -1040,6 +1049,7 @@
             if (isRecording) {
                 // Force stop without server notification
                 isRecording = false;
+                document.querySelector('.main-layout').classList.remove('with-qr');
                 if (processor) {
                     processor.disconnect();
                     processor = null;

@@ -513,13 +513,26 @@
 
         consentAcceptBtn.addEventListener('click', acceptConsent);
 
-        // Check for prior consent in this browser session
+        // Detect browser language so the consent popup opens in the visitor's
+        // own language by default (falls back to German for unsupported locales)
+        const SUPPORTED_VIEWER_LANGS = [
+            'de','en','fr','es','it','pl','ro','hr','bg','tr','ru','uk','hu','sr','sq'
+        ];
+        const browserLang = (navigator.language || 'de').toLowerCase().split('-')[0];
+        const initialConsentLang = SUPPORTED_VIEWER_LANGS.includes(browserLang) ? browserLang : 'de';
+
+        // Check for prior consent in this browser session.
+        // foreignLang must be declared here (not later in the file) because
+        // top-level code further down reads it before its first assignment.
         const storedConsent = sessionStorage.getItem('consent_' + token);
+        let foreignLang = (storedConsent && storedConsent !== 'de') ? storedConsent : null;
+
         if (storedConsent) {
             consentOverlay.style.display = 'none';
             mainContainer.classList.remove('hidden');
         } else {
-            updateConsentLanguage('de');
+            consentLangSelect.value = initialConsentLang;
+            updateConsentLanguage(initialConsentLang);
         }
 
         // ---------------------------------------------------------------
@@ -613,8 +626,7 @@
             'sr': 'Serbian'
         };
 
-        // Restore language from consent if returning visitor
-        let foreignLang = (storedConsent && storedConsent !== 'de') ? storedConsent : null;
+        // (foreignLang is declared earlier in the consent block)
         let segments = [];
         let ws = null;
         let sessionEnded = false;
