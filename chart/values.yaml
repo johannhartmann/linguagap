@@ -1,9 +1,9 @@
 replicaCount: 1
 
 image:
-  repository: ghcr.io/johannhartmann/linguagap
-  tag: latest
-  pullPolicy: Always
+  repository: ghcr.io/mayflower/linguagap
+  tag: "87ec0f9"
+  pullPolicy: IfNotPresent
 
 nameOverride: ""
 fullnameOverride: ""
