@@ -39,6 +39,14 @@
             max-height: 60px;
             margin-bottom: 10px;
         }
+        .brand-text {
+            font-size: 2.2rem;
+            font-weight: 700;
+            color: var(--synia-teal);
+            margin-bottom: 10px;
+            letter-spacing: 0.5px;
+            line-height: 1.1;
+        }
         h1 {
             font-size: 2rem;
             margin-bottom: 10px;
@@ -308,7 +316,7 @@
 <body>
     <div class="container">
         <header>
-            <img id="brandLogo" src="/static/synia-logo.png" alt="SYNIA Solutions" class="logo">
+            <div id="brandLogo" class="brand-text">Synia Gesprächsassistent SGA</div>
             <p id="subtitle">Real-time Speech Transcription & Translation</p>
             <div class="header-actions">
                 <a id="adminLink" class="logout-btn" href="/admin" style="display:none" title="Admin">Admin</a>
@@ -382,11 +390,6 @@
                 const resp = await fetch('/api/me');
                 if (resp.ok) {
                     const user = await resp.json();
-                    if (user.logo_url) {
-                        const logo = document.getElementById('brandLogo');
-                        logo.src = user.logo_url;
-                        logo.alt = user.display_name;
-                    }
                     if (user.is_admin) {
                         document.getElementById('adminLink').style.display = '';
                     }

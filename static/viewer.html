@@ -43,6 +43,14 @@
             max-height: 40px;
             margin-bottom: 8px;
         }
+        .brand-text {
+            font-size: 1.6rem;
+            font-weight: 700;
+            color: var(--synia-teal);
+            margin-bottom: 8px;
+            letter-spacing: 0.3px;
+            line-height: 1.1;
+        }
         h1 {
             font-size: 1.3rem;
             margin-bottom: 4px;
@@ -253,6 +261,14 @@
             max-height: 40px;
             margin-bottom: 16px;
         }
+        .consent-card .brand-text {
+            font-size: 1.4rem;
+            font-weight: 700;
+            color: var(--synia-teal);
+            margin-bottom: 16px;
+            letter-spacing: 0.3px;
+            line-height: 1.2;
+        }
         .consent-title {
             font-size: 1.3rem;
             font-weight: 600;
@@ -296,7 +312,7 @@
 <body>
     <div class="consent-overlay" id="consentOverlay">
         <div class="consent-card">
-            <img src="/static/synia-logo.png" alt="SYNIA" class="logo">
+            <div class="brand-text">Synia Gesprächsassistent SGA</div>
             <h2 class="consent-title" id="consentTitle">Datenschutz &amp; Nutzungshinweis</h2>
             <select class="lang-select" id="consentLangSelect" style="margin-bottom:12px;width:100%">
                 <option value="de" selected>Deutsch</option>
@@ -322,7 +338,7 @@
 
     <div class="container hidden">
         <header>
-            <img src="/static/synia-logo.png" alt="SYNIA" class="logo">
+            <div class="brand-text">Synia Gesprächsassistent SGA</div>
             <div class="status" id="status">
                 <span class="status-dot" id="statusDot"></span>
                 <span id="statusText"></span>
