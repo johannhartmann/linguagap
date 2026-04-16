@@ -50,7 +50,8 @@ summ-qwen3 = [
 # TTS backends
 tts-kugelaudio = [
     "kugelaudio-open @ git+https://github.com/kugelaudio/kugelaudio-open.git",
-    "transformers>=5.0.0",
+    # Pin to 4.x — transformers 5.x breaks kugelaudio with meta-tensor init error
+    "transformers>=4.40.0,<5.0.0",
     "bitsandbytes>=0.43.0",
 ]
 
