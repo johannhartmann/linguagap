@@ -1018,7 +1018,6 @@
                 muteBtn.classList.remove('muted');
                 languageSelect.disabled = true;
                 audioInputSelect.disabled = true;
-                document.querySelector('.main-layout').classList.add('with-qr');
 
             } catch (error) {
                 console.error('Error starting recording:', error);
@@ -1031,7 +1030,6 @@
             isMuted = false;
             muteBtn.style.display = 'none';
             muteBtn.classList.remove('muted');
-            document.querySelector('.main-layout').classList.remove('with-qr');
 
             // Stop audio capture
             if (processor) {
@@ -1071,6 +1069,8 @@
         function updateStartButtonState() {
             const hasLanguage = languageSelect.value !== '';
             startBtn.disabled = !hasLanguage && !isRecording;
+            // Show QR sidebar as soon as a language is selected
+            document.querySelector('.main-layout').classList.toggle('with-qr', hasLanguage || isRecording);
             if (!hasLanguage && !isRecording) {
                 startBtn.title = t('selectLanguageFirst');
             } else {
