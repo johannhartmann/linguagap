@@ -212,6 +212,43 @@
             cursor: not-allowed;
             animation: none;
         }
+        /* PTT mode: larger mic button */
+        .mic-btn.ptt-active {
+            width: 100px;
+            height: 100px;
+            font-size: 2.5rem;
+        }
+        .mic-btn.ptt-active.recording {
+            background: #ef4444;
+            animation: pulse 1.5s infinite;
+        }
+        /* Speaking indicator (viewer) */
+        .speaking-indicator {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 8px 16px;
+            margin: 0 auto 8px;
+            background: rgba(0, 153, 168, 0.15);
+            border: 1px solid var(--synia-teal);
+            border-radius: 20px;
+            width: fit-content;
+            font-size: 0.85rem;
+            color: var(--synia-teal);
+            font-weight: 500;
+        }
+        .speaking-dot {
+            width: 10px;
+            height: 10px;
+            background: var(--synia-teal);
+            border-radius: 50%;
+            animation: speaking-pulse 1s ease-in-out infinite;
+        }
+        @keyframes speaking-pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(0.8); }
+        }
         /* TTS toggle button */
         .tts-toggle {
             display: none;
@@ -348,6 +385,10 @@
             <button class="tts-toggle" id="ttsToggle" title="Text-to-Speech">&#128264;</button>
         </header>
         <div class="transcript" id="transcript"></div>
+        <div class="speaking-indicator" id="hostSpeakingIndicator" style="display:none">
+            <span class="speaking-dot"></span>
+            <span id="hostSpeakingText"></span>
+        </div>
         <div class="mic-bar" id="micBar">
             <select class="lang-select" id="viewerLangSelect">
                 <option value="" disabled selected id="langPlaceholder">-- Your language --</option>
@@ -490,10 +531,33 @@
             }
         };
 
+        // PTT-specific i18n (separate to avoid editing all 17 language entries)
+        const PTT_I18N = {
+            de: { holdToSpeak: 'Gedr\u00fcckt halten', hostSpeaking: 'Gastgeber spricht\u2026', pttActive: 'Sprechtaste aktiv' },
+            en: { holdToSpeak: 'Hold to speak', hostSpeaking: 'Host is speaking\u2026', pttActive: 'Push-to-Talk active' },
+            fr: { holdToSpeak: 'Maintenir pour parler', hostSpeaking: 'L\u2019h\u00f4te parle\u2026', pttActive: 'Appui-parole actif' },
+            es: { holdToSpeak: 'Mantener para hablar', hostSpeaking: 'El anfitri\u00f3n habla\u2026', pttActive: 'Pulsar para hablar activo' },
+            it: { holdToSpeak: 'Tieni premuto', hostSpeaking: 'L\u2019ospite sta parlando\u2026', pttActive: 'Premi per parlare attivo' },
+            pl: { holdToSpeak: 'Przytrzymaj', hostSpeaking: 'Gospodarz m\u00f3wi\u2026', pttActive: 'Naci\u015bnij i m\u00f3w aktywne' },
+            ro: { holdToSpeak: '\u021aine\u021bi ap\u0103sat', hostSpeaking: 'Gazda vorbe\u0219te\u2026', pttActive: 'Apas\u0103 pentru a vorbi activ' },
+            hr: { holdToSpeak: 'Dr\u017eite pritisnutim', hostSpeaking: 'Doma\u0107in govori\u2026', pttActive: 'Pritisni za govor aktivno' },
+            bg: { holdToSpeak: '\u0417\u0430\u0434\u0440\u044a\u0436\u0442\u0435', hostSpeaking: '\u0414\u043e\u043c\u0430\u043a\u0438\u043d\u044a\u0442 \u0433\u043e\u0432\u043e\u0440\u0438\u2026', pttActive: '\u041d\u0430\u0442\u0438\u0441\u043d\u0438 \u0437\u0430 \u0433\u043e\u0432\u043e\u0440' },
+            tr: { holdToSpeak: 'Bas\u0131l\u0131 tutun', hostSpeaking: 'Ev sahibi konu\u015fuyor\u2026', pttActive: 'Bas-konu\u015f aktif' },
+            ru: { holdToSpeak: '\u0423\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0439\u0442\u0435', hostSpeaking: '\u0412\u0435\u0434\u0443\u0449\u0438\u0439 \u0433\u043e\u0432\u043e\u0440\u0438\u0442\u2026', pttActive: '\u041d\u0430\u0436\u043c\u0438 \u0438 \u0433\u043e\u0432\u043e\u0440\u0438' },
+            uk: { holdToSpeak: '\u0423\u0442\u0440\u0438\u043c\u0443\u0439\u0442\u0435', hostSpeaking: '\u0412\u0435\u0434\u0443\u0447\u0438\u0439 \u0433\u043e\u0432\u043e\u0440\u0438\u0442\u044c\u2026', pttActive: '\u041d\u0430\u0442\u0438\u0441\u043d\u0438 \u0456 \u0433\u043e\u0432\u043e\u0440\u0438' },
+            hu: { holdToSpeak: 'Tartsa lenyomva', hostSpeaking: 'A h\u00e1zigazda besz\u00e9l\u2026', pttActive: 'Nyomd \u00e9s besz\u00e9lj akt\u00edv' },
+            sr: { holdToSpeak: 'Dr\u017eite pritisnuto', hostSpeaking: 'Doma\u0107in govori\u2026', pttActive: 'Pritisni za govor aktivno' },
+            sq: { holdToSpeak: 'Mbani shtypur', hostSpeaking: 'Nikoq\u00edri po flet\u2026', pttActive: 'Shtyp p\u00ebr t\u00eb folur aktiv' },
+            ar: { holdToSpeak: '\u0627\u0636\u063a\u0637 \u0645\u0639 \u0627\u0644\u0627\u0633\u062a\u0645\u0631\u0627\u0631', hostSpeaking: '\u0627\u0644\u0645\u0636\u064a\u0641 \u064a\u062a\u062d\u062f\u062b\u2026', pttActive: '\u0627\u0636\u063a\u0637 \u0644\u0644\u062a\u062d\u062f\u062b' },
+            fa: { holdToSpeak: '\u0646\u06af\u0647 \u062f\u0627\u0631\u06cc\u062f', hostSpeaking: '\u0645\u06cc\u0632\u0628\u0627\u0646 \u062f\u0631 \u062d\u0627\u0644 \u0635\u062d\u0628\u062a\u2026', pttActive: '\u0628\u0631\u0627\u06cc \u0635\u062d\u0628\u062a \u0641\u0634\u0627\u0631 \u062f\u0647\u06cc\u062f' }
+        };
+
         // Translation helper — uses foreignLang if set, falls back to English then German
         function t(key) {
             return (foreignLang && I18N[foreignLang] && I18N[foreignLang][key])
+                || (foreignLang && PTT_I18N[foreignLang] && PTT_I18N[foreignLang][key])
                 || (I18N['en'] && I18N['en'][key])
+                || (PTT_I18N['en'] && PTT_I18N['en'][key])
                 || (I18N['de'] && I18N['de'][key])
                 || key;
         }
@@ -690,6 +754,8 @@
         const SAMPLE_RATE = 16000;
         let micRecording = false;
         let micMuted = false;
+        let pttModeActive = false;
+        let micInitialized = false;
         let audioContext = null;
         let mediaStream = null;
         let processor = null;
@@ -967,7 +1033,9 @@
             updateMicState();
         });
 
-        micBtn.addEventListener('click', () => {
+        // Normal mode: click to toggle mic
+        micBtn.addEventListener('click', (e) => {
+            if (pttModeActive) return;  // PTT mode handles its own events
             if (micRecording) {
                 stopMicrophone();
             } else {
@@ -979,8 +1047,69 @@
             }
         });
 
+        // PTT mode: press-and-hold to talk
+        async function pttPress(e) {
+            if (!pttModeActive) return;
+            e.preventDefault();
+            if (!viewerLangSelect.value) {
+                micStatus.textContent = t('selectLangFirst');
+                return;
+            }
+            if (!micInitialized) {
+                // First press: set up mic, then immediately unmute
+                await startMicrophone();
+                micInitialized = true;
+            } else {
+                micMuted = false;
+                micBtn.classList.remove('muted');
+                micBtn.classList.add('recording');
+                micStatus.textContent = t('listening');
+            }
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'speaking_state', party: 'viewer', speaking: true }));
+            }
+        }
+
+        function pttRelease(e) {
+            if (!pttModeActive || !micInitialized) return;
+            e.preventDefault();
+            micMuted = true;
+            micBtn.classList.remove('recording');
+            micBtn.classList.add('muted');
+            micStatus.textContent = t('holdToSpeak');
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'speaking_state', party: 'viewer', speaking: false }));
+            }
+        }
+
+        micBtn.addEventListener('touchstart', pttPress, { passive: false });
+        micBtn.addEventListener('touchend', pttRelease, { passive: false });
+        micBtn.addEventListener('touchcancel', pttRelease, { passive: false });
+        micBtn.addEventListener('mousedown', pttPress);
+        document.addEventListener('mouseup', pttRelease);
+
+        const hostSpeakingIndicator = document.getElementById('hostSpeakingIndicator');
+        const hostSpeakingText = document.getElementById('hostSpeakingText');
+
+        function updatePTTMode(enabled) {
+            pttModeActive = enabled;
+            micBtn.classList.toggle('ptt-active', enabled);
+            if (enabled) {
+                viewerMuteBtn.style.display = 'none';
+                micStatus.textContent = t('holdToSpeak');
+                if (hostSpeakingText) hostSpeakingText.textContent = t('hostSpeaking');
+            } else {
+                micInitialized = false;
+                if (micRecording) {
+                    stopMicrophone();
+                }
+                micStatus.textContent = t('tapToSpeak');
+                hostSpeakingIndicator.style.display = 'none';
+            }
+        }
+
         viewerMuteBtn.addEventListener('click', () => {
-            if (!micRecording) return;
+            if (!micRecording || pttModeActive) return;
             micMuted = !micMuted;
             viewerMuteBtn.classList.toggle('active', micMuted);
             viewerMuteBtn.textContent = micMuted ? '\u{1F50A}' : '\u{1F507}';
@@ -1034,6 +1163,10 @@
                     } else if (data.type === 'session_ended') {
                         onSessionEnded();
                         showSessionEnded();
+                    } else if (data.type === 'ptt_mode') {
+                        updatePTTMode(!!data.enabled);
+                    } else if (data.type === 'speaking_state' && data.party === 'host') {
+                        hostSpeakingIndicator.style.display = data.speaking ? '' : 'none';
                     } else if (data.type === 'ping') {
                         // Respond to ping with pong
                         ws.send(JSON.stringify({ type: 'pong' }));
@@ -1050,6 +1183,8 @@
 
             ws.onclose = (event) => {
                 stopMicrophone();
+                updatePTTMode(false);
+                hostSpeakingIndicator.style.display = 'none';
                 if (!sessionEnded) {
                     if (event.code === 4004) {
                         setStatus(t('invalidLink'), 'error');

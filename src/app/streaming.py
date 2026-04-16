@@ -41,7 +41,7 @@ from fastapi import WebSocket
 from app.backends import get_asr_backend, get_summarization_backend, get_translation_backend
 from app.languages import LANG_INFO
 from app.session_registry import SessionEntry, registry
-from app.streaming_policy import Segment, SegmentTracker
+from app.streaming_policy import STABILITY_SEC, Segment, SegmentTracker
 
 logger = logging.getLogger(__name__)
 
@@ -199,6 +199,21 @@ async def _maybe_broadcast(session_token: str | None, message: dict) -> None:
             await broadcast_to_viewers(entry, message)
 
 
+async def _delayed_viewer_speaking_off(token: str, delay: float) -> None:
+    """Send delayed 'viewer stopped speaking' to host, looking up fresh WS from registry."""
+    try:
+        await asyncio.sleep(delay)
+        entry = await registry.get(token)
+        if entry and entry.main_ws:
+            await entry.main_ws.send_text(
+                json.dumps({"type": "speaking_state", "party": "viewer", "speaking": False})
+            )
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.warning("Failed to relay viewer speaking_state off to host", exc_info=True)
+
+
 @dataclass
 class ChannelBuffer:
     """Audio buffer for a single channel (German or foreign speaker)."""
@@ -247,6 +262,7 @@ class StreamingSession:
         self.foreign_channel = ChannelBuffer()
         self.viewer_last_audio_time: float = 0.0
         self.dual_channel_locked: bool = False
+        self.ptt_mode: bool = False
 
     def add_audio(self, pcm16_bytes: bytes):
         self.audio_buffer.append(pcm16_bytes)
@@ -624,6 +640,7 @@ class WebSocketHandler:
         self._translation_queue: asyncio.Queue[Segment] = asyncio.Queue()
         self._msg_count = 0
         self._bytes_received = 0
+        self._host_speaking_off_task: asyncio.Task | None = None
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -664,6 +681,10 @@ class WebSocketHandler:
                 await self._handle_config(data)
             elif msg_type == "request_summary":
                 await self._handle_request_summary()
+            elif msg_type == "ptt_mode":
+                await self._handle_ptt_mode(data)
+            elif msg_type == "speaking_state":
+                await self._handle_host_speaking_state(data)
         elif "bytes" in message:
             self._handle_audio(message["bytes"])
 
@@ -724,6 +745,51 @@ class WebSocketHandler:
                     self._bytes_received,
                     self.session.get_buffered_seconds(),
                 )
+
+    # ------------------------------------------------------------------
+    # Push-to-Talk
+    # ------------------------------------------------------------------
+
+    async def _handle_ptt_mode(self, data: dict) -> None:
+        if self.session is None:
+            return
+        enabled = bool(data.get("enabled", False))
+        self.session.ptt_mode = enabled
+        logger.info("PTT mode %s", "enabled" if enabled else "disabled")
+        await _maybe_broadcast(self.session_token, {"type": "ptt_mode", "enabled": enabled})
+
+    async def _handle_host_speaking_state(self, data: dict) -> None:
+        if self.session is None or self.session_token is None:
+            return
+        speaking = bool(data.get("speaking", False))
+        if speaking:
+            # Cancel any pending "speaking off" relay
+            if self._host_speaking_off_task and not self._host_speaking_off_task.done():
+                self._host_speaking_off_task.cancel()
+                self._host_speaking_off_task = None
+            # Broadcast immediately
+            await _maybe_broadcast(
+                self.session_token,
+                {"type": "speaking_state", "party": "host", "speaking": True},
+            )
+        else:
+            # Delay broadcast to let ASR finalize last segments
+            delay = STABILITY_SEC + TICK_SEC
+            self._host_speaking_off_task = asyncio.create_task(
+                self._delayed_speaking_broadcast("host", delay)
+            )
+
+    async def _delayed_speaking_broadcast(self, party: str, delay: float) -> None:
+        try:
+            await asyncio.sleep(delay)
+            await _maybe_broadcast(
+                self.session_token,
+                {"type": "speaking_state", "party": party, "speaking": False},
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.warning("Failed to broadcast speaking_state off for %s", party, exc_info=True)
 
     # ------------------------------------------------------------------
     # Request summary (stop recording + summarize)
@@ -1042,6 +1108,7 @@ class WebSocketHandler:
         await registry.unregister(self.session_token)
         await self._cancel_task("_asr_task")
         await self._cancel_task("_mt_task")
+        await self._cancel_task("_host_speaking_off_task")
 
 
 async def handle_websocket(websocket: WebSocket) -> None:
@@ -1082,6 +1149,9 @@ async def handle_viewer_websocket(websocket: WebSocket, token: str) -> None:
                     }
                 )
             )
+            # Inform late-joining viewer about PTT mode
+            if session.ptt_mode:
+                await websocket.send_text(json.dumps({"type": "ptt_mode", "enabled": True}))
         else:
             # Session is pending - tell viewer to wait
             await websocket.send_text(
@@ -1096,6 +1166,7 @@ async def handle_viewer_websocket(websocket: WebSocket, token: str) -> None:
 
         # Cache session reference for audio routing
         cached_session = None
+        viewer_speaking_off_task: asyncio.Task | None = None
 
         # Main loop: handle pong/keepalive, audio frames, and viewer config
         while True:
@@ -1141,6 +1212,37 @@ async def handle_viewer_websocket(websocket: WebSocket, token: str) -> None:
                                         )
                                         # Reset cached role/lang inferences to re-lock speakers with new hint.
                                     cached_session.foreign_lang = viewer_foreign_lang
+
+                        elif msg_type == "speaking_state":
+                            # Relay viewer speaking state to host
+                            entry = await registry.get(token)
+                            if entry and entry.main_ws:
+                                speaking = bool(data.get("speaking", False))
+                                msg = {
+                                    "type": "speaking_state",
+                                    "party": "viewer",
+                                    "speaking": speaking,
+                                }
+                                if speaking:
+                                    if (
+                                        viewer_speaking_off_task
+                                        and not viewer_speaking_off_task.done()
+                                    ):
+                                        viewer_speaking_off_task.cancel()
+                                        viewer_speaking_off_task = None
+                                    try:
+                                        await entry.main_ws.send_text(json.dumps(msg))
+                                    except Exception:
+                                        logger.warning(
+                                            "Failed to relay viewer speaking_state to host"
+                                        )
+                                else:
+                                    viewer_speaking_off_task = asyncio.create_task(
+                                        _delayed_viewer_speaking_off(
+                                            token, STABILITY_SEC + TICK_SEC
+                                        )
+                                    )
+
                         # pong is implicitly handled (no action needed)
                     except (json.JSONDecodeError, KeyError):
                         pass
@@ -1155,5 +1257,7 @@ async def handle_viewer_websocket(websocket: WebSocket, token: str) -> None:
     except Exception as e:
         logger.error("Viewer websocket error: %s", e)
     finally:
+        if viewer_speaking_off_task and not viewer_speaking_off_task.done():
+            viewer_speaking_off_task.cancel()
         await registry.remove_viewer(token, websocket)
         logger.info("Viewer disconnected from session %s...", token[:8])

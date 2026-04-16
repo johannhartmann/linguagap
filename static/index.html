@@ -104,6 +104,75 @@
             background: #ccc;
             cursor: not-allowed;
         }
+        /* PTT toggle switch */
+        .ptt-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            user-select: none;
+            vertical-align: middle;
+        }
+        .ptt-toggle input {
+            display: none;
+        }
+        .ptt-slider {
+            position: relative;
+            width: 46px;
+            height: 24px;
+            background: #ccc;
+            border-radius: 24px;
+            transition: background 0.2s;
+        }
+        .ptt-slider::before {
+            content: '';
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            left: 2px;
+            top: 2px;
+            background: #fff;
+            border-radius: 50%;
+            transition: transform 0.2s;
+        }
+        .ptt-toggle input:checked + .ptt-slider {
+            background: var(--synia-teal);
+        }
+        .ptt-toggle input:checked + .ptt-slider::before {
+            transform: translateX(22px);
+        }
+        .ptt-label {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--synia-text-dark);
+        }
+        /* Speaking indicator */
+        .speaking-indicator {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 8px 16px;
+            margin: 8px auto;
+            background: rgba(0, 153, 168, 0.1);
+            border: 1px solid var(--synia-teal);
+            border-radius: 20px;
+            width: fit-content;
+            font-size: 0.9rem;
+            color: var(--synia-teal-dark);
+            font-weight: 500;
+        }
+        .speaking-dot {
+            width: 10px;
+            height: 10px;
+            background: var(--synia-teal);
+            border-radius: 50%;
+            animation: speaking-pulse 1s ease-in-out infinite;
+        }
+        @keyframes speaking-pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(0.8); }
+        }
         .panes {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -350,12 +419,21 @@
                 <option value="ar">Arabic (beta)</option>
                 <option value="fa">Persian (beta)</option>
             </select>
+            <label class="ptt-toggle" id="pttToggleLabel" title="Push-to-Talk">
+                <input type="checkbox" id="pttToggle">
+                <span class="ptt-slider"></span>
+                <span class="ptt-label" id="pttLabelText">PTT</span>
+            </label>
             <button id="startBtn">Start Recording</button>
             <button id="muteBtn" disabled style="display:none">Mute</button>
             <button id="clearBtn">Clear</button>
         </div>
 
         <div class="status" id="status"><span id="statusText">Click "Start Recording" to begin</span><span class="dual-channel-badge" id="dualChannelBadge">Dual Channel</span></div>
+        <div class="speaking-indicator" id="viewerSpeakingIndicator" style="display:none">
+            <span class="speaking-dot"></span>
+            <span id="viewerSpeakingText">Gast spricht...</span>
+        </div>
 
         <div class="main-layout">
         <div class="panes">
@@ -434,7 +512,10 @@
                 errorBrowser: 'Fehler: Browser unterstützt keinen Mikrofonzugriff',
                 errorMicDenied: 'Mikrofonzugriff verweigert',
                 speaker: 'Sprecher {n}',
-                translationFailed: 'Übersetzung fehlgeschlagen'
+                translationFailed: 'Übersetzung fehlgeschlagen',
+                pttLabel: 'Sprechtaste',
+                pttHint: 'Leertaste halten zum Sprechen',
+                guestSpeaking: 'Gast spricht...'
             },
             en: {
                 title: 'Real-time Speech Translation',
@@ -463,7 +544,10 @@
                 errorBrowser: 'Error: Browser does not support microphone access',
                 errorMicDenied: 'Microphone access denied',
                 speaker: 'Speaker {n}',
-                translationFailed: 'Translation failed'
+                translationFailed: 'Translation failed',
+                pttLabel: 'Push-to-Talk',
+                pttHint: 'Hold spacebar to speak',
+                guestSpeaking: 'Guest is speaking...'
             }
         };
 
@@ -497,6 +581,10 @@
         const rightLangLabel = document.getElementById('rightLangLabel');
         const uiLangSelect = document.getElementById('uiLangSelect');
         const subtitleEl = document.getElementById('subtitle');
+        const pttToggle = document.getElementById('pttToggle');
+        const pttLabelText = document.getElementById('pttLabelText');
+        const viewerSpeakingIndicator = document.getElementById('viewerSpeakingIndicator');
+        const viewerSpeakingText = document.getElementById('viewerSpeakingText');
 
         // Language display names
         const LANG_NAMES = {
@@ -515,6 +603,8 @@
         let mediaStream = null;
         let processor = null;
         let sessionCleared = false;  // Guard flag to prevent renderSegments after clear
+        let pttMode = false;
+        let spaceHeld = false;
 
         const SAMPLE_RATE = 16000;
 
@@ -618,6 +708,10 @@
             const qrSubtitle = document.querySelector('.qr-sidebar p');
             if (qrTitle) qrTitle.textContent = t('shareTitle');
             if (qrSubtitle) qrSubtitle.textContent = t('shareSubtitle');
+
+            // PTT labels
+            if (pttLabelText) pttLabelText.textContent = t('pttLabel');
+            if (viewerSpeakingText) viewerSpeakingText.textContent = t('guestSpeaking');
         }
 
         // Initialize UI language
@@ -629,6 +723,82 @@
             currentUiLang = e.target.value;
             localStorage.setItem('uiLang', currentUiLang);
             applyTranslations();
+        });
+
+        // PTT toggle handler
+        pttToggle.addEventListener('change', () => {
+            pttMode = pttToggle.checked;
+            // Notify server
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'ptt_mode', enabled: pttMode }));
+            }
+            if (pttMode) {
+                // PTT on: default to muted, hide mute button
+                isMuted = true;
+                muteBtn.style.display = 'none';
+                if (isRecording) {
+                    setStatus(t('pttHint'), 'connected');
+                }
+            } else {
+                // PTT off: if mid-speech, release
+                if (spaceHeld) {
+                    spaceHeld = false;
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({ type: 'speaking_state', party: 'host', speaking: false }));
+                    }
+                }
+                isMuted = false;
+                if (isRecording) {
+                    muteBtn.style.display = '';
+                    muteBtn.textContent = t('mute');
+                    muteBtn.classList.remove('muted');
+                    setStatus(t('statusRecording'), 'connected');
+                }
+            }
+        });
+
+        // Spacebar PTT handler
+        document.addEventListener('keydown', (e) => {
+            if (!pttMode || !isRecording) return;
+            if (e.code !== 'Space') return;
+            if (e.repeat) return;
+            e.preventDefault();
+            spaceHeld = true;
+            isMuted = false;
+            startBtn.classList.add('recording');
+            setStatus(t('statusRecording'), 'connected');
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'speaking_state', party: 'host', speaking: true }));
+            }
+        });
+
+        document.addEventListener('keyup', (e) => {
+            if (!pttMode || !isRecording) return;
+            if (e.code !== 'Space') return;
+            e.preventDefault();
+            spaceHeld = false;
+            isMuted = true;
+            startBtn.classList.remove('recording');
+            setStatus(t('pttHint'), 'connected');
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'speaking_state', party: 'host', speaking: false }));
+            }
+        });
+
+        // Release PTT if tab loses focus or becomes hidden
+        function releasePTT() {
+            if (!pttMode || !spaceHeld || !isRecording) return;
+            spaceHeld = false;
+            isMuted = true;
+            startBtn.classList.remove('recording');
+            setStatus(t('pttHint'), 'connected');
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'speaking_state', party: 'host', speaking: false }));
+            }
+        }
+        window.addEventListener('blur', releasePTT);
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) releasePTT();
         });
 
         async function enumerateDevices() {
@@ -947,7 +1117,13 @@
                         console.log('WS message:', data.type, data.segments?.length || 0);
                         if (data.type === 'config_ack') {
                             console.log('Config acknowledged:', data.status);
-                            setStatus(t('statusRecording'), 'connected');
+                            // Sync PTT state if it was enabled before recording started
+                            if (pttMode) {
+                                ws.send(JSON.stringify({ type: 'ptt_mode', enabled: true }));
+                                setStatus(t('pttHint'), 'connected');
+                            } else {
+                                setStatus(t('statusRecording'), 'connected');
+                            }
                         } else if (data.type === 'error') {
                             console.error('Server error:', data.message);
                             setStatus(data.message || t('statusConnError'), 'error');
@@ -971,6 +1147,8 @@
                         } else if (data.type === 'translation_error') {
                             console.error('Translation failed for segment', data.segment_id, data.error);
                             markTranslationFailed(data.segment_id, data.tgt_lang);
+                        } else if (data.type === 'speaking_state' && data.party === 'viewer') {
+                            viewerSpeakingIndicator.style.display = data.speaking ? '' : 'none';
                         }
                     } catch (e) {
                         console.error('WebSocket message error:', e, e.stack);
@@ -1009,15 +1187,18 @@
                 };
 
                 isRecording = true;
-                isMuted = false;
+                isMuted = pttMode;  // PTT: start muted; normal: start unmuted
                 startBtn.textContent = t('stopRecording');
-                startBtn.classList.add('recording');
-                muteBtn.style.display = '';
+                if (!pttMode) startBtn.classList.add('recording');
+                muteBtn.style.display = pttMode ? 'none' : '';
                 muteBtn.disabled = false;
                 muteBtn.textContent = t('mute');
                 muteBtn.classList.remove('muted');
                 languageSelect.disabled = true;
                 audioInputSelect.disabled = true;
+                if (pttMode) {
+                    setStatus(t('pttHint'), 'connected');
+                }
 
             } catch (error) {
                 console.error('Error starting recording:', error);
@@ -1028,8 +1209,10 @@
         function stopRecording() {
             isRecording = false;
             isMuted = false;
+            spaceHeld = false;
             muteBtn.style.display = 'none';
             muteBtn.classList.remove('muted');
+            viewerSpeakingIndicator.style.display = 'none';
 
             // Stop audio capture
             if (processor) {
@@ -1128,14 +1311,19 @@
                 startBtn.textContent = t('startRecording');
                 startBtn.classList.remove('recording');
                 isMuted = false;
+                spaceHeld = false;
                 muteBtn.style.display = 'none';
                 muteBtn.classList.remove('muted');
                 languageSelect.disabled = false;
                 audioInputSelect.disabled = false;
             }
-            // Clear display
-            leftTranscript.innerHTML = '';
-            rightTranscript.innerHTML = '';
+            // Reset PTT state
+            pttMode = false;
+            pttToggle.checked = false;
+            viewerSpeakingIndicator.style.display = 'none';
+            // Clear display (innerHTML = '' is safe — empties container, no user content)
+            leftTranscript.innerHTML = '';  // eslint-disable-line no-unsanitized/property
+            rightTranscript.innerHTML = '';  // eslint-disable-line no-unsanitized/property
             foreignLang = null;
             leftLangLabel.textContent = t('foreignLang');
             setStatus(t('statusReady'), '');
