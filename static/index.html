@@ -264,6 +264,28 @@
         .dual-channel-badge.active {
             display: inline-block;
         }
+        .transcript-download-bar {
+            display: none;
+            margin: 16px auto;
+            text-align: center;
+        }
+        .transcript-download-bar.visible {
+            display: block;
+        }
+        .transcript-download-btn {
+            padding: 10px 22px;
+            font-size: 1rem;
+            font-weight: 600;
+            background: var(--synia-teal);
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        .transcript-download-btn:hover {
+            background: var(--synia-teal-dark);
+        }
         /* QR Code sidebar styles — hidden until a session is recording */
         .qr-sidebar {
             display: none;
@@ -381,6 +403,7 @@
             display: block;
         }
     </style>
+    <script src="/static/js/transcript_export.js"></script>
 </head>
 <body>
     <div class="container">
@@ -449,6 +472,10 @@
                 <h2 id="rightLangLabel">German</h2>
                 <div class="transcript" id="rightTranscript"></div>
             </div>
+        </div>
+
+        <div class="transcript-download-bar" id="transcriptDownloadBar">
+            <button class="transcript-download-btn" id="transcriptDownloadBtn"></button>
         </div>
 
         <!-- QR Code Sidebar -->
@@ -520,7 +547,10 @@
                 pttLabel: 'Sprechtaste',
                 pttHint: 'Leertaste halten zum Sprechen',
                 guestSpeaking: 'Gast spricht...',
-                translating: 'Übersetzung läuft…'
+                translating: 'Übersetzung läuft…',
+                statusFinalizing: 'Gespräch wird abgeschlossen, bitte warten…',
+                downloadTranscript: 'Gesprächsprotokoll herunterladen',
+                downloadFailed: 'Download fehlgeschlagen'
             },
             en: {
                 title: 'Real-time Speech Translation',
@@ -553,7 +583,10 @@
                 pttLabel: 'Push-to-Talk',
                 pttHint: 'Hold spacebar to speak',
                 guestSpeaking: 'Guest is speaking...',
-                translating: 'Translation in progress…'
+                translating: 'Translation in progress…',
+                statusFinalizing: 'Finishing up, please wait…',
+                downloadTranscript: 'Download conversation transcript',
+                downloadFailed: 'Download failed'
             }
         };
 
@@ -621,8 +654,58 @@
             'it': 'Italian', 'pl': 'Polish', 'ro': 'Romanian', 'hr': 'Croatian',
             'bg': 'Bulgarian', 'sq': 'Albanian', 'tr': 'Turkish', 'ru': 'Russian',
             'uk': 'Ukrainian', 'hu': 'Hungarian',
-            'sr': 'Serbian'
+            'sr': 'Serbian', 'ar': 'Arabic', 'fa': 'Persian'
         };
+
+        // Authoritative copy of the last segments list from the server,
+        // kept in sync by the `segments` and `translation` handlers. Used
+        // to build the transcript export at session end.
+        let allSegments = [];
+        let viewerConsentedTranscript = false;
+        let isStoppingRecording = false;
+        let stopWatchdogTimer = null;
+
+        // Hard upper bound on how long the host waits for the server to flush
+        // the final segments + summary. 60s matches _handle_request_summary's
+        // translation_queue.join timeout on the server; +15s budget for the
+        // summariser. If we hit it, the user gets their download (from local
+        // state) and is unblocked.
+        const STOP_WATCHDOG_MS = 75 * 1000;
+
+        function updateAllSegmentsFromMessage(segs) {
+            allSegments = Array.isArray(segs) ? segs.map(s => ({ ...s, translations: { ...(s.translations || {}) } })) : [];
+        }
+
+        function applyTranslationToAllSegments(segmentId, tgtLang, text) {
+            const seg = allSegments.find(s => s.id === segmentId);
+            if (!seg) return;
+            if (!seg.translations) seg.translations = {};
+            seg.translations[tgtLang] = text;
+        }
+
+        function maybeShowTranscriptDownload() {
+            const bar = document.getElementById('transcriptDownloadBar');
+            const btn = document.getElementById('transcriptDownloadBtn');
+            if (!bar || !btn) return;
+            const hasFinal = allSegments.some(s => s.final);
+            if (!viewerConsentedTranscript || !foreignLang || !hasFinal) return;
+            btn.textContent = t('downloadTranscript');
+            bar.classList.add('visible');
+        }
+
+        function downloadTranscriptFile() {
+            try {
+                TranscriptExport.download({
+                    segments: allSegments,
+                    foreignLang: foreignLang,
+                    source: 'host',
+                    langNames: LANG_NAMES,
+                });
+            } catch (e) {
+                console.error('Transcript download failed:', e);
+                setStatus(t('downloadFailed'), 'error');
+            }
+        }
 
         let isRecording = false;
         let isMuted = false;
@@ -747,6 +830,8 @@
         // Initialize UI language
         uiLangSelect.value = currentUiLang;
         applyTranslations();
+
+        document.getElementById('transcriptDownloadBtn').addEventListener('click', downloadTranscriptFile);
 
         // Handle UI language change
         uiLangSelect.addEventListener('change', (e) => {
@@ -1063,6 +1148,12 @@
         async function startRecording() {
             // Reset the cleared flag when starting a new session
             sessionCleared = false;
+            // Reset transcript export state for the new session
+            allSegments = [];
+            viewerConsentedTranscript = false;
+            isStoppingRecording = false;
+            const dlBar = document.getElementById('transcriptDownloadBar');
+            if (dlBar) dlBar.classList.remove('visible');
 
             // Check for secure context (HTTPS or localhost)
             if (!window.isSecureContext) {
@@ -1159,6 +1250,7 @@
                             setStatus(data.message || t('statusConnError'), 'error');
                         } else if (data.type === 'segments' && data.segments) {
                             console.log('Calling renderSegments with', data.segments.length, 'segments');
+                            updateAllSegmentsFromMessage(data.segments);
                             renderSegments(data.segments, data.foreign_lang);
                             refreshPendingFromSegments(data.segments);
                             console.log('renderSegments completed');
@@ -1174,6 +1266,7 @@
                             }
                         } else if (data.type === 'translation') {
                             // Update translation for specific segment
+                            applyTranslationToAllSegments(data.segment_id, data.tgt_lang, data.text);
                             updateTranslation(data.segment_id, data.tgt_lang, data.text);
                             if (data.tgt_lang === 'de') {
                                 pendingTranslations.delete(data.segment_id);
@@ -1186,6 +1279,8 @@
                                 pendingTranslations.delete(data.segment_id);
                                 updateTranslatingIndicator();
                             }
+                        } else if (data.type === 'transcript_consent') {
+                            viewerConsentedTranscript = !!data.enabled;
                         } else if (data.type === 'speaking_state' && data.party === 'viewer') {
                             viewerSpeakingIndicator.style.display = data.speaking ? '' : 'none';
                         }
@@ -1203,8 +1298,15 @@
                     if (isRecording) {
                         setStatus(t('statusConnClosed'), 'error');
                     }
-                    pendingTranslations.clear();
-                    updateTranslatingIndicator();
+                    // Server closes the WS after drain + summary. Surface the
+                    // transcript download at that point if the viewer consented.
+                    if (isStoppingRecording) {
+                        finalizeAfterStop();
+                    } else {
+                        pendingTranslations.clear();
+                        updateTranslatingIndicator();
+                    }
+                    ws = null;
                 };
 
                 let frameCount = 0;
@@ -1251,11 +1353,10 @@
             isRecording = false;
             isMuted = false;
             spaceHeld = false;
+            isStoppingRecording = true;
             muteBtn.style.display = 'none';
             muteBtn.classList.remove('muted');
             viewerSpeakingIndicator.style.display = 'none';
-            pendingTranslations.clear();
-            updateTranslatingIndicator();
 
             // Stop audio capture
             if (processor) {
@@ -1273,14 +1374,36 @@
                 mediaStream = null;
             }
 
-            // Tell server to stop (drains translations and sends final segments)
+            // Ask server to drain translations and send final segments + summary.
+            // We intentionally keep the socket open so those messages can arrive;
+            // the server closes it once summarization is done.
             if (ws && ws.readyState === WebSocket.OPEN) {
                 ws.send(JSON.stringify({ type: 'request_summary' }));
-            }
-
-            if (ws) {
-                ws.close();
-                ws = null;
+                setStatus(t('statusFinalizing'), 'connected');
+                // Watchdog: if the server never closes the socket, force-exit
+                // the finalising state so the user isn't stranded.
+                stopWatchdogTimer = setTimeout(() => {
+                    stopWatchdogTimer = null;
+                    console.warn('stopRecording watchdog fired — forcing finalize');
+                    try {
+                        try {
+                            if (ws) ws.close();
+                        } catch (e) {
+                            console.warn('ws.close from watchdog failed:', e);
+                        }
+                        finalizeAfterStop();
+                    } finally {
+                        // Guarantee the user escapes "finalizing" even if
+                        // finalizeAfterStop throws for any reason.
+                        if (isStoppingRecording) {
+                            isStoppingRecording = false;
+                            setStatus(t('statusStopped'), '');
+                        }
+                    }
+                }, STOP_WATCHDOG_MS);
+            } else {
+                // No live connection — finalize immediately so the user isn't stuck.
+                finalizeAfterStop();
             }
 
             startBtn.textContent = t('startRecording');
@@ -1288,7 +1411,19 @@
             startBtn.disabled = false;
             languageSelect.disabled = false;
             audioInputSelect.disabled = false;
+        }
+
+        function finalizeAfterStop() {
+            if (!isStoppingRecording) return;
+            isStoppingRecording = false;
+            if (stopWatchdogTimer !== null) {
+                clearTimeout(stopWatchdogTimer);
+                stopWatchdogTimer = null;
+            }
+            pendingTranslations.clear();
+            updateTranslatingIndicator();
             setStatus(t('statusStopped'), '');
+            maybeShowTranscriptDownload();
         }
 
         // Disable start button until language is selected
@@ -1360,12 +1495,31 @@
                 languageSelect.disabled = false;
                 audioInputSelect.disabled = false;
             }
+            // Cancel any pending stop watchdog and close a still-draining socket.
+            if (stopWatchdogTimer !== null) {
+                clearTimeout(stopWatchdogTimer);
+                stopWatchdogTimer = null;
+            }
+            if (ws) {
+                try {
+                    ws.close();
+                } catch (e) {
+                    console.warn('ws.close during clear failed:', e);
+                }
+                ws = null;
+            }
             // Reset PTT state
             pttMode = false;
             pttToggle.checked = false;
             viewerSpeakingIndicator.style.display = 'none';
             pendingTranslations.clear();
             updateTranslatingIndicator();
+            // Reset transcript download state
+            allSegments = [];
+            viewerConsentedTranscript = false;
+            isStoppingRecording = false;
+            const dlBar = document.getElementById('transcriptDownloadBar');
+            if (dlBar) dlBar.classList.remove('visible');
             // Clear display (innerHTML = '' is safe — empties container, no user content)
             leftTranscript.innerHTML = '';  // eslint-disable-line no-unsanitized/property
             rightTranscript.innerHTML = '';  // eslint-disable-line no-unsanitized/property

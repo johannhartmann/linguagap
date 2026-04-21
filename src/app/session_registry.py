@@ -37,6 +37,10 @@ class SessionEntry:
     session: "StreamingSession | None"  # None when pending (waiting for recording to start)
     main_ws: WebSocket | None  # None when pending
     viewers: WeakSet[WebSocket] = field(default_factory=WeakSet)
+    # Sticky flag set to True once any viewer explicitly consents to the
+    # bilingual transcript download. Lives on the entry (not the session) so
+    # consent given BEFORE the host activates the session survives.
+    transcript_consent: bool = False
 
     @property
     def is_active(self) -> bool:

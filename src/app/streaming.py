@@ -293,6 +293,10 @@ class StreamingSession:
         self.viewer_last_audio_time: float = 0.0
         self.dual_channel_locked: bool = False
         self.ptt_mode: bool = False
+        # True once at least one viewer has explicitly consented to the
+        # bilingual transcript download. Sticky: a later viewer opting out
+        # does not revoke an earlier consent from another viewer.
+        self.transcript_consent: bool = False
         # Set by WebSocketHandler after session creation so non-handler code
         # (e.g. viewer WebSocket loop) can queue segments for translation.
         self.translation_queue: asyncio.Queue[Segment] | None = None
@@ -755,6 +759,21 @@ class WebSocketHandler:
         await self._send_json({"type": "config_ack", "status": "active"})
 
         entry = await registry.get(self.session_token)
+        # A freshly-activated StreamingSession defaults transcript_consent=False.
+        # Carry pre-activation viewer consent from the entry onto the new
+        # session so the post-stop download button renders for the host.
+        # Host notification is best-effort — a failure here must not abort
+        # activation or block the viewer-side session_active broadcast.
+        if entry and entry.transcript_consent:
+            self.session.transcript_consent = True
+            try:
+                await self._send_json({"type": "transcript_consent", "enabled": True})
+            except Exception as exc:  # noqa: BLE001 - best-effort relay
+                logger.warning(
+                    "transcript_consent host notify failed for token=%s: %s",
+                    self.session_token[:8] if self.session_token else "?",
+                    exc,
+                )
         if entry and entry.viewers:
             await broadcast_to_viewers(
                 entry,
@@ -893,19 +912,28 @@ class WebSocketHandler:
                 self._translation_queue.qsize(),
             )
 
-        # Send final segments with all translations
+        # Send final segments with all translations. Broadcast to viewers FIRST
+        # so their transcript download state is complete even if the host has
+        # already disconnected mid-stop; then tolerate a host-send failure.
         finalized = self.session.segment_tracker.finalized_segments
         if finalized:
             segments_data = _serialize_segments(self.session, list(finalized))
-            await self._send_json(
-                {
-                    "type": "segments",
-                    "t": self.session.get_current_time(),
-                    "src_lang": self.session.detected_lang or "unknown",
-                    "foreign_lang": self.session.foreign_lang or "en",
-                    "segments": segments_data,
-                }
-            )
+            segments_msg = {
+                "type": "segments",
+                "t": self.session.get_current_time(),
+                "src_lang": self.session.detected_lang or "unknown",
+                "foreign_lang": self.session.foreign_lang or "en",
+                "segments": segments_data,
+            }
+            await _maybe_broadcast(self.session_token, segments_msg)
+            try:
+                await self._send_json(segments_msg)
+            except Exception as exc:  # noqa: BLE001 - host may be mid-disconnect
+                logger.warning(
+                    "Final segments host send failed for token=%s: %s",
+                    self.session_token[:8] if self.session_token else "?",
+                    exc,
+                )
 
         await self._run_summarization(finalized)
 
@@ -1276,6 +1304,33 @@ async def handle_viewer_websocket(websocket: WebSocket, token: str) -> None:
                                         )
                                         # Reset cached role/lang inferences to re-lock speakers with new hint.
                                     cached_session.foreign_lang = viewer_foreign_lang
+
+                        elif msg_type == "transcript_consent":
+                            # Viewer opted in to the bilingual transcript download.
+                            # Consent is stored on the SessionEntry (not the
+                            # session) so it survives the pre-activation window
+                            # where the host hasn't started recording yet.
+                            enabled = bool(data.get("enabled", False))
+                            entry = await registry.get(token)
+                            if entry and enabled:
+                                entry.transcript_consent = True
+                                if entry.session is not None:
+                                    entry.session.transcript_consent = True
+                            if entry and entry.main_ws:
+                                msg = {
+                                    "type": "transcript_consent",
+                                    "enabled": entry.transcript_consent,
+                                }
+                                try:
+                                    await entry.main_ws.send_text(json.dumps(msg))
+                                except Exception as exc:  # noqa: BLE001 - relay best-effort
+                                    logger.warning(
+                                        "Failed to relay transcript_consent to host for "
+                                        "token=%s: %s",
+                                        token[:8],
+                                        exc,
+                                        exc_info=True,
+                                    )
 
                         elif msg_type == "speaking_state":
                             # Relay viewer speaking state to host
