@@ -1283,6 +1283,13 @@
                             viewerConsentedTranscript = !!data.enabled;
                         } else if (data.type === 'speaking_state' && data.party === 'viewer') {
                             viewerSpeakingIndicator.style.display = data.speaking ? '' : 'none';
+                            // In PTT mode the status text latches onto the last
+                            // "spricht: XX" from a segments message. Reset it when
+                            // the guest stops so the host doesn't see a stale
+                            // speaker attribution.
+                            if (!data.speaking && isRecording) {
+                                setStatus(t(pttMode ? 'pttHint' : 'statusRecording'), 'connected');
+                            }
                         }
                     } catch (e) {
                         console.error('WebSocket message error:', e, e.stack);
