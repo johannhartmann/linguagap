@@ -1088,6 +1088,11 @@
                 micStatus.textContent = t('selectLangFirst');
             } else if (!sessionActive) {
                 micStatus.textContent = t('waitingForSession');
+            } else if (pttModeActive) {
+                // Preserve the PTT hint — a language-change event would
+                // otherwise silently rewrite it to 'tapToSpeak' even though
+                // we're still in PTT mode.
+                micStatus.textContent = t('holdToSpeak');
             } else {
                 micStatus.textContent = t('tapToSpeak');
             }
@@ -1199,23 +1204,40 @@
         const hostSpeakingText = document.getElementById('hostSpeakingText');
         const translatingIndicator = document.getElementById('translatingIndicator');
         const translatingText = document.getElementById('translatingText');
-        const pendingTranslations = new Set();
+        // Map<segmentId, enqueuedAtMs> — pending translations expire after
+        // PENDING_TRANSLATION_TIMEOUT_MS so the indicator can't stick forever
+        // when a server-side MT call hangs without reporting an error.
+        const pendingTranslations = new Map();
+        const PENDING_TRANSLATION_TIMEOUT_MS = 60 * 1000;
+
+        function prunePendingTranslations() {
+            const cutoff = Date.now() - PENDING_TRANSLATION_TIMEOUT_MS;
+            for (const [id, ts] of pendingTranslations) {
+                if (ts < cutoff) pendingTranslations.delete(id);
+            }
+        }
 
         function updateTranslatingIndicator() {
             if (translatingText) translatingText.textContent = t('translating');
+            prunePendingTranslations();
             translatingIndicator.style.display = pendingTranslations.size > 0 ? '' : 'none';
         }
+
+        setInterval(() => {
+            if (pendingTranslations.size > 0) updateTranslatingIndicator();
+        }, 5000);
 
         function refreshPendingFromSegments(segments) {
             // Viewer target is foreignLang. A segment is pending iff it is
             // finalized, its source is German (needs translation to foreign),
             // and no foreign-lang translation has arrived yet.
             if (!foreignLang) return;
+            const now = Date.now();
             for (const seg of segments || []) {
                 const needsForeign = seg.final && seg.src_lang === 'de';
                 const hasForeign = seg.translations && seg.translations[foreignLang];
                 if (needsForeign && !hasForeign) {
-                    pendingTranslations.add(seg.id);
+                    if (!pendingTranslations.has(seg.id)) pendingTranslations.set(seg.id, now);
                 } else {
                     pendingTranslations.delete(seg.id);
                 }

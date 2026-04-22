@@ -447,6 +447,11 @@
                 <span class="ptt-slider"></span>
                 <span class="ptt-label" id="pttLabelText">PTT</span>
             </label>
+            <label class="ptt-toggle" id="hostTranscriptLabel" title="Protokoll erstellen">
+                <input type="checkbox" id="hostTranscriptToggle">
+                <span class="ptt-slider"></span>
+                <span class="ptt-label" id="hostTranscriptLabelText">Protokoll</span>
+            </label>
             <button id="startBtn">Start Recording</button>
             <button id="muteBtn" disabled style="display:none">Mute</button>
             <button id="clearBtn">Clear</button>
@@ -550,7 +555,9 @@
                 translating: 'Übersetzung läuft…',
                 statusFinalizing: 'Gespräch wird abgeschlossen, bitte warten…',
                 downloadTranscript: 'Gesprächsprotokoll herunterladen',
-                downloadFailed: 'Download fehlgeschlagen'
+                downloadFailed: 'Download fehlgeschlagen',
+                hostTranscriptLabel: 'Protokoll',
+                hostTranscriptTitle: 'Protokoll erstellen (Download am Sitzungsende, Zustimmung des Gasts vorausgesetzt)'
             },
             en: {
                 title: 'Real-time Speech Translation',
@@ -586,7 +593,9 @@
                 translating: 'Translation in progress…',
                 statusFinalizing: 'Finishing up, please wait…',
                 downloadTranscript: 'Download conversation transcript',
-                downloadFailed: 'Download failed'
+                downloadFailed: 'Download failed',
+                hostTranscriptLabel: 'Transcript',
+                hostTranscriptTitle: 'Create a transcript (downloadable after the session, requires guest consent)'
             }
         };
 
@@ -622,25 +631,47 @@
         const subtitleEl = document.getElementById('subtitle');
         const pttToggle = document.getElementById('pttToggle');
         const pttLabelText = document.getElementById('pttLabelText');
+        const hostTranscriptToggle = document.getElementById('hostTranscriptToggle');
+        const hostTranscriptLabelText = document.getElementById('hostTranscriptLabelText');
+        const hostTranscriptLabel = document.getElementById('hostTranscriptLabel');
+        let hostTranscriptConsent = false;
         const viewerSpeakingIndicator = document.getElementById('viewerSpeakingIndicator');
         const viewerSpeakingText = document.getElementById('viewerSpeakingText');
         const translatingIndicator = document.getElementById('translatingIndicator');
         const translatingText = document.getElementById('translatingText');
-        const pendingTranslations = new Set();
+        // Map<segmentId, enqueuedAtMs>. Pending translations get evicted after
+        // PENDING_TRANSLATION_TIMEOUT_MS so the "Übersetzung läuft" pill can't
+        // stick forever when a server-side MT call hangs without emitting a
+        // translation_error.
+        const pendingTranslations = new Map();
+        const PENDING_TRANSLATION_TIMEOUT_MS = 60 * 1000;
+
+        function prunePendingTranslations() {
+            const cutoff = Date.now() - PENDING_TRANSLATION_TIMEOUT_MS;
+            for (const [id, ts] of pendingTranslations) {
+                if (ts < cutoff) pendingTranslations.delete(id);
+            }
+        }
 
         function updateTranslatingIndicator() {
+            prunePendingTranslations();
             translatingIndicator.style.display = pendingTranslations.size > 0 ? '' : 'none';
         }
+
+        setInterval(() => {
+            if (pendingTranslations.size > 0) updateTranslatingIndicator();
+        }, 5000);
 
         function refreshPendingFromSegments(segments) {
             // Host target is German. A segment is pending iff it is finalized,
             // its source language is non-German, and no 'de' translation has
             // arrived yet.
+            const now = Date.now();
             for (const seg of segments || []) {
                 const needsGerman = seg.final && seg.src_lang && seg.src_lang !== 'de';
                 const hasGerman = seg.translations && seg.translations.de;
                 if (needsGerman && !hasGerman) {
-                    pendingTranslations.add(seg.id);
+                    if (!pendingTranslations.has(seg.id)) pendingTranslations.set(seg.id, now);
                 } else {
                     pendingTranslations.delete(seg.id);
                 }
@@ -688,7 +719,9 @@
             const btn = document.getElementById('transcriptDownloadBtn');
             if (!bar || !btn) return;
             const hasFinal = allSegments.some(s => s.final);
-            if (!viewerConsentedTranscript || !foreignLang || !hasFinal) return;
+            // Both parties must consent: the host opts in via the controls-bar
+            // toggle, the viewer via the checkbox in their privacy popup.
+            if (!hostTranscriptConsent || !viewerConsentedTranscript || !foreignLang || !hasFinal) return;
             btn.textContent = t('downloadTranscript');
             bar.classList.add('visible');
         }
@@ -823,6 +856,8 @@
 
             // PTT labels
             if (pttLabelText) pttLabelText.textContent = t('pttLabel');
+            if (hostTranscriptLabelText) hostTranscriptLabelText.textContent = t('hostTranscriptLabel');
+            if (hostTranscriptLabel) hostTranscriptLabel.title = t('hostTranscriptTitle');
             if (viewerSpeakingText) viewerSpeakingText.textContent = t('guestSpeaking');
             if (translatingText) translatingText.textContent = t('translating');
         }
@@ -838,6 +873,12 @@
             currentUiLang = e.target.value;
             localStorage.setItem('uiLang', currentUiLang);
             applyTranslations();
+        });
+
+        // Host transcript consent — must be checked before stopping the session
+        // for the download button to surface. Viewer consent is independent.
+        hostTranscriptToggle.addEventListener('change', () => {
+            hostTranscriptConsent = hostTranscriptToggle.checked;
         });
 
         // PTT toggle handler
