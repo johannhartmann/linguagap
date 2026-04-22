@@ -74,7 +74,7 @@ dev = [
     "google-genai>=1.0.0",  # Gemini dialogue gen + LLM-as-judge
     "google-cloud-texttospeech>=2.32.0",  # Cloud TTS API for Gemini TTS
     "pyyaml>=6.0",  # YAML dialogue templates
-    "python-dotenv>=1.0.0",  # Load .env files
+    "python-dotenv>=1.2.2",  # Load .env files (>=1.2.2 fixes CVE symlink-rename set_key)
 ]
 
 [tool.pytest.ini_options]
