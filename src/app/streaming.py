@@ -512,7 +512,11 @@ def run_asr_german_channel(session: StreamingSession) -> tuple[list[Segment], li
     backend = get_asr_backend()
     asr_start = time.time()
 
-    finalized_text = " ".join(s.src for s in session.segment_tracker.finalized_segments[-5:])
+    # Only seed the German prompt with prior German history — leftover
+    # foreign-role segments from a past dual-channel phase would bias Whisper
+    # the wrong way.
+    recent_final = session.segment_tracker.finalized_segments[-10:]
+    finalized_text = " ".join(s.src for s in recent_final if s.speaker_role != "foreign")[-500:]
     german_results = _transcribe_channel(
         backend,
         german_audio,
@@ -606,7 +610,14 @@ def run_asr_dual_channel(session: StreamingSession) -> tuple[list[Segment], list
 
     asr_start = time.time()
 
-    finalized_text = " ".join(s.src for s in session.segment_tracker.finalized_segments[-5:])
+    # Channel-local finalized history. Whisper is strongly biased by its
+    # initial_prompt: feeding the foreign channel German context early in a
+    # session (when only German has finalized) makes it hallucinate a German
+    # paraphrase of English audio despite language="en" being forced. Keep
+    # each channel's prompt monolingual to prevent cross-language drift.
+    recent_final = session.segment_tracker.finalized_segments[-10:]
+    german_history = " ".join(s.src for s in recent_final if s.speaker_role == "german")[-500:]
+    foreign_history = " ".join(s.src for s in recent_final if s.speaker_role == "foreign")[-500:]
 
     # Transcribe both channels via backend
     german_results = _transcribe_channel(
@@ -616,7 +627,7 @@ def run_asr_dual_channel(session: StreamingSession) -> tuple[list[Segment], list
         "SPEAKER_00",
         "german",
         force_lang="de",
-        finalized_text=finalized_text,
+        finalized_text=german_history,
     )
     foreign_results = _transcribe_channel(
         backend,
@@ -625,7 +636,7 @@ def run_asr_dual_channel(session: StreamingSession) -> tuple[list[Segment], list
         "SPEAKER_01",
         "foreign",
         force_lang=session.foreign_lang,
-        finalized_text=finalized_text,
+        finalized_text=foreign_history,
     )
 
     # Offset segment timestamps to absolute time
