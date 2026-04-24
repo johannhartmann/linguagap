@@ -2,7 +2,7 @@ replicaCount: 1
 
 image:
   repository: ghcr.io/mayflower/linguagap
-  tag: "5b72ff9"
+  tag: "2f3bf75"
   pullPolicy: IfNotPresent
 
 nameOverride: ""
