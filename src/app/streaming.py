@@ -244,6 +244,13 @@ async def _delayed_viewer_speaking_off(token: str, delay: float) -> None:
             if newly_final and entry.session.translation_queue is not None:
                 for seg in newly_final:
                     await entry.session.translation_queue.put(seg)
+            # Drain the foreign channel buffer so the next viewer PTT press
+            # starts from clean audio. Without this the 8s sliding window keeps
+            # replaying the just-released utterance into the next transcript
+            # (observed bleed: "Can you hear me clearly?" reappearing as a
+            # prefix of the *next* viewer segment).
+            entry.session.foreign_channel.reset()
+            _trace("channel_reset", tok=token[:8], party="viewer")
             if newly_final and entry.main_ws:
                 all_segments = list(entry.session.segment_tracker.finalized_segments)
                 segments_data = _serialize_segments(entry.session, all_segments)
@@ -279,6 +286,22 @@ class ChannelBuffer:
     trimmed_samples: int = 0
     start_offset_sec: float = 0.0
     started: bool = False
+
+    def reset(self) -> None:
+        """Drop buffered audio so the next utterance starts from a clean slate.
+
+        Used after PTT release: without this, the 8s sliding ASR window keeps
+        re-transcribing the just-finalized utterance every tick and the
+        trailing words bleed into the *next* PTT press's transcript. Resetting
+        ``started`` lets the next add_audio call re-anchor ``start_offset_sec``
+        to the current wall-clock — combined with reset counters this keeps
+        segment timestamps strictly ascending so SegmentTracker won't merge
+        new segments with stale finalized ones.
+        """
+        self.audio.clear()
+        self.total_samples = 0
+        self.trimmed_samples = 0
+        self.started = False
 
 
 class StreamingSession:
@@ -944,6 +967,9 @@ class WebSocketHandler:
 
         Used on PTT release: without new audio, get_current_time() freezes and
         live segments never finalize via the normal time-based threshold.
+        Also drains the host (German) channel buffer so the next press starts
+        from clean audio — otherwise the 8s sliding window keeps replaying the
+        just-released utterance into subsequent transcripts.
         """
         if self.session is None:
             return
@@ -962,6 +988,12 @@ class WebSocketHandler:
             )
             _trace("mt_put", tok=tok, seg=seg.id, qsize=self._translation_queue.qsize())
             await self._translation_queue.put(seg)
+        # Drop any audio still buffered for the host channel — the next PTT
+        # press should start from a clean window. Done unconditionally because
+        # even if no segment finalized this round, sub-second trailing audio
+        # would otherwise bleed into the next utterance.
+        self.session.german_channel.reset()
+        _trace("channel_reset", tok=tok, party="host")
         if newly_final:
             # Broadcast updated segment state so clients see final=True
             all_segments = list(self.session.segment_tracker.finalized_segments)
