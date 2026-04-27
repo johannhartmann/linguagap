@@ -110,7 +110,6 @@
             color: #888;
             margin-top: 4px;
         }
-        .char-counter.over { color: #d9534f; font-weight: 600; }
         .actions {
             display: flex;
             justify-content: center;
@@ -179,19 +178,30 @@
         @keyframes spin { to { transform: rotate(360deg); } }
 
         @media print {
-            body * { visibility: hidden; }
-            #result, #result * { visibility: visible; }
+            /* Hide everything except #result, but keep #result in normal
+               flow so the print engine paginates long translations across
+               pages (visibility:hidden + position:absolute clips on Safari). */
+            header,
+            h1,
+            .error-banner,
+            .lang-row,
+            textarea,
+            .char-counter,
+            .actions,
+            .result-section h2 {
+                display: none !important;
+            }
+            body { padding: 0; }
+            .container { max-width: none; padding: 0; margin: 0; }
+            .result-section { margin-top: 0; }
             #result {
-                position: absolute;
-                left: 0;
-                top: 0;
-                width: 100%;
                 font-size: 14pt;
                 line-height: 1.6;
-                padding: 2cm;
+                padding: 0;
                 background: transparent;
                 border: none;
                 color: #000;
+                min-height: 0;
             }
             @page { margin: 1.5cm; }
         }
@@ -223,8 +233,8 @@
             </label>
         </div>
 
-        <textarea id="sourceText" placeholder="Originaltext eingeben…" maxlength="4000"></textarea>
-        <div class="char-counter" id="charCounter">0 / 4000</div>
+        <textarea id="sourceText" placeholder="Originaltext eingeben…"></textarea>
+        <div class="char-counter" id="charCounter">Zeichen: 0</div>
 
         <div class="actions">
             <button class="primary" id="translateBtn">
@@ -243,34 +253,8 @@
     </div>
 
     <script>
-        // Same tier list as static/index.html — keep in sync when languages change.
-        const LANGUAGE_OPTIONS = [
-            { code: 'de', label: 'Deutsch' },
-            { code: 'ar', label: 'Arabic' },
-            { code: 'zh', label: 'Chinese' },
-            { code: 'nl', label: 'Dutch' },
-            { code: 'en', label: 'English' },
-            { code: 'fr', label: 'French' },
-            { code: 'it', label: 'Italian' },
-            { code: 'ja', label: 'Japanese' },
-            { code: 'ko', label: 'Korean' },
-            { code: 'pl', label: 'Polish' },
-            { code: 'pt', label: 'Portuguese' },
-            { code: 'ru', label: 'Russian' },
-            { code: 'es', label: 'Spanish' },
-            { code: 'tr', label: 'Turkish' },
-            { code: 'bg', label: 'Bulgarian (beta)' },
-            { code: 'hr', label: 'Croatian (beta)' },
-            { code: 'fa', label: 'Farsi (beta)' },
-            { code: 'hu', label: 'Hungarian (beta)' },
-            { code: 'ro', label: 'Romanian (beta)' },
-            { code: 'sr', label: 'Serbian (beta)' },
-            { code: 'uk', label: 'Ukrainian (beta)' },
-        ];
-        const MAX_CHARS = 4000;
-
-        function fillLangSelect(selectEl, defaultCode) {
-            for (const { code, label } of LANGUAGE_OPTIONS) {
+        function fillLangSelect(selectEl, options, defaultCode) {
+            for (const { code, label } of options) {
                 const opt = document.createElement('option');
                 opt.value = code;
                 opt.textContent = label;
@@ -281,8 +265,18 @@
 
         const srcLang = document.getElementById('srcLang');
         const tgtLang = document.getElementById('tgtLang');
-        fillLangSelect(srcLang, 'de');
-        fillLangSelect(tgtLang, 'en');
+        // Populate dropdowns from the server's language registry. The submit
+        // button stays disabled until both lists are filled.
+        (async () => {
+            const resp = await fetch('/api/languages?scope=translate');
+            if (!resp.ok) {
+                showError('Sprachliste konnte nicht geladen werden.');
+                return;
+            }
+            const options = await resp.json();
+            fillLangSelect(srcLang, options, 'de');
+            fillLangSelect(tgtLang, options, 'en');
+        })();
 
         const sourceText = document.getElementById('sourceText');
         const charCounter = document.getElementById('charCounter');
@@ -294,9 +288,7 @@
         const errorBanner = document.getElementById('errorBanner');
 
         function updateCounter() {
-            const n = sourceText.value.length;
-            charCounter.textContent = `${n} / ${MAX_CHARS}`;
-            charCounter.classList.toggle('over', n > MAX_CHARS);
+            charCounter.textContent = `Zeichen: ${sourceText.value.length}`;
         }
         sourceText.addEventListener('input', updateCounter);
         updateCounter();

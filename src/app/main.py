@@ -39,6 +39,7 @@ from app.auth import (
     verify_credentials,
 )
 from app.backends import get_asr_backend, get_summarization_backend, get_translation_backend
+from app.languages import speech_languages, translation_languages
 from app.mt import translate_texts
 from app.scripts.asr_smoke import generate_silence_wav
 from app.streaming import get_metrics, handle_viewer_websocket, handle_websocket
@@ -307,9 +308,37 @@ async def mt_smoke():
     return {"input": texts, "output": result}
 
 
-# Soft cap kept well below MT_N_CTX (4096 tokens) so a single request can't
-# blow the model context. ~4000 chars ≈ 1000–1500 tokens for Latin scripts.
+@app.get("/api/languages")
+async def api_languages(scope: str = "speech"):
+    """Single source of truth for UI language dropdowns.
+
+    Public — viewer.html is served without a session cookie, and the list
+    itself isn't sensitive. Frontend pages call this on load and populate
+    both their dropdowns and any local code→label maps from the result.
+
+    scope=speech (default): foreign speech languages for index/viewer.
+    scope=translate: speech languages plus German (translate page).
+    """
+    if scope == "translate":
+        return translation_languages()
+    return speech_languages()
+
+
+# Soft caps kept well below MT_N_CTX (4096 tokens). Latin/Cyrillic/Arabic
+# scripts produce ~0.3–0.7 tokens per char with TranslateGemma's tokenizer;
+# CJK scripts produce ~1.5–3 tokens per char, so allow far fewer characters
+# for those source languages or a long input would blow the context window.
 TRANSLATE_TEXT_MAX_CHARS = 4000
+TRANSLATE_TEXT_MAX_CHARS_DENSE = 1500
+_DENSE_TOKEN_LANGS: frozenset[str] = frozenset({"zh", "ja", "ko"})
+
+
+def _max_translate_chars(src_lang: str) -> int:
+    return (
+        TRANSLATE_TEXT_MAX_CHARS_DENSE
+        if src_lang in _DENSE_TOKEN_LANGS
+        else TRANSLATE_TEXT_MAX_CHARS
+    )
 
 
 class TranslateRequest(BaseModel):
@@ -325,14 +354,24 @@ async def translate_page():
 
 @app.post("/api/translate", dependencies=[Depends(require_auth)])
 async def api_translate(req: TranslateRequest):
-    if len(req.text) > TRANSLATE_TEXT_MAX_CHARS:
+    max_chars = _max_translate_chars(req.src_lang)
+    if len(req.text) > max_chars:
         raise HTTPException(
             status_code=400,
-            detail=f"Text exceeds maximum length of {TRANSLATE_TEXT_MAX_CHARS} characters",
+            detail=(
+                f"Text zu lang ({len(req.text)} Zeichen, "
+                f"Maximum {max_chars} für Quellsprache {req.src_lang!r})"
+            ),
         )
     if not req.text.strip():
         return {"output": ""}
-    output = await asyncio.to_thread(translate_texts, [req.text], req.src_lang, req.tgt_lang)
+    if req.src_lang == req.tgt_lang:
+        return {"output": req.text}
+    try:
+        output = await asyncio.to_thread(translate_texts, [req.text], req.src_lang, req.tgt_lang)
+    except Exception:
+        logger.exception("Text-to-text translation failed")
+        raise HTTPException(status_code=500, detail="Übersetzung fehlgeschlagen") from None
     return {"output": output[0] if output else ""}
 
 

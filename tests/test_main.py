@@ -238,6 +238,24 @@ class TestTranslateEndpoint:
         assert response.json() == {"output": ""}
         mock_models["translate"].assert_not_called()
 
+    def test_translate_same_language_returns_input(self, client, mock_models):
+        response = client.post(
+            "/api/translate",
+            json={"text": "Hallo", "src_lang": "de", "tgt_lang": "de"},
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {"output": "Hallo"}
+        mock_models["translate"].assert_not_called()
+
+    def test_translate_boundary_4000_chars_passes(self, client, mock_models):
+        mock_models["translate"].return_value = ["ok"]
+        response = client.post(
+            "/api/translate",
+            json={"text": "x" * 4000, "src_lang": "de", "tgt_lang": "en"},
+        )
+        assert response.status_code == 200
+
     def test_translate_oversize_rejected(self, client, mock_models):
         response = client.post(
             "/api/translate",
@@ -247,8 +265,26 @@ class TestTranslateEndpoint:
         assert response.status_code == 400
         mock_models["translate"].assert_not_called()
 
-    def test_translate_requires_auth(self, mock_models, tmp_path):  # noqa: ARG002
-        """Unauthenticated POST /api/translate must return 401."""
+    def test_translate_dense_lang_has_lower_cap(self, client, mock_models):
+        """CJK source languages have a 1500-char cap due to higher token density."""
+        response = client.post(
+            "/api/translate",
+            json={"text": "x" * 1501, "src_lang": "zh", "tgt_lang": "en"},
+        )
+        assert response.status_code == 400
+        mock_models["translate"].assert_not_called()
+
+    def test_translate_backend_failure_returns_500(self, client, mock_models):
+        mock_models["translate"].side_effect = RuntimeError("model exploded")
+        response = client.post(
+            "/api/translate",
+            json={"text": "Hallo", "src_lang": "de", "tgt_lang": "en"},
+        )
+        assert response.status_code == 500
+        assert response.json()["detail"] == "Übersetzung fehlgeschlagen"
+
+    def test_translate_requires_auth(self, mock_models, tmp_path):
+        """Unauthenticated POST /api/translate must return 401 before any backend call."""
         with (
             patch("app.auth.DATA_DIR", tmp_path),
             patch("app.auth.ACCOUNTS_FILE", tmp_path / "accounts.json"),
@@ -264,8 +300,60 @@ class TestTranslateEndpoint:
                     json={"text": "Hi", "src_lang": "de", "tgt_lang": "en"},
                 )
                 assert response.status_code == 401
+        mock_models["translate"].assert_not_called()
 
     def test_translate_page_serves_html(self, client):
         response = client.get("/translate")
         assert response.status_code == 200
         assert "text/html" in response.headers.get("content-type", "")
+
+
+class TestLanguagesEndpoint:
+    """Tests for the /api/languages registry endpoint."""
+
+    def test_speech_scope_is_alphabetical_within_tier(self, client):
+        response = client.get("/api/languages")
+        assert response.status_code == 200
+        langs = response.json()
+        codes_a = [lang["code"] for lang in langs if lang["tier"] == "a"]
+        codes_b = [lang["code"] for lang in langs if lang["tier"] == "b"]
+        # Tier A precedes tier B
+        assert [lang["tier"] for lang in langs] == ["a"] * len(codes_a) + ["b"] * len(codes_b)
+        # Each tier sorted alphabetically by label
+        labels_a = [lang["label"] for lang in langs if lang["tier"] == "a"]
+        labels_b = [lang["label"] for lang in langs if lang["tier"] == "b"]
+        assert labels_a == sorted(labels_a)
+        assert labels_b == sorted(labels_b)
+
+    def test_speech_scope_excludes_german(self, client):
+        langs = client.get("/api/languages").json()
+        assert "de" not in {lang["code"] for lang in langs}
+
+    def test_beta_suffix_on_tier_b(self, client):
+        langs = client.get("/api/languages").json()
+        for lang in langs:
+            if lang["tier"] == "b":
+                assert lang["label"].endswith(" (beta)")
+            else:
+                assert "(beta)" not in lang["label"]
+
+    def test_translate_scope_includes_german_first(self, client):
+        langs = client.get("/api/languages?scope=translate").json()
+        assert langs[0] == {"code": "de", "label": "Deutsch", "tier": "host"}
+        # Speech languages still present after the German entry
+        assert any(lang["code"] == "en" for lang in langs[1:])
+
+    def test_languages_is_public(self, mock_models, tmp_path):  # noqa: ARG002
+        """Endpoint must be reachable without a session — viewer.html needs it."""
+        with (
+            patch("app.auth.DATA_DIR", tmp_path),
+            patch("app.auth.ACCOUNTS_FILE", tmp_path / "accounts.json"),
+            patch("app.auth.LOGOS_DIR", tmp_path / "logos"),
+            patch("app.main.LOGOS_DIR", tmp_path / "logos"),
+        ):
+            (tmp_path / "logos").mkdir(exist_ok=True)
+            from app.main import app
+
+            with TestClient(app) as anon_client:
+                response = anon_client.get("/api/languages")
+                assert response.status_code == 200
