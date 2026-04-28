@@ -2,7 +2,7 @@ replicaCount: 1
 
 image:
   repository: ghcr.io/mayflower/linguagap
-  tag: "cd3032e"
+  tag: "eb501d2"
   pullPolicy: IfNotPresent
 
 nameOverride: ""
