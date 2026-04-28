@@ -734,6 +734,22 @@
         const viewerLangSelect = document.getElementById('viewerLangSelect');
         const ttsToggle = document.getElementById('ttsToggle');
 
+        // Populate the mic-bar language dropdown from /api/languages.
+        // Declared here (before any consumer) because `const` is not hoisted
+        // — referencing it earlier in the script trips the temporal dead
+        // zone, which halts the rest of init.
+        const langsReady = (async () => {
+            const resp = await fetch('/api/languages');
+            if (!resp.ok) return;
+            const langs = await resp.json();
+            for (const { code, label } of langs) {
+                const opt = document.createElement('option');
+                opt.value = code;
+                opt.textContent = label;
+                viewerLangSelect.appendChild(opt);
+            }
+        })();
+
         // Sync mic-bar selector if language was restored from consent
         // sessionStorage. Wait for the dropdown to be populated first.
         langsReady.then(() => {
@@ -805,23 +821,6 @@
                 processTTSQueue();
             }
         }
-
-        // Populate the mic-bar language dropdown from /api/languages.
-        // langsReady resolves once the options are in the DOM — code that
-        // reads viewerLangSelect options on init must await it (see the
-        // foreignLang restore below).
-        const langsReady = (async () => {
-            const resp = await fetch('/api/languages');
-            if (!resp.ok) return;
-            const langs = await resp.json();
-            const select = document.getElementById('viewerLangSelect');
-            for (const { code, label } of langs) {
-                const opt = document.createElement('option');
-                opt.value = code;
-                opt.textContent = label;
-                select.appendChild(opt);
-            }
-        })();
 
         // (foreignLang is declared earlier in the consent block)
         let segments = [];
