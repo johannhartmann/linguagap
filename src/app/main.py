@@ -42,6 +42,7 @@ from app.backends import get_asr_backend, get_summarization_backend, get_transla
 from app.languages import speech_languages, translation_languages
 from app.mt import translate_texts
 from app.scripts.asr_smoke import generate_silence_wav
+from app.session_registry import registry
 from app.streaming import get_metrics, handle_viewer_websocket, handle_websocket
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
@@ -384,6 +385,18 @@ class TTSRequest(BaseModel):
 async def tts_endpoint(request: TTSRequest):
     from app.tts import TTS_SUPPORTED_LANGS, synthesize_wav
 
+    if request.lang not in TTS_SUPPORTED_LANGS:
+        raise HTTPException(status_code=404, detail="Language not supported for TTS")
+    audio_bytes = await asyncio.to_thread(synthesize_wav, request.text, request.lang)
+    return Response(content=audio_bytes, media_type="audio/wav")
+
+
+@app.post("/api/viewer/{token}/tts")
+async def viewer_tts_endpoint(token: str, request: TTSRequest):
+    from app.tts import TTS_SUPPORTED_LANGS, synthesize_wav
+
+    if await registry.get(token) is None:
+        raise HTTPException(status_code=404, detail="Session not found")
     if request.lang not in TTS_SUPPORTED_LANGS:
         raise HTTPException(status_code=404, detail="Language not supported for TTS")
     audio_bytes = await asyncio.to_thread(synthesize_wav, request.text, request.lang)

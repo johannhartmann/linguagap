@@ -451,7 +451,7 @@
             </select>
             <br>
             <div class="mic-buttons">
-                <button class="tts-toggle" id="ttsToggle" title="Text-to-Speech">&#128264;</button>
+                <button class="tts-toggle" id="ttsToggle">&#129296;</button>
                 <button class="mic-btn" id="micBtn" title="Start microphone" disabled>&#127908;</button>
                 <button class="mute-btn" id="muteBtn" title="Mute">&#128263;</button>
             </div>
@@ -469,14 +469,16 @@
                 connecting: 'Verbindung wird hergestellt\u2026', connected: 'Verbunden', live: 'Live', waiting: 'Warte auf Sitzungsbeginn\u2026', sessionEnded: 'Sitzung beendet', invalidLink: 'Ungültiger oder abgelaufener Link', disconnected: 'Getrennt', connError: 'Verbindungsfehler',
                 selectLang: '-- Ihre Sprache --', selectLangFirst: 'Bitte wählen Sie zuerst Ihre Sprache', waitingForSession: 'Warte auf Sitzung\u2026', tapToSpeak: 'Zum Sprechen tippen', listening: 'Hört zu\u2026', muted: 'Stumm', micDenied: 'Mikrofonzugriff verweigert', micNotSupported: 'Mikrofon nicht unterstützt', requiresHttps: 'HTTPS erforderlich',
                 endedTitle: 'Sitzung beendet', endedBody: 'Die Aufnahme wurde gestoppt. Das Transkript bleibt zur Ansicht erhalten.',
-                translationFailed: 'Übersetzung fehlgeschlagen'
+                translationFailed: 'Übersetzung fehlgeschlagen',
+                ttsTooltip: 'Übersetzung vorlesen'
             },
             en: {
                 title: 'Privacy & Usage Notice', body: 'We use interpreter software. Data protection is guaranteed \u2013 no data is stored. Please speak clearly, slowly, and in short, simple sentences without dialect. Pause after one or two sentences for the translation. In case of misunderstandings, please repeat or rephrase. Please click here to accept the data protection conditions. Note: The SGA may make errors. Please verify important information.', accept: 'Accept',
                 connecting: 'Connecting\u2026', connected: 'Connected', live: 'Live', waiting: 'Waiting for session to start\u2026', sessionEnded: 'Session ended', invalidLink: 'Invalid or expired link', disconnected: 'Disconnected', connError: 'Connection error',
                 selectLang: '-- Your language --', selectLangFirst: 'Select your language first', waitingForSession: 'Waiting for session\u2026', tapToSpeak: 'Tap to speak', listening: 'Listening\u2026', muted: 'Muted', micDenied: 'Mic access denied', micNotSupported: 'Mic not supported', requiresHttps: 'Requires HTTPS',
                 endedTitle: 'Session Ended', endedBody: 'The recording has stopped. This transcript is preserved for your review.',
-                translationFailed: 'Translation failed'
+                translationFailed: 'Translation failed',
+                ttsTooltip: 'Read translation aloud'
             },
             fr: {
                 title: 'Avis de confidentialit\u00e9 et d\u2019utilisation', body: 'Nous utilisons un logiciel d\u2019interpr\u00e9tation. La protection des donn\u00e9es est garantie \u2013 aucune donn\u00e9e n\u2019est enregistr\u00e9e. Veuillez parler clairement, lentement et en phrases courtes et simples, sans dialecte. Faites une pause apr\u00e8s une ou deux phrases pour la traduction. En cas de malentendus, veuillez r\u00e9p\u00e9ter ou reformuler. Veuillez cliquer ici pour accepter les conditions de protection des donn\u00e9es. Remarque\u00a0: Le SGA peut faire des erreurs. V\u00e9rifiez les informations importantes.', accept: 'Accepter',
@@ -767,13 +769,20 @@
         let ttsPlaying = false;
         const spokenSegments = new Set();
         let ttsEnabled = localStorage.getItem('ttsEnabled') === 'true';
-        let ttsAudioCtx = null;
+        let ttsAudio = null;
+        // 44-byte silent PCM WAV data-URI used to unlock autoplay during the
+        // toggle gesture. Without this, the first programmatic play() that
+        // follows MT can be blocked on mobile because the gesture context is
+        // already gone by the time the audio is fetched.
+        const TTS_SILENT_WAV =
+            'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=';
 
         function updateTTSToggle() {
             const supported = foreignLang && TTS_SUPPORTED_LANGS.has(foreignLang);
             ttsToggle.style.display = supported ? 'block' : 'none';
             ttsToggle.classList.toggle('active', ttsEnabled);
-            ttsToggle.textContent = ttsEnabled ? '\u{1F50A}' : '\u{1F508}';
+            ttsToggle.textContent = ttsEnabled ? '\u{1F5E3}\u{FE0F}' : '\u{1F910}';
+            ttsToggle.title = t('ttsTooltip');
         }
 
         ttsToggle.addEventListener('click', () => {
@@ -781,11 +790,17 @@
             localStorage.setItem('ttsEnabled', ttsEnabled);
             updateTTSToggle();
             if (ttsEnabled) {
-                // Create AudioContext on user gesture (required by mobile Safari)
-                if (!ttsAudioCtx) ttsAudioCtx = new AudioContext({ sampleRate: 24000 });
-                if (ttsAudioCtx.state === 'suspended') ttsAudioCtx.resume();
+                if (!ttsAudio) {
+                    ttsAudio = new Audio();
+                    ttsAudio.preload = 'auto';
+                }
+                ttsAudio.src = TTS_SILENT_WAV;
+                ttsAudio.play().catch((e) => console.warn('TTS unlock failed:', e));
             } else {
                 ttsQueue.length = 0;
+                if (ttsAudio) {
+                    try { ttsAudio.pause(); } catch (_) { /* ignore */ }
+                }
             }
         });
 
@@ -801,23 +816,47 @@
             if (ttsQueue.length === 0) { ttsPlaying = false; return; }
             ttsPlaying = true;
             const { text, lang } = ttsQueue.shift();
+            let blobUrl = null;
             try {
-                const resp = await fetch('/api/tts', {
+                const resp = await fetch(`/api/viewer/${token}/tts`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ text, lang })
                 });
                 if (!resp.ok) { processTTSQueue(); return; }
-                const arrayBuffer = await resp.arrayBuffer();
-                if (!ttsAudioCtx) ttsAudioCtx = new AudioContext({ sampleRate: 24000 });
-                const audioBuffer = await ttsAudioCtx.decodeAudioData(arrayBuffer);
-                const source = ttsAudioCtx.createBufferSource();
-                source.buffer = audioBuffer;
-                source.connect(ttsAudioCtx.destination);
-                source.onended = () => processTTSQueue();
-                source.start();
+                const blob = await resp.blob();
+                blobUrl = URL.createObjectURL(blob);
+                if (!ttsAudio) {
+                    ttsAudio = new Audio();
+                    ttsAudio.preload = 'auto';
+                }
+
+                let advanced = false;
+                let watchdog = null;
+                const advance = () => {
+                    if (advanced) return;
+                    advanced = true;
+                    if (watchdog) clearTimeout(watchdog);
+                    if (blobUrl) URL.revokeObjectURL(blobUrl);
+                    ttsAudio.onended = null;
+                    ttsAudio.onerror = null;
+                    processTTSQueue();
+                };
+                ttsAudio.onended = advance;
+                ttsAudio.onerror = advance;
+                // Watchdog: ~12 chars/sec is a slow speaking rate; +6s slack
+                // covers tab-background pauses without deadlocking the queue.
+                const estDurMs = Math.max(3000, Math.ceil(text.length / 12) * 1000) + 6000;
+                watchdog = setTimeout(advance, estDurMs);
+
+                ttsAudio.src = blobUrl;
+                ttsAudio.play().catch((e) => {
+                    console.error('TTS play failed:', e);
+                    advance();
+                });
             } catch (e) {
                 console.error('TTS error:', e);
+                if (blobUrl) URL.revokeObjectURL(blobUrl);
                 processTTSQueue();
             }
         }
