@@ -47,6 +47,27 @@ declare const qrcode: ((
     [key: string]: any;
 }) & { [key: string]: any };
 
+/** Shared auth guard — see static/js/lib/auth_guard.js. */
+declare const LinguaGapAuth: {
+    requireUser(): Promise<{
+        email: string;
+        display_name: string;
+        logo_url: string;
+        is_admin: boolean;
+    } | null>;
+    wireLogoutButton(buttonId: string, redirectTo?: string): void;
+};
+
+/** Shared i18n resolver — see static/js/lib/i18n.js. */
+declare const LinguaGapI18n: {
+    t(
+        maps: ReadonlyArray<Record<string, Record<string, string>>>,
+        currentLang: string | null | undefined,
+        key: string,
+        replacements?: Record<string, string | number>
+    ): string;
+};
+
 /**
  * Chrome historically exposed extra google-prefixed audio constraints. They
  * still work but aren't part of the standard MediaTrackConstraints typing.

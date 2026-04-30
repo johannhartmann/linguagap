@@ -758,16 +758,15 @@
         },
     };
 
-    // Translation helper — uses foreignLang if set, falls back to English then German
+    /**
+     * Translation lookup — delegates to the shared resolver. The viewer
+     * keeps two maps (consent strings + PTT strings) and the shared
+     * function walks both before falling back to en → de → key.
+     *
+     * @param {string} key
+     */
     function t(key) {
-        return (
-            (foreignLang && I18N[foreignLang] && I18N[foreignLang][key]) ||
-            (foreignLang && PTT_I18N[foreignLang] && PTT_I18N[foreignLang][key]) ||
-            I18N.en?.[key] ||
-            PTT_I18N.en?.[key] ||
-            I18N.de?.[key] ||
-            key
-        );
+        return LinguaGapI18n.t([I18N, PTT_I18N], foreignLang, key);
     }
 
     // ---------------------------------------------------------------

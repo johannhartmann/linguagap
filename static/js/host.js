@@ -2,24 +2,14 @@
 // segment rendering, translation display, QR sharing, summary download.
 
 (() => {
-    // Auth: load branding and wire logout
-    (async () => {
-        try {
-            const resp = await fetch('/api/me');
-            if (resp.ok) {
-                const user = await resp.json();
-                if (user.is_admin) {
-                    document.getElementById('adminLink').style.display = '';
-                }
-            }
-        } catch (e) {
-            console.error('Auth check failed:', e);
+    // Auth: load branding (admin link) + wire logout via the shared guard.
+    LinguaGapAuth.requireUser().then((user) => {
+        if (user?.is_admin) {
+            const adminLink = document.getElementById('adminLink');
+            if (adminLink) adminLink.style.display = '';
         }
-    })();
-    document.getElementById('logoutBtn').addEventListener('click', async () => {
-        await fetch('/api/logout', { method: 'POST' });
-        window.location.href = '/login';
     });
+    LinguaGapAuth.wireLogoutButton('logoutBtn');
 
     // Translations for UI internationalization
     const TRANSLATIONS = {
@@ -106,13 +96,16 @@
     // Current UI language (default: German)
     let currentUiLang = localStorage.getItem('uiLang') || 'de';
 
-    // Translation function
+    /**
+     * Translation lookup — delegates to the shared resolver in
+     * static/js/lib/i18n.js so the fallback chain (current → en → de → key)
+     * stays consistent with viewer.js.
+     *
+     * @param {string} key
+     * @param {Record<string, string | number>} [replacements]
+     */
     function t(key, replacements = {}) {
-        let text = TRANSLATIONS[currentUiLang]?.[key] || TRANSLATIONS.en?.[key] || key;
-        for (const [k, v] of Object.entries(replacements)) {
-            text = text.replace(`{${k}}`, v);
-        }
-        return text;
+        return LinguaGapI18n.t([TRANSLATIONS], currentUiLang, key, replacements);
     }
 
     const startBtn = /** @type {HTMLButtonElement} */ (document.getElementById('startBtn'));

@@ -119,21 +119,7 @@
 
     printBtn.addEventListener('click', () => window.print());
 
-    // Auth check (mirrors index.html); 401 → /login.
-    (async () => {
-        try {
-            const resp = await fetch('/api/me');
-            if (!resp.ok) {
-                window.location.href = '/login';
-            }
-        } catch (e) {
-            console.error('Auth check failed:', e);
-        }
-    })();
-
-    const logoutBtn = /** @type {HTMLButtonElement} */ (document.getElementById('logoutBtn'));
-    logoutBtn.addEventListener('click', async () => {
-        await fetch('/api/logout', { method: 'POST' });
-        window.location.href = '/login';
-    });
+    // Auth + logout via the shared guard.
+    LinguaGapAuth.requireUser();
+    LinguaGapAuth.wireLogoutButton('logoutBtn');
 })();
