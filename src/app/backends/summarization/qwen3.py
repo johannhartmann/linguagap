@@ -12,8 +12,12 @@ from __future__ import annotations
 import logging
 import os
 import re
+from typing import TYPE_CHECKING
 
 from app.backends.base import SummarizationBackend
+
+if TYPE_CHECKING:
+    from llama_cpp import Llama
 
 logger = logging.getLogger(__name__)
 
@@ -45,13 +49,16 @@ class Qwen3SummarizationBackend(SummarizationBackend):
     """Qwen3-4B summarization backend via llama-cpp-python."""
 
     def __init__(self) -> None:
-        self._llm = None
+        self._llm: Llama | None = None
 
     def load_model(self) -> None:
+        self._get_llm()
+
+    def _get_llm(self) -> Llama:
         if self._llm is not None:
-            return
+            return self._llm
         from huggingface_hub import hf_hub_download
-        from llama_cpp import Llama
+        from llama_cpp import Llama as _Llama
 
         logger.info("Downloading summarization model: %s/%s", SUMM_MODEL_REPO, SUMM_MODEL_FILE)
         model_path = hf_hub_download(  # nosec B615
@@ -59,7 +66,7 @@ class Qwen3SummarizationBackend(SummarizationBackend):
             filename=SUMM_MODEL_FILE,
         )
         logger.info("Loading summarization model from: %s", model_path)
-        self._llm = Llama(
+        self._llm = _Llama(
             model_path=model_path,
             n_gpu_layers=SUMM_N_GPU_LAYERS,
             n_ctx=SUMM_N_CTX,
@@ -68,11 +75,12 @@ class Qwen3SummarizationBackend(SummarizationBackend):
             use_mmap=False,
         )
         logger.info("Summarization model loaded")
+        return self._llm
 
     def warmup(self) -> None:
-        self.load_model()
+        llm = self._get_llm()
         # Quick warmup: generate a short completion
-        self._llm.create_chat_completion(
+        llm.create_chat_completion(
             messages=[{"role": "user", "content": "Hello"}],
             max_tokens=16,
         )
@@ -90,7 +98,7 @@ class Qwen3SummarizationBackend(SummarizationBackend):
             logger.warning("Unsupported language '%s' for summary, using 'English'", foreign_lang)
             foreign_lang = "en"
 
-        self.load_model()
+        llm = self._get_llm()
         foreign_name = LANG_NAMES.get(foreign_lang, foreign_lang)
 
         # Build conversation with original text
@@ -118,7 +126,7 @@ GERMAN: [same summary in German]"""
 
         messages = [{"role": "user", "content": prompt}]
 
-        output = self._llm.create_chat_completion(
+        output = llm.create_chat_completion(
             messages=messages,
             max_tokens=2048,
             temperature=0.5,

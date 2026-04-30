@@ -32,8 +32,10 @@ import logging
 import os
 import time
 from collections import deque
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
+from typing import Any
 
 import numpy as np
 from fastapi import WebSocket
@@ -83,7 +85,7 @@ def _trace(event: str, **fields) -> None:
 _executor = ThreadPoolExecutor(max_workers=2)
 
 # Metrics
-_metrics = {
+_metrics: dict[str, deque[float]] = {
     "asr_times": deque(maxlen=100),
     "mt_times": deque(maxlen=100),
     "diar_times": deque(maxlen=100),
@@ -779,7 +781,7 @@ class WebSocketHandler:
     # Message dispatch
     # ------------------------------------------------------------------
 
-    async def _handle_message(self, message: dict) -> None:
+    async def _handle_message(self, message: Mapping[str, Any]) -> None:
         if "text" in message:
             data = json.loads(message["text"])
             msg_type = data.get("type")
@@ -1420,7 +1422,8 @@ class WebSocketHandler:
     async def _cleanup(self) -> None:
         self._running = False
         await _maybe_broadcast(self.session_token, {"type": "session_ended"})
-        await registry.unregister(self.session_token)
+        if self.session_token is not None:
+            await registry.unregister(self.session_token)
         await self._cancel_task("_asr_task")
         await self._cancel_task("_mt_task")
         await self._cancel_task("_host_speaking_off_task")
@@ -1447,7 +1450,7 @@ async def handle_viewer_websocket(websocket: WebSocket, token: str) -> None:
     try:
         # Check if session is already active
         entry = await registry.get(token)
-        if entry and entry.is_active:
+        if entry and entry.session is not None:
             # Session is active, send current state
             session = entry.session
             live_segments = [cs.segment for cs in session.segment_tracker.cumulative_segments]

@@ -8,9 +8,13 @@ from __future__ import annotations
 
 import logging
 import os
+from typing import TYPE_CHECKING
 
 from app.backends.base import TranslationBackend
 from app.languages import LANG_INFO
+
+if TYPE_CHECKING:
+    from llama_cpp import Llama
 
 logger = logging.getLogger(__name__)
 
@@ -24,13 +28,16 @@ class TranslateGemmaBackend(TranslationBackend):
     """TranslateGemma 12B translation backend via llama-cpp-python."""
 
     def __init__(self) -> None:
-        self._llm = None
+        self._llm: Llama | None = None
 
     def load_model(self) -> None:
+        self._get_llm()
+
+    def _get_llm(self) -> Llama:
         if self._llm is not None:
-            return
+            return self._llm
         from huggingface_hub import hf_hub_download
-        from llama_cpp import Llama
+        from llama_cpp import Llama as _Llama
 
         logger.info("Downloading MT model: %s/%s", MT_MODEL_REPO, MT_MODEL_FILE)
         model_path = hf_hub_download(  # nosec B615
@@ -38,7 +45,7 @@ class TranslateGemmaBackend(TranslationBackend):
             filename=MT_MODEL_FILE,
         )
         logger.info("Loading MT model from: %s", model_path)
-        self._llm = Llama(
+        self._llm = _Llama(
             model_path=model_path,
             n_gpu_layers=MT_N_GPU_LAYERS,
             n_ctx=MT_N_CTX,
@@ -46,6 +53,7 @@ class TranslateGemmaBackend(TranslationBackend):
             use_mmap=False,  # Sequential read - faster on network storage
         )
         logger.info("MT model loaded")
+        return self._llm
 
     def warmup(self) -> None:
         self.load_model()
@@ -61,7 +69,7 @@ class TranslateGemmaBackend(TranslationBackend):
             logger.warning("Unsupported target language '%s', falling back to 'en'", tgt_lang)
             tgt_lang = "en"
 
-        self.load_model()
+        llm = self._get_llm()
         _, src_code = LANG_INFO[src_lang]
         _, tgt_code = LANG_INFO[tgt_lang]
 
@@ -85,7 +93,7 @@ class TranslateGemmaBackend(TranslationBackend):
                 },
             ]
 
-            output = self._llm.create_chat_completion(
+            output = llm.create_chat_completion(
                 messages=messages,
                 max_tokens=256,
                 temperature=0.3,

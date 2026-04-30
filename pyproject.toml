@@ -149,6 +149,25 @@ invalid-argument-type = "ignore"  # llama-cpp-python complex types
 not-subscriptable = "ignore"  # llama-cpp-python return types
 possibly-missing-attribute = "ignore"  # llama-cpp-python nullable fields
 
+[tool.mypy]
+python_version = "3.12"
+explicit_package_bases = true
+namespace_packages = true
+ignore_missing_imports = true
+mypy_path = "src"
+files = ["src/app"]
+
+[[tool.mypy.overrides]]
+# llama-cpp-python's chat-completion API uses TypedDicts that don't accept
+# loose dict literals at call sites, and the return type is a union of
+# response/stream-iterator that mypy can't narrow without runtime checks.
+# Mirrors the [tool.ty.rules] suppressions for the same reason.
+module = [
+    "app.backends.translation.translategemma",
+    "app.backends.summarization.qwen3",
+]
+disable_error_code = ["arg-type", "index", "union-attr"]
+
 [tool.uv.sources]
 # Force torch packages from cu129 index for CUDA 12.9 / cuDNN 9.8+ compatibility
 torch = { index = "pytorch-cu129" }

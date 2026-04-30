@@ -45,7 +45,7 @@ PIPER_VOICES: dict[str, tuple[str, str]] = {
 TTS_SUPPORTED_LANGS: set[str] = set(PIPER_VOICES.keys())
 
 _voices: dict[str, object] = {}
-_metrics = {"tts_times": deque(maxlen=100)}
+_metrics: dict[str, deque[float]] = {"tts_times": deque(maxlen=100)}
 
 
 def get_tts_metrics() -> dict:

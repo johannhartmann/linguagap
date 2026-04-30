@@ -8,11 +8,15 @@ from __future__ import annotations
 
 import logging
 import os
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from app.backends.base import ASRBackend
 from app.backends.types import ASRResult, ASRSegment
+
+if TYPE_CHECKING:
+    from faster_whisper import WhisperModel
 
 logger = logging.getLogger(__name__)
 
@@ -294,33 +298,37 @@ class WhisperASRBackend(ASRBackend):
     }
 
     def __init__(self) -> None:
-        self._model = None
+        self._model: WhisperModel | None = None
 
     def load_model(self) -> None:
+        self._get_model()
+
+    def _get_model(self) -> WhisperModel:
         if self._model is not None:
-            return
-        from faster_whisper import WhisperModel
+            return self._model
+        from faster_whisper import WhisperModel as _WhisperModel
 
         logger.info("  Loading WhisperModel: %s", ASR_MODEL)
         logger.info("  Device: %s, Compute type: %s", ASR_DEVICE, ASR_COMPUTE_TYPE)
-        self._model = WhisperModel(
+        self._model = _WhisperModel(
             ASR_MODEL,
             device=ASR_DEVICE,
             compute_type=ASR_COMPUTE_TYPE,
         )
         logger.info("  WhisperModel loaded")
+        return self._model
 
     def warmup(self) -> None:
-        self.load_model()
+        model = self._get_model()
         logger.debug("  Running test transcription...")
         silence = np.zeros(16000, dtype=np.float32)
-        list(self._model.transcribe(silence))
+        list(model.transcribe(silence))
         logger.info("  ASR warmup complete")
 
     def transcribe_file(self, path: str) -> ASRResult:
         """Transcribe audio from a file path using faster-whisper's native support."""
-        self.load_model()
-        segments, info = self._model.transcribe(path)
+        model = self._get_model()
+        segments, info = model.transcribe(path)
         result_segments = [
             ASRSegment(start=seg.start, end=seg.end, text=seg.text, language=info.language)
             for seg in segments
@@ -338,7 +346,7 @@ class WhisperASRBackend(ASRBackend):
         language: str | None = None,
         initial_prompt: str | None = None,
     ) -> ASRResult:
-        self.load_model()
+        model = self._get_model()
 
         # Handle unsupported languages
         whisper_lang = language
@@ -351,7 +359,7 @@ class WhisperASRBackend(ASRBackend):
 
         use_multilingual = whisper_lang is None or whisper_lang == "unknown"
 
-        segments, info = self._model.transcribe(
+        segments, info = model.transcribe(
             audio,
             language=whisper_lang if not use_multilingual else None,
             beam_size=1,
@@ -409,7 +417,7 @@ class WhisperASRBackend(ASRBackend):
 
     def post_process(self, segments: list[ASRSegment]) -> list[ASRSegment]:
         """Filter hallucinations and deloop repeated text."""
-        result = []
+        result: list[ASRSegment] = []
         for seg in segments:
             text = seg.text
             duration = seg.end - seg.start
