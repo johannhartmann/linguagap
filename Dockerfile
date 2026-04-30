@@ -31,7 +31,7 @@ ENV FORCE_CMAKE=1
 ARG ASR_BACKEND=whisper
 ARG MT_BACKEND=translategemma
 ARG SUMM_BACKEND=
-ARG TTS_BACKEND=kugelaudio
+ARG TTS_BACKEND=piper
 
 WORKDIR /app
 
@@ -76,7 +76,7 @@ COPY static/ ./static/
 ARG ASR_BACKEND=whisper
 ARG MT_BACKEND=translategemma
 ARG SUMM_BACKEND=
-ARG TTS_BACKEND=kugelaudio
+ARG TTS_BACKEND=piper
 
 # Set PYTHONPATH to include src directory
 ENV PYTHONPATH=/app/src

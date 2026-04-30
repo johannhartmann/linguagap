@@ -16,13 +16,15 @@ services:
       - "0.0.0.0:8000:8000"
     volumes:
       - hf-cache:/data/hf
+      - piper-cache:/data/piper
     env_file:
       - .env
     environment:
       - PYTHONUNBUFFERED=1
       - HF_HOME=/data/hf
       - HF_HUB_DISABLE_TELEMETRY=1
-      - TTS_BACKEND=kugelaudio
+      - TTS_BACKEND=piper
+      - PIPER_DATA_DIR=/data/piper
     deploy:
       resources:
         reservations:
@@ -33,3 +35,4 @@ services:
 
 volumes:
   hf-cache:
+  piper-cache:

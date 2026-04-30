@@ -344,10 +344,10 @@
             margin: 12px auto;
             padding: 14px 16px;
             max-width: 600px;
-            background: rgba(0, 153, 168, 0.12);
+            background: var(--synia-dark);
             border: 1px solid var(--synia-teal);
             border-radius: 10px;
-            color: #1a1a1a;
+            color: #fff;
             font-size: 0.95rem;
             line-height: 1.5;
         }
@@ -762,7 +762,7 @@
 
         // TTS state
         const TTS_SUPPORTED_LANGS = new Set([
-            'en','de','fr','es','it','pl','ro','hr','bg',
+            'en','de','fr','es','it','pl','ro','bg',
             'tr','ru','uk','hu','sr','pt','nl'
         ]);
         const ttsQueue = [];

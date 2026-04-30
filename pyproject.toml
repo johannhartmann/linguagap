@@ -48,11 +48,10 @@ summ-qwen3 = [
     "llama-cpp-python @ git+https://github.com/abetlen/llama-cpp-python.git@f42739945a70b9b592fc0e81a4b2ea4beebd4c50",
 ]
 # TTS backends
-tts-kugelaudio = [
-    "kugelaudio-open @ git+https://github.com/kugelaudio/kugelaudio-open.git",
-    # Pin to 4.x — transformers 5.x breaks kugelaudio with meta-tensor init error
-    "transformers>=4.40.0,<5.0.0",
-    "bitsandbytes>=0.43.0",
+tts-piper = [
+    "piper-tts>=1.2.0",
+    "onnxruntime-gpu>=1.18.0",
+    "huggingface-hub>=0.24.0",
 ]
 
 [project.urls]
