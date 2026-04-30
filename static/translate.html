@@ -1,374 +1,300 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="de">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Text übersetzen — Synia</title>
-    <link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <style>
-        :root {
-            --synia-teal: #0099a8;
-            --synia-teal-dark: #007a87;
-            --synia-dark: #1f1f1f;
-            --synia-text: rgba(18, 18, 18, 0.75);
-            --synia-text-dark: #121212;
-        }
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body {
-            font-family: 'Assistant', sans-serif;
-            background: #ffffff;
-            color: var(--synia-text);
-            min-height: 100vh;
-            padding: 20px;
-        }
-        .container { max-width: 900px; margin: 0 auto; }
-        header {
-            text-align: center;
-            margin-bottom: 30px;
-            position: relative;
-        }
-        .brand-text {
-            font-size: 2.2rem;
-            font-weight: 700;
-            color: var(--synia-teal);
-            margin-bottom: 6px;
-            letter-spacing: 0.5px;
-            line-height: 1.1;
-        }
-        .header-actions {
-            position: absolute;
-            top: 20px;
-            left: 20px;
-            display: flex;
-            gap: 8px;
-        }
-        .nav-btn {
-            padding: 6px 14px;
-            font-size: 0.85rem;
-            background: transparent;
-            color: var(--synia-text);
-            border: 1px solid #ccc;
-            border-radius: 6px;
-            cursor: pointer;
-            font-family: 'Assistant', sans-serif;
-            font-weight: 500;
-            transition: background 0.2s, color 0.2s;
-            text-decoration: none;
-            display: inline-block;
-        }
-        .nav-btn:hover { background: #f0f0f0; color: var(--synia-dark); }
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Text übersetzen — Synia</title>
+        <link
+            href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;500;600;700&display=swap"
+            rel="stylesheet"
+        />
+        <style>
+            :root {
+                --synia-teal: #0099a8;
+                --synia-teal-dark: #007a87;
+                --synia-dark: #1f1f1f;
+                --synia-text: rgba(18, 18, 18, 0.75);
+                --synia-text-dark: #121212;
+            }
+            * {
+                box-sizing: border-box;
+                margin: 0;
+                padding: 0;
+            }
+            body {
+                font-family: "Assistant", sans-serif;
+                background: #ffffff;
+                color: var(--synia-text);
+                min-height: 100vh;
+                padding: 20px;
+            }
+            .container {
+                max-width: 900px;
+                margin: 0 auto;
+            }
+            header {
+                text-align: center;
+                margin-bottom: 30px;
+                position: relative;
+            }
+            .brand-text {
+                font-size: 2.2rem;
+                font-weight: 700;
+                color: var(--synia-teal);
+                margin-bottom: 6px;
+                letter-spacing: 0.5px;
+                line-height: 1.1;
+            }
+            .header-actions {
+                position: absolute;
+                top: 20px;
+                left: 20px;
+                display: flex;
+                gap: 8px;
+            }
+            .nav-btn {
+                padding: 6px 14px;
+                font-size: 0.85rem;
+                background: transparent;
+                color: var(--synia-text);
+                border: 1px solid #ccc;
+                border-radius: 6px;
+                cursor: pointer;
+                font-family: "Assistant", sans-serif;
+                font-weight: 500;
+                transition:
+                    background 0.2s,
+                    color 0.2s;
+                text-decoration: none;
+                display: inline-block;
+            }
+            .nav-btn:hover {
+                background: #f0f0f0;
+                color: var(--synia-dark);
+            }
 
-        h1 {
-            font-size: 1.7rem;
-            color: var(--synia-dark);
-            font-weight: 600;
-            margin-bottom: 20px;
-        }
-        .lang-row {
-            display: flex;
-            justify-content: center;
-            gap: 20px;
-            margin-bottom: 16px;
-            flex-wrap: wrap;
-        }
-        .lang-row label {
-            display: flex;
-            flex-direction: column;
-            gap: 4px;
-            font-size: 0.9rem;
-            color: var(--synia-dark);
-        }
-        select {
-            padding: 10px 16px;
-            font-size: 1rem;
-            border: 1px solid #ccc;
-            border-radius: 8px;
-            background: #fff;
-            color: var(--synia-text-dark);
-            font-family: 'Assistant', sans-serif;
-            min-width: 200px;
-            cursor: pointer;
-        }
-        select:focus, textarea:focus, button:focus {
-            outline: 2px solid var(--synia-teal);
-            outline-offset: 2px;
-        }
-        textarea {
-            width: 100%;
-            min-height: 200px;
-            padding: 14px;
-            font-size: 1rem;
-            border: 1px solid #ccc;
-            border-radius: 8px;
-            font-family: 'Assistant', sans-serif;
-            color: var(--synia-text-dark);
-            resize: vertical;
-        }
-        .char-counter {
-            text-align: right;
-            font-size: 0.85rem;
-            color: #888;
-            margin-top: 4px;
-        }
-        .actions {
-            display: flex;
-            justify-content: center;
-            gap: 12px;
-            margin: 20px 0;
-        }
-        button.primary {
-            padding: 12px 28px;
-            font-size: 1rem;
-            background: var(--synia-teal);
-            color: #fff;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-family: 'Assistant', sans-serif;
-            font-weight: 600;
-            transition: background 0.2s;
-        }
-        button.primary:hover:not(:disabled) { background: var(--synia-teal-dark); }
-        button.primary:disabled { background: #999; cursor: not-allowed; }
+            h1 {
+                font-size: 1.7rem;
+                color: var(--synia-dark);
+                font-weight: 600;
+                margin-bottom: 20px;
+            }
+            .lang-row {
+                display: flex;
+                justify-content: center;
+                gap: 20px;
+                margin-bottom: 16px;
+                flex-wrap: wrap;
+            }
+            .lang-row label {
+                display: flex;
+                flex-direction: column;
+                gap: 4px;
+                font-size: 0.9rem;
+                color: var(--synia-dark);
+            }
+            select {
+                padding: 10px 16px;
+                font-size: 1rem;
+                border: 1px solid #ccc;
+                border-radius: 8px;
+                background: #fff;
+                color: var(--synia-text-dark);
+                font-family: "Assistant", sans-serif;
+                min-width: 200px;
+                cursor: pointer;
+            }
+            select:focus,
+            textarea:focus,
+            button:focus {
+                outline: 2px solid var(--synia-teal);
+                outline-offset: 2px;
+            }
+            textarea {
+                width: 100%;
+                min-height: 200px;
+                padding: 14px;
+                font-size: 1rem;
+                border: 1px solid #ccc;
+                border-radius: 8px;
+                font-family: "Assistant", sans-serif;
+                color: var(--synia-text-dark);
+                resize: vertical;
+            }
+            .char-counter {
+                text-align: right;
+                font-size: 0.85rem;
+                color: #888;
+                margin-top: 4px;
+            }
+            .actions {
+                display: flex;
+                justify-content: center;
+                gap: 12px;
+                margin: 20px 0;
+            }
+            button.primary {
+                padding: 12px 28px;
+                font-size: 1rem;
+                background: var(--synia-teal);
+                color: #fff;
+                border: none;
+                border-radius: 8px;
+                cursor: pointer;
+                font-family: "Assistant", sans-serif;
+                font-weight: 600;
+                transition: background 0.2s;
+            }
+            button.primary:hover:not(:disabled) {
+                background: var(--synia-teal-dark);
+            }
+            button.primary:disabled {
+                background: #999;
+                cursor: not-allowed;
+            }
 
-        .result-section { margin-top: 30px; }
-        .result-section h2 {
-            font-size: 1.1rem;
-            color: var(--synia-dark);
-            font-weight: 600;
-            margin-bottom: 10px;
-            border-bottom: 2px solid var(--synia-teal);
-            padding-bottom: 6px;
-        }
-        #result {
-            min-height: 100px;
-            padding: 16px;
-            background: #fafafa;
-            border: 1px solid #e0e0e0;
-            border-radius: 8px;
-            font-size: 1.05rem;
-            line-height: 1.6;
-            color: var(--synia-text-dark);
-            white-space: pre-wrap;
-            word-wrap: break-word;
-        }
-        #result.empty { color: #aaa; font-style: italic; }
-        .error-banner {
-            background: #fff3cd;
-            color: #856404;
-            border: 1px solid #ffeaa7;
-            border-radius: 6px;
-            padding: 10px 14px;
-            margin-bottom: 16px;
-            font-size: 0.95rem;
-            display: none;
-        }
-        .error-banner.visible { display: block; }
-        .spinner {
-            display: inline-block;
-            width: 14px;
-            height: 14px;
-            border: 2px solid rgba(255,255,255,0.4);
-            border-top-color: #fff;
-            border-radius: 50%;
-            animation: spin 0.8s linear infinite;
-            vertical-align: middle;
-            margin-right: 8px;
-        }
-        @keyframes spin { to { transform: rotate(360deg); } }
+            .result-section {
+                margin-top: 30px;
+            }
+            .result-section h2 {
+                font-size: 1.1rem;
+                color: var(--synia-dark);
+                font-weight: 600;
+                margin-bottom: 10px;
+                border-bottom: 2px solid var(--synia-teal);
+                padding-bottom: 6px;
+            }
+            #result {
+                min-height: 100px;
+                padding: 16px;
+                background: #fafafa;
+                border: 1px solid #e0e0e0;
+                border-radius: 8px;
+                font-size: 1.05rem;
+                line-height: 1.6;
+                color: var(--synia-text-dark);
+                white-space: pre-wrap;
+                word-wrap: break-word;
+            }
+            #result.empty {
+                color: #aaa;
+                font-style: italic;
+            }
+            .error-banner {
+                background: #fff3cd;
+                color: #856404;
+                border: 1px solid #ffeaa7;
+                border-radius: 6px;
+                padding: 10px 14px;
+                margin-bottom: 16px;
+                font-size: 0.95rem;
+                display: none;
+            }
+            .error-banner.visible {
+                display: block;
+            }
+            .spinner {
+                display: inline-block;
+                width: 14px;
+                height: 14px;
+                border: 2px solid rgba(255, 255, 255, 0.4);
+                border-top-color: #fff;
+                border-radius: 50%;
+                animation: spin 0.8s linear infinite;
+                vertical-align: middle;
+                margin-right: 8px;
+            }
+            @keyframes spin {
+                to {
+                    transform: rotate(360deg);
+                }
+            }
 
-        @media print {
-            /* Hide everything except #result, but keep #result in normal
+            @media print {
+                /* Hide everything except #result, but keep #result in normal
                flow so the print engine paginates long translations across
                pages (visibility:hidden + position:absolute clips on Safari). */
-            header,
-            h1,
-            .error-banner,
-            .lang-row,
-            textarea,
-            .char-counter,
-            .actions,
-            .result-section h2 {
-                display: none !important;
+                header,
+                h1,
+                .error-banner,
+                .lang-row,
+                textarea,
+                .char-counter,
+                .actions,
+                .result-section h2 {
+                    display: none !important;
+                }
+                body {
+                    padding: 0;
+                }
+                .container {
+                    max-width: none;
+                    padding: 0;
+                    margin: 0;
+                }
+                .result-section {
+                    margin-top: 0;
+                }
+                #result {
+                    font-size: 14pt;
+                    line-height: 1.6;
+                    padding: 0;
+                    background: transparent;
+                    border: none;
+                    color: #000;
+                    min-height: 0;
+                }
+                @page {
+                    margin: 1.5cm;
+                }
             }
-            body { padding: 0; }
-            .container { max-width: none; padding: 0; margin: 0; }
-            .result-section { margin-top: 0; }
-            #result {
-                font-size: 14pt;
-                line-height: 1.6;
-                padding: 0;
-                background: transparent;
-                border: none;
-                color: #000;
-                min-height: 0;
-            }
-            @page { margin: 1.5cm; }
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <header>
-            <div class="brand-text">Synia Gesprächsassistent SGA</div>
-            <p>Text übersetzen</p>
-            <div class="header-actions">
-                <a class="nav-btn" href="/" title="Zurück zur Live-Übersetzung">← Live</a>
-                <button id="logoutBtn" class="nav-btn" title="Logout">Logout</button>
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <header>
+                <div class="brand-text">Synia Gesprächsassistent SGA</div>
+                <p>Text übersetzen</p>
+                <div class="header-actions">
+                    <a class="nav-btn" href="/" title="Zurück zur Live-Übersetzung">← Live</a>
+                    <button id="logoutBtn" class="nav-btn" title="Logout">Logout</button>
+                </div>
+            </header>
+
+            <h1>Text-zu-Text Übersetzung</h1>
+
+            <div class="error-banner" id="errorBanner"></div>
+
+            <div class="lang-row">
+                <label>
+                    Quellsprache
+                    <select id="srcLang"></select>
+                </label>
+                <label>
+                    Zielsprache
+                    <select id="tgtLang"></select>
+                </label>
             </div>
-        </header>
 
-        <h1>Text-zu-Text Übersetzung</h1>
+            <textarea id="sourceText" placeholder="Originaltext eingeben…"></textarea>
+            <div class="char-counter" id="charCounter">Zeichen: 0</div>
 
-        <div class="error-banner" id="errorBanner"></div>
-
-        <div class="lang-row">
-            <label>
-                Quellsprache
-                <select id="srcLang"></select>
-            </label>
-            <label>
-                Zielsprache
-                <select id="tgtLang"></select>
-            </label>
-        </div>
-
-        <textarea id="sourceText" placeholder="Originaltext eingeben…"></textarea>
-        <div class="char-counter" id="charCounter">Zeichen: 0</div>
-
-        <div class="actions">
-            <button class="primary" id="translateBtn">
-                <span class="spinner" id="translateSpinner" style="display:none"></span>
-                <span id="translateLabel">Übersetzen</span>
-            </button>
-        </div>
-
-        <div class="result-section">
-            <h2>Übersetzung</h2>
-            <div id="result" class="empty">Hier erscheint die Übersetzung.</div>
             <div class="actions">
-                <button class="primary" id="printBtn" disabled>Drucken</button>
+                <button class="primary" id="translateBtn">
+                    <span class="spinner" id="translateSpinner" style="display: none"></span>
+                    <span id="translateLabel">Übersetzen</span>
+                </button>
+            </div>
+
+            <div class="result-section">
+                <h2>Übersetzung</h2>
+                <div id="result" class="empty">Hier erscheint die Übersetzung.</div>
+                <div class="actions">
+                    <button class="primary" id="printBtn" disabled>Drucken</button>
+                </div>
             </div>
         </div>
-    </div>
 
-    <script>
-        function fillLangSelect(selectEl, options, defaultCode) {
-            for (const { code, label } of options) {
-                const opt = document.createElement('option');
-                opt.value = code;
-                opt.textContent = label;
-                if (code === defaultCode) opt.selected = true;
-                selectEl.appendChild(opt);
-            }
-        }
-
-        const srcLang = document.getElementById('srcLang');
-        const tgtLang = document.getElementById('tgtLang');
-        // Populate dropdowns from the server's language registry. The submit
-        // button stays disabled until both lists are filled.
-        (async () => {
-            const resp = await fetch('/api/languages?scope=translate');
-            if (!resp.ok) {
-                showError('Sprachliste konnte nicht geladen werden.');
-                return;
-            }
-            const options = await resp.json();
-            fillLangSelect(srcLang, options, 'de');
-            fillLangSelect(tgtLang, options, 'en');
-        })();
-
-        const sourceText = document.getElementById('sourceText');
-        const charCounter = document.getElementById('charCounter');
-        const translateBtn = document.getElementById('translateBtn');
-        const translateSpinner = document.getElementById('translateSpinner');
-        const translateLabel = document.getElementById('translateLabel');
-        const printBtn = document.getElementById('printBtn');
-        const result = document.getElementById('result');
-        const errorBanner = document.getElementById('errorBanner');
-
-        function updateCounter() {
-            charCounter.textContent = `Zeichen: ${sourceText.value.length}`;
-        }
-        sourceText.addEventListener('input', updateCounter);
-        updateCounter();
-
-        function showError(msg) {
-            errorBanner.textContent = msg;
-            errorBanner.classList.add('visible');
-        }
-        function clearError() { errorBanner.classList.remove('visible'); }
-
-        translateBtn.addEventListener('click', async () => {
-            const text = sourceText.value.trim();
-            clearError();
-            if (!text) {
-                showError('Bitte einen Text eingeben.');
-                return;
-            }
-            if (srcLang.value === tgtLang.value) {
-                showError('Quell- und Zielsprache sind identisch.');
-                return;
-            }
-            translateBtn.disabled = true;
-            translateSpinner.style.display = 'inline-block';
-            translateLabel.textContent = 'Übersetze…';
-            try {
-                const resp = await fetch('/api/translate', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        text,
-                        src_lang: srcLang.value,
-                        tgt_lang: tgtLang.value,
-                    }),
-                });
-                if (resp.status === 401) {
-                    window.location.href = '/login';
-                    return;
-                }
-                if (!resp.ok) {
-                    let detail = '';
-                    try { detail = (await resp.json()).detail || ''; } catch (_) {}
-                    showError(`Übersetzung fehlgeschlagen${detail ? ': ' + detail : ''}.`);
-                    return;
-                }
-                const data = await resp.json();
-                const output = (data.output || '').trim();
-                if (output) {
-                    result.textContent = output;
-                    result.classList.remove('empty');
-                    printBtn.disabled = false;
-                } else {
-                    result.textContent = '(leere Übersetzung)';
-                    result.classList.add('empty');
-                    printBtn.disabled = true;
-                }
-            } catch (e) {
-                showError('Netzwerkfehler. Bitte erneut versuchen.');
-            } finally {
-                translateBtn.disabled = false;
-                translateSpinner.style.display = 'none';
-                translateLabel.textContent = 'Übersetzen';
-            }
-        });
-
-        printBtn.addEventListener('click', () => window.print());
-
-        // Auth check (mirrors index.html); 401 → /login.
-        (async () => {
-            try {
-                const resp = await fetch('/api/me');
-                if (!resp.ok) { window.location.href = '/login'; }
-            } catch (e) {
-                console.error('Auth check failed:', e);
-            }
-        })();
-
-        document.getElementById('logoutBtn').addEventListener('click', async () => {
-            await fetch('/api/logout', { method: 'POST' });
-            window.location.href = '/login';
-        });
-    </script>
-</body>
+        <script src="/static/js/translate.js" defer></script>
+    </body>
 </html>

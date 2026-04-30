@@ -8,11 +8,9 @@
 //       source: 'host' | 'viewer',
 //       langNames: { tr: 'Turkish', ... },   // optional, falls back to the code
 //   });
-(function (global) {
-    'use strict';
-
+((global) => {
     function formatTime(seconds) {
-        if (seconds == null || !isFinite(seconds)) return '';
+        if (seconds == null || !Number.isFinite(seconds)) return '';
         const total = Math.max(0, Math.floor(seconds));
         const h = Math.floor(total / 3600);
         const m = Math.floor((total % 3600) / 60);
@@ -45,19 +43,22 @@
 
     function buildHtml(segments, foreignLang, source, langNames) {
         const names = langNames || {};
-        const foreignLabel = foreignLang && names[foreignLang] ? names[foreignLang] : (foreignLang || 'Foreign');
+        const foreignLabel =
+            foreignLang && names[foreignLang] ? names[foreignLang] : foreignLang || 'Foreign';
         const safeForeignAttr = safeLangCode(foreignLang);
         const rows = (Array.isArray(segments) ? segments : [])
-            .filter(seg => seg && seg.final)
-            .map(seg => {
+            .filter((seg) => seg?.final)
+            .map((seg) => {
                 const time = formatTime(seg.abs_start);
                 const isGerman = seg.src_lang === 'de';
                 const role = seg.speaker_role === 'german' || isGerman ? 'de' : 'fg';
                 const speaker = role === 'de' ? 'Host' : 'Gast';
                 const translations = seg.translations || {};
-                const germanText = isGerman ? seg.src : (translations.de || '');
+                const germanText = isGerman ? seg.src : translations.de || '';
                 const foreignText = isGerman
-                    ? (foreignLang ? (translations[foreignLang] || '') : '')
+                    ? foreignLang
+                        ? translations[foreignLang] || ''
+                        : ''
                     : seg.src;
                 return `    <tr class="${role}">
       <td class="t-time">${escapeHtml(time)}</td>
@@ -143,9 +144,9 @@ ${rows}
         }
     }
 
-    global.TranscriptExport = {
-        buildHtml: buildHtml,
-        filename: filename,
-        download: download,
+    /** @type {any} */ (global).TranscriptExport = {
+        buildHtml,
+        filename,
+        download,
     };
 })(typeof window !== 'undefined' ? window : globalThis);

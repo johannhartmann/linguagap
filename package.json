@@ -1,0 +1,20 @@
+{
+  "name": "linguagap-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Static HTML/JS frontend for LinguaGap. No build step — these scripts run lint, format, and type checks against the files served directly by FastAPI.",
+  "scripts": {
+    "lint": "biome lint static/js",
+    "lint:fix": "biome lint --write static/js",
+    "format": "biome format --write static/js && prettier --write \"static/**/*.{html,css}\"",
+    "format:check": "biome format static/js && prettier --check \"static/**/*.{html,css}\"",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run lint && npm run format:check && npm run typecheck"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@types/dom-speech-recognition": "^0.0.4",
+    "prettier": "^3.3.3",
+    "typescript": "^5.6.3"
+  }
+}

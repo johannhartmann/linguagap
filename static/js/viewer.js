@@ -1,0 +1,1654 @@
+// Viewer page main script — consent overlay, WebSocket reception,
+// PTT mic capture (when host enables it), TTS playback queue.
+
+(() => {
+    // ---------------------------------------------------------------
+    // Full viewer i18n — consent + all UI strings
+    // ---------------------------------------------------------------
+    const I18N = {
+        de: {
+            title: 'Datenschutz & Nutzungshinweis',
+            body: 'Wir nutzen eine Dolmetscher-Software. Datenschutz ist gewährleistet, es werden keine Daten gespeichert. Bitte sprechen Sie klar, langsam und in kurzen, einfachen Sätzen ohne Dialekt. Machen Sie nach ein bis zwei Sätzen eine Pause für die Übersetzung. Bei Missverständnissen bitte wiederholen oder anders formulieren. Bitte hier clicken für das Akzeptieren der Datenschutzbedingungen. Hinweis: Der SGA kann Fehler machen. Überprüfe wichtige Informationen.',
+            accept: 'Akzeptieren',
+            connecting: 'Verbindung wird hergestellt\u2026',
+            connected: 'Verbunden',
+            live: 'Live',
+            waiting: 'Warte auf Sitzungsbeginn\u2026',
+            sessionEnded: 'Sitzung beendet',
+            invalidLink: 'Ungültiger oder abgelaufener Link',
+            disconnected: 'Getrennt',
+            connError: 'Verbindungsfehler',
+            selectLang: '-- Ihre Sprache --',
+            selectLangFirst: 'Bitte wählen Sie zuerst Ihre Sprache',
+            waitingForSession: 'Warte auf Sitzung\u2026',
+            tapToSpeak: 'Zum Sprechen tippen',
+            listening: 'Hört zu\u2026',
+            muted: 'Stumm',
+            micDenied: 'Mikrofonzugriff verweigert',
+            micNotSupported: 'Mikrofon nicht unterstützt',
+            requiresHttps: 'HTTPS erforderlich',
+            endedTitle: 'Sitzung beendet',
+            endedBody: 'Die Aufnahme wurde gestoppt. Das Transkript bleibt zur Ansicht erhalten.',
+            translationFailed: 'Übersetzung fehlgeschlagen',
+            ttsTooltip: 'Übersetzung vorlesen',
+        },
+        en: {
+            title: 'Privacy & Usage Notice',
+            body: 'We use interpreter software. Data protection is guaranteed \u2013 no data is stored. Please speak clearly, slowly, and in short, simple sentences without dialect. Pause after one or two sentences for the translation. In case of misunderstandings, please repeat or rephrase. Please click here to accept the data protection conditions. Note: The SGA may make errors. Please verify important information.',
+            accept: 'Accept',
+            connecting: 'Connecting\u2026',
+            connected: 'Connected',
+            live: 'Live',
+            waiting: 'Waiting for session to start\u2026',
+            sessionEnded: 'Session ended',
+            invalidLink: 'Invalid or expired link',
+            disconnected: 'Disconnected',
+            connError: 'Connection error',
+            selectLang: '-- Your language --',
+            selectLangFirst: 'Select your language first',
+            waitingForSession: 'Waiting for session\u2026',
+            tapToSpeak: 'Tap to speak',
+            listening: 'Listening\u2026',
+            muted: 'Muted',
+            micDenied: 'Mic access denied',
+            micNotSupported: 'Mic not supported',
+            requiresHttps: 'Requires HTTPS',
+            endedTitle: 'Session Ended',
+            endedBody: 'The recording has stopped. This transcript is preserved for your review.',
+            translationFailed: 'Translation failed',
+            ttsTooltip: 'Read translation aloud',
+        },
+        fr: {
+            title: 'Avis de confidentialit\u00e9 et d\u2019utilisation',
+            body: 'Nous utilisons un logiciel d\u2019interpr\u00e9tation. La protection des donn\u00e9es est garantie \u2013 aucune donn\u00e9e n\u2019est enregistr\u00e9e. Veuillez parler clairement, lentement et en phrases courtes et simples, sans dialecte. Faites une pause apr\u00e8s une ou deux phrases pour la traduction. En cas de malentendus, veuillez r\u00e9p\u00e9ter ou reformuler. Veuillez cliquer ici pour accepter les conditions de protection des donn\u00e9es. Remarque\u00a0: Le SGA peut faire des erreurs. V\u00e9rifiez les informations importantes.',
+            accept: 'Accepter',
+            connecting: 'Connexion\u2026',
+            connected: 'Connect\u00e9',
+            live: 'En direct',
+            waiting: 'En attente du d\u00e9but de la session\u2026',
+            sessionEnded: 'Session termin\u00e9e',
+            invalidLink: 'Lien invalide ou expir\u00e9',
+            disconnected: 'D\u00e9connect\u00e9',
+            connError: 'Erreur de connexion',
+            selectLang: '-- Votre langue --',
+            selectLangFirst: 'Veuillez d\u2019abord s\u00e9lectionner votre langue',
+            waitingForSession: 'En attente de la session\u2026',
+            tapToSpeak: 'Appuyez pour parler',
+            listening: '\u00c9coute\u2026',
+            muted: 'Muet',
+            micDenied: 'Acc\u00e8s au micro refus\u00e9',
+            micNotSupported: 'Micro non pris en charge',
+            requiresHttps: 'HTTPS requis',
+            endedTitle: 'Session termin\u00e9e',
+            endedBody:
+                'L\u2019enregistrement est termin\u00e9. La transcription est conserv\u00e9e pour votre consultation.',
+        },
+        es: {
+            title: 'Aviso de privacidad y uso',
+            body: 'Utilizamos un software de interpretaci\u00f3n. La protecci\u00f3n de datos est\u00e1 garantizada \u2013 no se almacenan datos. Por favor, hable con claridad, despacio y en frases cortas y sencillas, sin dialecto. Haga una pausa despu\u00e9s de una o dos frases para la traducci\u00f3n. En caso de malentendidos, repita o reformule. Haga clic aqu\u00ed para aceptar las condiciones de protecci\u00f3n de datos. Nota: El SGA puede cometer errores. Verifique la informaci\u00f3n importante.',
+            accept: 'Aceptar',
+            connecting: 'Conectando\u2026',
+            connected: 'Conectado',
+            live: 'En vivo',
+            waiting: 'Esperando inicio de sesi\u00f3n\u2026',
+            sessionEnded: 'Sesi\u00f3n finalizada',
+            invalidLink: 'Enlace inv\u00e1lido o caducado',
+            disconnected: 'Desconectado',
+            connError: 'Error de conexi\u00f3n',
+            selectLang: '-- Su idioma --',
+            selectLangFirst: 'Seleccione primero su idioma',
+            waitingForSession: 'Esperando sesi\u00f3n\u2026',
+            tapToSpeak: 'Toque para hablar',
+            listening: 'Escuchando\u2026',
+            muted: 'Silenciado',
+            micDenied: 'Acceso al micro denegado',
+            micNotSupported: 'Micro no compatible',
+            requiresHttps: 'Requiere HTTPS',
+            endedTitle: 'Sesi\u00f3n finalizada',
+            endedBody:
+                'La grabaci\u00f3n se ha detenido. La transcripci\u00f3n se conserva para su revisi\u00f3n.',
+        },
+        it: {
+            title: 'Informativa sulla privacy e sull\u2019uso',
+            body: 'Utilizziamo un software di interpretariato. La protezione dei dati \u00e8 garantita \u2013 nessun dato viene memorizzato. Si prega di parlare in modo chiaro, lento e con frasi brevi e semplici, senza dialetto. Fare una pausa dopo una o due frasi per la traduzione. In caso di malintesi, ripetere o riformulare. Cliccare qui per accettare le condizioni sulla protezione dei dati. Nota: L\u2019SGA pu\u00f2 commettere errori. Verificare le informazioni importanti.',
+            accept: 'Accetta',
+            connecting: 'Connessione\u2026',
+            connected: 'Connesso',
+            live: 'In diretta',
+            waiting: 'In attesa dell\u2019inizio della sessione\u2026',
+            sessionEnded: 'Sessione terminata',
+            invalidLink: 'Link non valido o scaduto',
+            disconnected: 'Disconnesso',
+            connError: 'Errore di connessione',
+            selectLang: '-- La tua lingua --',
+            selectLangFirst: 'Seleziona prima la tua lingua',
+            waitingForSession: 'In attesa della sessione\u2026',
+            tapToSpeak: 'Tocca per parlare',
+            listening: 'In ascolto\u2026',
+            muted: 'Disattivato',
+            micDenied: 'Accesso al microfono negato',
+            micNotSupported: 'Microfono non supportato',
+            requiresHttps: 'Richiede HTTPS',
+            endedTitle: 'Sessione terminata',
+            endedBody:
+                'La registrazione \u00e8 stata interrotta. La trascrizione \u00e8 conservata per la consultazione.',
+        },
+        pl: {
+            title: 'Informacja o ochronie danych',
+            body: 'Korzystamy z oprogramowania do t\u0142umaczenia ustnego. Ochrona danych jest zagwarantowana \u2013 \u017cadne dane nie s\u0105 przechowywane. Prosimy m\u00f3wi\u0107 wyra\u017anie, powoli i kr\u00f3tkimi, prostymi zdaniami, bez dialektu. Po jednym lub dw\u00f3ch zdaniach prosz\u0119 zrobi\u0107 pauz\u0119 na t\u0142umaczenie. W przypadku nieporozumie\u0144 prosz\u0119 powt\u00f3rzy\u0107 lub przeformu\u0142owa\u0107. Prosz\u0119 klikn\u0105\u0107 tutaj, aby zaakceptowa\u0107 warunki ochrony danych. Uwaga: SGA mo\u017ce pope\u0142nia\u0107 b\u0142\u0119dy. Prosz\u0119 zweryfikowa\u0107 wa\u017cne informacje.',
+            accept: 'Akceptuj\u0119',
+            connecting: '\u0141\u0105czenie\u2026',
+            connected: 'Po\u0142\u0105czono',
+            live: 'Na \u017cywo',
+            waiting: 'Oczekiwanie na rozpocz\u0119cie sesji\u2026',
+            sessionEnded: 'Sesja zako\u0144czona',
+            invalidLink: 'Nieprawid\u0142owy lub wygas\u0142y link',
+            disconnected: 'Roz\u0142\u0105czono',
+            connError: 'B\u0142\u0105d po\u0142\u0105czenia',
+            selectLang: '-- Tw\u00f3j j\u0119zyk --',
+            selectLangFirst: 'Najpierw wybierz sw\u00f3j j\u0119zyk',
+            waitingForSession: 'Oczekiwanie na sesj\u0119\u2026',
+            tapToSpeak: 'Dotknij, aby m\u00f3wi\u0107',
+            listening: 'S\u0142uchanie\u2026',
+            muted: 'Wyciszony',
+            micDenied: 'Odmowa dost\u0119pu do mikrofonu',
+            micNotSupported: 'Mikrofon nie jest obs\u0142ugiwany',
+            requiresHttps: 'Wymaga HTTPS',
+            endedTitle: 'Sesja zako\u0144czona',
+            endedBody:
+                'Nagrywanie zosta\u0142o zatrzymane. Transkrypcja jest zachowana do wgl\u0105du.',
+        },
+        ro: {
+            title: 'Notificare privind confiden\u021bialitatea',
+            body: 'Folosim un software de interpretare. Protec\u021bia datelor este garantat\u0103 \u2013 nu se stocheaz\u0103 date. V\u0103 rug\u0103m s\u0103 vorbi\u021bi clar, \u00eencet \u0219i \u00een propozi\u021bii scurte \u0219i simple, f\u0103r\u0103 dialect. Face\u021bi o pauz\u0103 dup\u0103 una sau dou\u0103 propozi\u021bii pentru traducere. \u00cen caz de ne\u00een\u021belegeri, v\u0103 rug\u0103m s\u0103 repeta\u021bi sau s\u0103 reformula\u021bi. Face\u021bi clic aici pentru a accepta condi\u021biile de protec\u021bie a datelor. Not\u0103: SGA poate face erori. Verifica\u021bi informa\u021biile importante.',
+            accept: 'Accept',
+            connecting: 'Conectare\u2026',
+            connected: 'Conectat',
+            live: '\u00cen direct',
+            waiting: 'Se a\u0219teapt\u0103 \u00eenceperea sesiunii\u2026',
+            sessionEnded: 'Sesiune \u00eencheiat\u0103',
+            invalidLink: 'Link invalid sau expirat',
+            disconnected: 'Deconectat',
+            connError: 'Eroare de conexiune',
+            selectLang: '-- Limba dvs. --',
+            selectLangFirst: 'Selecta\u021bi mai \u00eent\u00e2i limba',
+            waitingForSession: 'Se a\u0219teapt\u0103 sesiunea\u2026',
+            tapToSpeak: 'Atinge\u021bi pentru a vorbi',
+            listening: 'Ascult\u0103\u2026',
+            muted: 'Dezactivat',
+            micDenied: 'Acces la microfon refuzat',
+            micNotSupported: 'Microfon neacceptat',
+            requiresHttps: 'Necesit\u0103 HTTPS',
+            endedTitle: 'Sesiune \u00eencheiat\u0103',
+            endedBody:
+                '\u00cenregistrarea s-a oprit. Transcrip\u021bia este p\u0103strat\u0103 pentru consultare.',
+        },
+        hr: {
+            title: 'Obavijest o privatnosti i kori\u0161tenju',
+            body: 'Koristimo softver za prevo\u0111enje. Za\u0161tita podataka je zajam\u010dena \u2013 nikakvi podaci se ne pohranjuju. Molimo govorite jasno, polako i kratkim, jednostavnim re\u010denicama bez dijalekta. Napravite pauzu nakon jedne ili dvije re\u010denice za prijevod. U slu\u010daju nesporazuma, ponovite ili preformulirajte. Kliknite ovdje za prihva\u0107anje uvjeta za\u0161tite podataka. Napomena: SGA mo\u017ee pogrije\u0161iti. Provjerite va\u017ene informacije.',
+            accept: 'Prihva\u0107am',
+            connecting: 'Povezivanje\u2026',
+            connected: 'Povezano',
+            live: 'U\u017eivo',
+            waiting: '\u010cekanje po\u010detka sesije\u2026',
+            sessionEnded: 'Sesija zavr\u0161ena',
+            invalidLink: 'Neispravna ili istekla poveznica',
+            disconnected: 'Prekinuto',
+            connError: 'Gre\u0161ka povezivanja',
+            selectLang: '-- Va\u0161 jezik --',
+            selectLangFirst: 'Prvo odaberite svoj jezik',
+            waitingForSession: '\u010cekanje sesije\u2026',
+            tapToSpeak: 'Dodirnite za govor',
+            listening: 'Slu\u0161a\u2026',
+            muted: 'Isklju\u010deno',
+            micDenied: 'Pristup mikrofonu odbijen',
+            micNotSupported: 'Mikrofon nije podr\u017ean',
+            requiresHttps: 'Potreban HTTPS',
+            endedTitle: 'Sesija zavr\u0161ena',
+            endedBody: 'Snimanje je zaustavljeno. Transkript je sa\u010duvan za pregled.',
+        },
+        bg: {
+            title: '\u0423\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u0435 \u0437\u0430 \u043f\u043e\u0432\u0435\u0440\u0438\u0442\u0435\u043b\u043d\u043e\u0441\u0442',
+            body: '\u0418\u0437\u043f\u043e\u043b\u0437\u0432\u0430\u043c\u0435 \u0441\u043e\u0444\u0442\u0443\u0435\u0440 \u0437\u0430 \u0443\u0441\u0442\u0435\u043d \u043f\u0440\u0435\u0432\u043e\u0434. \u0417\u0430\u0449\u0438\u0442\u0430\u0442\u0430 \u043d\u0430 \u0434\u0430\u043d\u043d\u0438\u0442\u0435 \u0435 \u0433\u0430\u0440\u0430\u043d\u0442\u0438\u0440\u0430\u043d\u0430 \u2013 \u043d\u0435 \u0441\u0435 \u0441\u044a\u0445\u0440\u0430\u043d\u044f\u0432\u0430\u0442 \u0434\u0430\u043d\u043d\u0438. \u041c\u043e\u043b\u044f, \u0433\u043e\u0432\u043e\u0440\u0435\u0442\u0435 \u044f\u0441\u043d\u043e, \u0431\u0430\u0432\u043d\u043e \u0438 \u0441 \u043a\u0440\u0430\u0442\u043a\u0438, \u043f\u0440\u043e\u0441\u0442\u0438 \u0438\u0437\u0440\u0435\u0447\u0435\u043d\u0438\u044f \u0431\u0435\u0437 \u0434\u0438\u0430\u043b\u0435\u043a\u0442. \u041d\u0430\u043f\u0440\u0430\u0432\u0435\u0442\u0435 \u043f\u0430\u0443\u0437\u0430 \u0441\u043b\u0435\u0434 \u0435\u0434\u043d\u043e \u0438\u043b\u0438 \u0434\u0432\u0435 \u0438\u0437\u0440\u0435\u0447\u0435\u043d\u0438\u044f \u0437\u0430 \u043f\u0440\u0435\u0432\u043e\u0434\u0430. \u041f\u0440\u0438 \u043d\u0435\u0434\u043e\u0440\u0430\u0437\u0443\u043c\u0435\u043d\u0438\u044f, \u043c\u043e\u043b\u044f, \u043f\u043e\u0432\u0442\u043e\u0440\u0435\u0442\u0435 \u0438\u043b\u0438 \u043f\u0440\u0435\u0444\u043e\u0440\u043c\u0443\u043b\u0438\u0440\u0430\u0439\u0442\u0435. \u041c\u043e\u043b\u044f, \u043a\u043b\u0438\u043a\u043d\u0435\u0442\u0435 \u0442\u0443\u043a, \u0437\u0430 \u0434\u0430 \u043f\u0440\u0438\u0435\u043c\u0435\u0442\u0435 \u0443\u0441\u043b\u043e\u0432\u0438\u044f\u0442\u0430 \u0437\u0430 \u0437\u0430\u0449\u0438\u0442\u0430 \u043d\u0430 \u0434\u0430\u043d\u043d\u0438\u0442\u0435. \u0417\u0430\u0431\u0435\u043b\u0435\u0436\u043a\u0430: SGA \u043c\u043e\u0436\u0435 \u0434\u0430 \u0434\u043e\u043f\u0443\u0441\u043a\u0430 \u0433\u0440\u0435\u0448\u043a\u0438. \u041f\u0440\u043e\u0432\u0435\u0440\u0435\u0442\u0435 \u0432\u0430\u0436\u043d\u0430\u0442\u0430 \u0438\u043d\u0444\u043e\u0440\u043c\u0430\u0446\u0438\u044f.',
+            accept: '\u041f\u0440\u0438\u0435\u043c\u0430\u043c',
+            connecting: '\u0421\u0432\u044a\u0440\u0437\u0432\u0430\u043d\u0435\u2026',
+            connected: '\u0421\u0432\u044a\u0440\u0437\u0430\u043d',
+            live: '\u041d\u0430 \u0436\u0438\u0432\u043e',
+            waiting:
+                '\u0418\u0437\u0447\u0430\u043a\u0432\u0430\u043d\u0435 \u043d\u0430 \u0441\u0435\u0441\u0438\u044f\u0442\u0430\u2026',
+            sessionEnded:
+                '\u0421\u0435\u0441\u0438\u044f\u0442\u0430 \u043f\u0440\u0438\u043a\u043b\u044e\u0447\u0438',
+            invalidLink:
+                '\u041d\u0435\u0432\u0430\u043b\u0438\u0434\u0435\u043d \u0438\u043b\u0438 \u0438\u0437\u0442\u0435\u043a\u044a\u043b \u043b\u0438\u043d\u043a',
+            disconnected: '\u0418\u0437\u043a\u043b\u044e\u0447\u0435\u043d',
+            connError:
+                '\u0413\u0440\u0435\u0448\u043a\u0430 \u043f\u0440\u0438 \u0441\u0432\u044a\u0440\u0437\u0432\u0430\u043d\u0435',
+            selectLang: '-- \u0412\u0430\u0448\u0438\u044f\u0442 \u0435\u0437\u0438\u043a --',
+            selectLangFirst:
+                '\u041c\u043e\u043b\u044f, \u0438\u0437\u0431\u0435\u0440\u0435\u0442\u0435 \u0435\u0437\u0438\u043a',
+            waitingForSession: '\u0418\u0437\u0447\u0430\u043a\u0432\u0430\u043d\u0435\u2026',
+            tapToSpeak:
+                '\u0414\u043e\u043a\u043e\u0441\u043d\u0435\u0442\u0435 \u0437\u0430 \u0433\u043e\u0432\u043e\u0440',
+            listening: '\u0421\u043b\u0443\u0448\u0430\u2026',
+            muted: '\u0417\u0430\u0433\u043b\u0443\u0448\u0435\u043d',
+            micDenied:
+                '\u0414\u043e\u0441\u0442\u044a\u043f\u044a\u0442 \u0434\u043e \u043c\u0438\u043a\u0440\u043e\u0444\u043e\u043d\u0430 \u0435 \u043e\u0442\u043a\u0430\u0437\u0430\u043d',
+            micNotSupported:
+                '\u041c\u0438\u043a\u0440\u043e\u0444\u043e\u043d\u044a\u0442 \u043d\u0435 \u0441\u0435 \u043f\u043e\u0434\u0434\u044a\u0440\u0436\u0430',
+            requiresHttps: '\u0418\u0437\u0438\u0441\u043a\u0432\u0430 HTTPS',
+            endedTitle:
+                '\u0421\u0435\u0441\u0438\u044f\u0442\u0430 \u043f\u0440\u0438\u043a\u043b\u044e\u0447\u0438',
+            endedBody:
+                '\u0417\u0430\u043f\u0438\u0441\u044a\u0442 \u0435 \u0441\u043f\u0440\u044f\u043d. \u0422\u0440\u0430\u043d\u0441\u043a\u0440\u0438\u043f\u0446\u0438\u044f\u0442\u0430 \u0435 \u0437\u0430\u043f\u0430\u0437\u0435\u043d\u0430 \u0437\u0430 \u043f\u0440\u0435\u0433\u043b\u0435\u0434.',
+        },
+        tr: {
+            title: 'Gizlilik ve Kullan\u0131m Bildirimi',
+            body: 'Terc\u00fcmanl\u0131k yaz\u0131l\u0131m\u0131 kullan\u0131yoruz. Veri koruma garanti alt\u0131ndad\u0131r \u2013 hi\u00e7bir veri saklanmaz. L\u00fctfen net, yava\u015f ve leh\u00e7e kullanmadan k\u0131sa, basit c\u00fcmlelerle konu\u015fun. \u00c7eviri i\u00e7in bir veya iki c\u00fcmleden sonra ara verin. Yanl\u0131\u015f anla\u015f\u0131lma durumunda l\u00fctfen tekrarlay\u0131n veya farkl\u0131 \u015fekilde ifade edin. Veri koruma ko\u015fullar\u0131n\u0131 kabul etmek i\u00e7in l\u00fctfen buraya t\u0131klay\u0131n. Not: SGA hata yapabilir. \u00d6nemli bilgileri do\u011frulay\u0131n.',
+            accept: 'Kabul Ediyorum',
+            connecting: 'Ba\u011flan\u0131yor\u2026',
+            connected: 'Ba\u011fl\u0131',
+            live: 'Canl\u0131',
+            waiting: 'Oturum ba\u015flamas\u0131 bekleniyor\u2026',
+            sessionEnded: 'Oturum sona erdi',
+            invalidLink: 'Ge\u00e7ersiz veya s\u00fcresi dolmu\u015f ba\u011flant\u0131',
+            disconnected: 'Ba\u011flant\u0131 kesildi',
+            connError: 'Ba\u011flant\u0131 hatas\u0131',
+            selectLang: '-- Diliniz --',
+            selectLangFirst: '\u00d6nce dilinizi se\u00e7in',
+            waitingForSession: 'Oturum bekleniyor\u2026',
+            tapToSpeak: 'Konu\u015fmak i\u00e7in dokunun',
+            listening: 'Dinliyor\u2026',
+            muted: 'Sessiz',
+            micDenied: 'Mikrofon eri\u015fimi reddedildi',
+            micNotSupported: 'Mikrofon desteklenmiyor',
+            requiresHttps: 'HTTPS gerekli',
+            endedTitle: 'Oturum sona erdi',
+            endedBody:
+                'Kay\u0131t durduruldu. Transkript incelemeniz i\u00e7in saklanm\u0131\u015ft\u0131r.',
+        },
+        ru: {
+            title: '\u0423\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u0435 \u043e \u043a\u043e\u043d\u0444\u0438\u0434\u0435\u043d\u0446\u0438\u0430\u043b\u044c\u043d\u043e\u0441\u0442\u0438',
+            body: '\u041c\u044b \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u0443\u0435\u043c \u043f\u0440\u043e\u0433\u0440\u0430\u043c\u043c\u0443 \u0434\u043b\u044f \u0443\u0441\u0442\u043d\u043e\u0433\u043e \u043f\u0435\u0440\u0435\u0432\u043e\u0434\u0430. \u0417\u0430\u0449\u0438\u0442\u0430 \u0434\u0430\u043d\u043d\u044b\u0445 \u0433\u0430\u0440\u0430\u043d\u0442\u0438\u0440\u043e\u0432\u0430\u043d\u0430 \u2013 \u0434\u0430\u043d\u043d\u044b\u0435 \u043d\u0435 \u0441\u043e\u0445\u0440\u0430\u043d\u044f\u044e\u0442\u0441\u044f. \u041f\u043e\u0436\u0430\u043b\u0443\u0439\u0441\u0442\u0430, \u0433\u043e\u0432\u043e\u0440\u0438\u0442\u0435 \u0447\u0451\u0442\u043a\u043e, \u043c\u0435\u0434\u043b\u0435\u043d\u043d\u043e, \u043a\u043e\u0440\u043e\u0442\u043a\u0438\u043c\u0438 \u0438 \u043f\u0440\u043e\u0441\u0442\u044b\u043c\u0438 \u043f\u0440\u0435\u0434\u043b\u043e\u0436\u0435\u043d\u0438\u044f\u043c\u0438 \u0431\u0435\u0437 \u0434\u0438\u0430\u043b\u0435\u043a\u0442\u0430. \u041f\u043e\u0441\u043b\u0435 \u043e\u0434\u043d\u043e\u0433\u043e-\u0434\u0432\u0443\u0445 \u043f\u0440\u0435\u0434\u043b\u043e\u0436\u0435\u043d\u0438\u0439 \u0441\u0434\u0435\u043b\u0430\u0439\u0442\u0435 \u043f\u0430\u0443\u0437\u0443 \u0434\u043b\u044f \u043f\u0435\u0440\u0435\u0432\u043e\u0434\u0430. \u041f\u0440\u0438 \u043d\u0435\u0434\u043e\u0440\u0430\u0437\u0443\u043c\u0435\u043d\u0438\u044f\u0445, \u043f\u043e\u0436\u0430\u043b\u0443\u0439\u0441\u0442\u0430, \u043f\u043e\u0432\u0442\u043e\u0440\u0438\u0442\u0435 \u0438\u043b\u0438 \u043f\u0435\u0440\u0435\u0444\u0440\u0430\u0437\u0438\u0440\u0443\u0439\u0442\u0435. \u041d\u0430\u0436\u043c\u0438\u0442\u0435 \u0437\u0434\u0435\u0441\u044c, \u0447\u0442\u043e\u0431\u044b \u043f\u0440\u0438\u043d\u044f\u0442\u044c \u0443\u0441\u043b\u043e\u0432\u0438\u044f \u0437\u0430\u0449\u0438\u0442\u044b \u0434\u0430\u043d\u043d\u044b\u0445. \u041f\u0440\u0438\u043c\u0435\u0447\u0430\u043d\u0438\u0435: SGA \u043c\u043e\u0436\u0435\u0442 \u0434\u043e\u043f\u0443\u0441\u043a\u0430\u0442\u044c \u043e\u0448\u0438\u0431\u043a\u0438. \u041f\u0440\u043e\u0432\u0435\u0440\u044f\u0439\u0442\u0435 \u0432\u0430\u0436\u043d\u0443\u044e \u0438\u043d\u0444\u043e\u0440\u043c\u0430\u0446\u0438\u044e.',
+            accept: '\u041f\u0440\u0438\u043d\u0438\u043c\u0430\u044e',
+            connecting: '\u041f\u043e\u0434\u043a\u043b\u044e\u0447\u0435\u043d\u0438\u0435\u2026',
+            connected: '\u041f\u043e\u0434\u043a\u043b\u044e\u0447\u0435\u043d\u043e',
+            live: '\u041f\u0440\u044f\u043c\u043e\u0439 \u044d\u0444\u0438\u0440',
+            waiting:
+                '\u041e\u0436\u0438\u0434\u0430\u043d\u0438\u0435 \u043d\u0430\u0447\u0430\u043b\u0430 \u0441\u0435\u0441\u0441\u0438\u0438\u2026',
+            sessionEnded:
+                '\u0421\u0435\u0441\u0441\u0438\u044f \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043d\u0430',
+            invalidLink:
+                '\u041d\u0435\u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0442\u0435\u043b\u044c\u043d\u0430\u044f \u0438\u043b\u0438 \u0443\u0441\u0442\u0430\u0440\u0435\u0432\u0448\u0430\u044f \u0441\u0441\u044b\u043b\u043a\u0430',
+            disconnected: '\u041e\u0442\u043a\u043b\u044e\u0447\u0435\u043d\u043e',
+            connError:
+                '\u041e\u0448\u0438\u0431\u043a\u0430 \u043f\u043e\u0434\u043a\u043b\u044e\u0447\u0435\u043d\u0438\u044f',
+            selectLang: '-- \u0412\u0430\u0448 \u044f\u0437\u044b\u043a --',
+            selectLangFirst:
+                '\u0421\u043d\u0430\u0447\u0430\u043b\u0430 \u0432\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u044f\u0437\u044b\u043a',
+            waitingForSession:
+                '\u041e\u0436\u0438\u0434\u0430\u043d\u0438\u0435 \u0441\u0435\u0441\u0441\u0438\u0438\u2026',
+            tapToSpeak:
+                '\u041d\u0430\u0436\u043c\u0438\u0442\u0435 \u0434\u043b\u044f \u0440\u0430\u0437\u0433\u043e\u0432\u043e\u0440\u0430',
+            listening: '\u0421\u043b\u0443\u0448\u0430\u044e\u2026',
+            muted: '\u041e\u0442\u043a\u043b\u044e\u0447\u0435\u043d\u043e',
+            micDenied:
+                '\u0414\u043e\u0441\u0442\u0443\u043f \u043a \u043c\u0438\u043a\u0440\u043e\u0444\u043e\u043d\u0443 \u0437\u0430\u043f\u0440\u0435\u0449\u0435\u043d',
+            micNotSupported:
+                '\u041c\u0438\u043a\u0440\u043e\u0444\u043e\u043d \u043d\u0435 \u043f\u043e\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0435\u0442\u0441\u044f',
+            requiresHttps: '\u0422\u0440\u0435\u0431\u0443\u0435\u0442\u0441\u044f HTTPS',
+            endedTitle:
+                '\u0421\u0435\u0441\u0441\u0438\u044f \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043d\u0430',
+            endedBody:
+                '\u0417\u0430\u043f\u0438\u0441\u044c \u043e\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u0430. \u0422\u0440\u0430\u043d\u0441\u043a\u0440\u0438\u043f\u0446\u0438\u044f \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0430 \u0434\u043b\u044f \u043f\u0440\u043e\u0441\u043c\u043e\u0442\u0440\u0430.',
+        },
+        uk: {
+            title: '\u041f\u043e\u0432\u0456\u0434\u043e\u043c\u043b\u0435\u043d\u043d\u044f \u043f\u0440\u043e \u043a\u043e\u043d\u0444\u0456\u0434\u0435\u043d\u0446\u0456\u0439\u043d\u0456\u0441\u0442\u044c',
+            body: '\u041c\u0438 \u0432\u0438\u043a\u043e\u0440\u0438\u0441\u0442\u043e\u0432\u0443\u0454\u043c\u043e \u043f\u0440\u043e\u0433\u0440\u0430\u043c\u0443 \u0434\u043b\u044f \u0443\u0441\u043d\u043e\u0433\u043e \u043f\u0435\u0440\u0435\u043a\u043b\u0430\u0434\u0443. \u0417\u0430\u0445\u0438\u0441\u0442 \u0434\u0430\u043d\u0438\u0445 \u0433\u0430\u0440\u0430\u043d\u0442\u043e\u0432\u0430\u043d\u043e \u2013 \u0436\u043e\u0434\u043d\u0456 \u0434\u0430\u043d\u0456 \u043d\u0435 \u0437\u0431\u0435\u0440\u0456\u0433\u0430\u044e\u0442\u044c\u0441\u044f. \u0411\u0443\u0434\u044c \u043b\u0430\u0441\u043a\u0430, \u0433\u043e\u0432\u043e\u0440\u0456\u0442\u044c \u0447\u0456\u0442\u043a\u043e, \u043f\u043e\u0432\u0456\u043b\u044c\u043d\u043e, \u043a\u043e\u0440\u043e\u0442\u043a\u0438\u043c\u0438 \u0456 \u043f\u0440\u043e\u0441\u0442\u0438\u043c\u0438 \u0440\u0435\u0447\u0435\u043d\u043d\u044f\u043c\u0438 \u0431\u0435\u0437 \u0434\u0456\u0430\u043b\u0435\u043a\u0442\u0443. \u041f\u0456\u0441\u043b\u044f \u043e\u0434\u043d\u043e\u0433\u043e-\u0434\u0432\u043e\u0445 \u0440\u0435\u0447\u0435\u043d\u044c \u0437\u0440\u043e\u0431\u0456\u0442\u044c \u043f\u0430\u0443\u0437\u0443 \u0434\u043b\u044f \u043f\u0435\u0440\u0435\u043a\u043b\u0430\u0434\u0443. \u0423 \u0440\u0430\u0437\u0456 \u043d\u0435\u043f\u043e\u0440\u043e\u0437\u0443\u043c\u0456\u043d\u044c, \u0431\u0443\u0434\u044c \u043b\u0430\u0441\u043a\u0430, \u043f\u043e\u0432\u0442\u043e\u0440\u0456\u0442\u044c \u0430\u0431\u043e \u043f\u0435\u0440\u0435\u0444\u0440\u0430\u0437\u0443\u0439\u0442\u0435. \u041d\u0430\u0442\u0438\u0441\u043d\u0456\u0442\u044c \u0442\u0443\u0442, \u0449\u043e\u0431 \u043f\u0440\u0438\u0439\u043d\u044f\u0442\u0438 \u0443\u043c\u043e\u0432\u0438 \u0437\u0430\u0445\u0438\u0441\u0442\u0443 \u0434\u0430\u043d\u0438\u0445. \u041f\u0440\u0438\u043c\u0456\u0442\u043a\u0430: SGA \u043c\u043e\u0436\u0435 \u0434\u043e\u043f\u0443\u0441\u043a\u0430\u0442\u0438 \u043f\u043e\u043c\u0438\u043b\u043a\u0438. \u041f\u0435\u0440\u0435\u0432\u0456\u0440\u044f\u0439\u0442\u0435 \u0432\u0430\u0436\u043b\u0438\u0432\u0443 \u0456\u043d\u0444\u043e\u0440\u043c\u0430\u0446\u0456\u044e.',
+            accept: '\u041f\u0440\u0438\u0439\u043c\u0430\u044e',
+            connecting: '\u041f\u0456\u0434\u043a\u043b\u044e\u0447\u0435\u043d\u043d\u044f\u2026',
+            connected: '\u041f\u0456\u0434\u043a\u043b\u044e\u0447\u0435\u043d\u043e',
+            live: '\u041d\u0430\u0436\u0438\u0432\u043e',
+            waiting:
+                '\u041e\u0447\u0456\u043a\u0443\u0432\u0430\u043d\u043d\u044f \u043f\u043e\u0447\u0430\u0442\u043a\u0443 \u0441\u0435\u0441\u0456\u0457\u2026',
+            sessionEnded:
+                '\u0421\u0435\u0441\u0456\u044e \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043d\u043e',
+            invalidLink:
+                '\u041d\u0435\u0434\u0456\u0439\u0441\u043d\u0435 \u0430\u0431\u043e \u043f\u0440\u043e\u0442\u0435\u0440\u043c\u0456\u043d\u043e\u0432\u0430\u043d\u0435 \u043f\u043e\u0441\u0438\u043b\u0430\u043d\u043d\u044f',
+            disconnected: '\u0412\u0456\u0434\u043a\u043b\u044e\u0447\u0435\u043d\u043e',
+            connError:
+                '\u041f\u043e\u043c\u0438\u043b\u043a\u0430 \u043f\u0456\u0434\u043a\u043b\u044e\u0447\u0435\u043d\u043d\u044f',
+            selectLang: '-- \u0412\u0430\u0448\u0430 \u043c\u043e\u0432\u0430 --',
+            selectLangFirst:
+                '\u0421\u043f\u043e\u0447\u0430\u0442\u043a\u0443 \u043e\u0431\u0435\u0440\u0456\u0442\u044c \u043c\u043e\u0432\u0443',
+            waitingForSession:
+                '\u041e\u0447\u0456\u043a\u0443\u0432\u0430\u043d\u043d\u044f \u0441\u0435\u0441\u0456\u0457\u2026',
+            tapToSpeak:
+                '\u041d\u0430\u0442\u0438\u0441\u043d\u0456\u0442\u044c \u0434\u043b\u044f \u0440\u043e\u0437\u043c\u043e\u0432\u0438',
+            listening: '\u0421\u043b\u0443\u0445\u0430\u044e\u2026',
+            muted: '\u0412\u0438\u043c\u043a\u043d\u0435\u043d\u043e',
+            micDenied:
+                '\u0414\u043e\u0441\u0442\u0443\u043f \u0434\u043e \u043c\u0456\u043a\u0440\u043e\u0444\u043e\u043d\u0430 \u0437\u0430\u0431\u043e\u0440\u043e\u043d\u0435\u043d\u043e',
+            micNotSupported:
+                '\u041c\u0456\u043a\u0440\u043e\u0444\u043e\u043d \u043d\u0435 \u043f\u0456\u0434\u0442\u0440\u0438\u043c\u0443\u0454\u0442\u044c\u0441\u044f',
+            requiresHttps: '\u041f\u043e\u0442\u0440\u0456\u0431\u043d\u043e HTTPS',
+            endedTitle:
+                '\u0421\u0435\u0441\u0456\u044e \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043d\u043e',
+            endedBody:
+                '\u0417\u0430\u043f\u0438\u0441 \u0437\u0443\u043f\u0438\u043d\u0435\u043d\u043e. \u0422\u0440\u0430\u043d\u0441\u043a\u0440\u0438\u043f\u0446\u0456\u044e \u0437\u0431\u0435\u0440\u0435\u0436\u0435\u043d\u043e \u0434\u043b\u044f \u043f\u0435\u0440\u0435\u0433\u043b\u044f\u0434\u0443.',
+        },
+        hu: {
+            title: 'Adatv\u00e9delmi \u00e9s haszn\u00e1lati t\u00e1j\u00e9koztat\u00f3',
+            body: 'Tolm\u00e1csszoftvert haszn\u00e1lunk. Az adatv\u00e9delem biztos\u00edtott \u2013 semmilyen adat nem ker\u00fcl t\u00e1rol\u00e1sra. K\u00e9rj\u00fck, besz\u00e9ljen tiszt\u00e1n, lassan, r\u00f6vid \u00e9s egyszer\u0171 mondatokban, nyelvj\u00e1r\u00e1s n\u00e9lk\u00fcl. Egy-k\u00e9t mondat ut\u00e1n tartson sz\u00fcnetet a ford\u00edt\u00e1shoz. F\u00e9lre\u00e9rt\u00e9s eset\u00e9n k\u00e9rj\u00fck, ism\u00e9telje meg vagy fogalmazza \u00e1t. Kattintson ide az adatv\u00e9delmi felt\u00e9telek elfogad\u00e1s\u00e1hoz. Megjegyz\u00e9s: Az SGA hib\u00e1zhat. Ellen\u0151rizze a fontos inform\u00e1ci\u00f3kat.',
+            accept: 'Elfogadom',
+            connecting: 'Csatlakoz\u00e1s\u2026',
+            connected: 'Csatlakozva',
+            live: '\u00c9l\u0151',
+            waiting: 'V\u00e1rakoz\u00e1s a munkamenet ind\u00edt\u00e1s\u00e1ra\u2026',
+            sessionEnded: 'Munkamenet befejez\u0151d\u00f6tt',
+            invalidLink: '\u00c9rv\u00e9nytelen vagy lej\u00e1rt hivatkoz\u00e1s',
+            disconnected: 'Lecsatlakozva',
+            connError: 'Kapcsolati hiba',
+            selectLang: '-- Az \u00d6n nyelve --',
+            selectLangFirst: 'El\u0151sz\u00f6r v\u00e1lassza ki a nyelv\u00e9t',
+            waitingForSession: 'V\u00e1rakoz\u00e1s\u2026',
+            tapToSpeak: '\u00c9rintse meg a besz\u00e9dhez',
+            listening: 'Hallgat\u2026',
+            muted: 'N\u00e9m\u00edtva',
+            micDenied: 'Mikrofon-hozz\u00e1f\u00e9r\u00e9s megtagadva',
+            micNotSupported: 'Mikrofon nem t\u00e1mogatott',
+            requiresHttps: 'HTTPS sz\u00fcks\u00e9ges',
+            endedTitle: 'Munkamenet befejez\u0151d\u00f6tt',
+            endedBody: 'A felv\u00e9tel le\u00e1llt. Az \u00e1tirat megtekinthet\u0151.',
+        },
+        sr: {
+            title: '\u041e\u0431\u0430\u0432\u0435\u0448\u0442\u0435\u045a\u0435 \u043e \u043f\u0440\u0438\u0432\u0430\u0442\u043d\u043e\u0441\u0442\u0438',
+            body: '\u041a\u043e\u0440\u0438\u0441\u0442\u0438\u043c\u043e \u0441\u043e\u0444\u0442\u0432\u0435\u0440 \u0437\u0430 \u043f\u0440\u0435\u0432\u043e\u0452\u0435\u045a\u0435. \u0417\u0430\u0448\u0442\u0438\u0442\u0430 \u043f\u043e\u0434\u0430\u0442\u0430\u043a\u0430 \u0458\u0435 \u0437\u0430\u0433\u0430\u0440\u0430\u043d\u0442\u043e\u0432\u0430\u043d\u0430 \u2013 \u043f\u043e\u0434\u0430\u0446\u0438 \u0441\u0435 \u043d\u0435 \u0447\u0443\u0432\u0430\u0458\u0443. \u041c\u043e\u043b\u0438\u043c\u043e \u0433\u043e\u0432\u043e\u0440\u0438\u0442\u0435 \u0458\u0430\u0441\u043d\u043e, \u043f\u043e\u043b\u0430\u043a\u043e \u0438 \u043a\u0440\u0430\u0442\u043a\u0438\u043c, \u0458\u0435\u0434\u043d\u043e\u0441\u0442\u0430\u0432\u043d\u0438\u043c \u0440\u0435\u0447\u0435\u043d\u0438\u0446\u0430\u043c\u0430 \u0431\u0435\u0437 \u0434\u0438\u0458\u0430\u043b\u0435\u043a\u0442\u0430. \u041d\u0430\u043f\u0440\u0430\u0432\u0438\u0442\u0435 \u043f\u0430\u0443\u0437\u0443 \u043d\u0430\u043a\u043e\u043d \u0458\u0435\u0434\u043d\u0435 \u0438\u043b\u0438 \u0434\u0432\u0435 \u0440\u0435\u0447\u0435\u043d\u0438\u0446\u0435 \u0437\u0430 \u043f\u0440\u0435\u0432\u043e\u0434. \u0423 \u0441\u043b\u0443\u0447\u0430\u0458\u0443 \u043d\u0435\u0441\u043f\u043e\u0440\u0430\u0437\u0443\u043c\u0430, \u043f\u043e\u043d\u043e\u0432\u0438\u0442\u0435 \u0438\u043b\u0438 \u043f\u0440\u0435\u0444\u043e\u0440\u043c\u0443\u043b\u0438\u0448\u0438\u0442\u0435. \u041a\u043b\u0438\u043a\u043d\u0438\u0442\u0435 \u043e\u0432\u0434\u0435 \u0437\u0430 \u043f\u0440\u0438\u0445\u0432\u0430\u0442\u0430\u045a\u0435 \u0443\u0441\u043b\u043e\u0432\u0430 \u0437\u0430\u0448\u0442\u0438\u0442\u0435 \u043f\u043e\u0434\u0430\u0442\u0430\u043a\u0430. \u041d\u0430\u043f\u043e\u043c\u0435\u043d\u0430: SGA \u043c\u043e\u0436\u0435 \u043f\u0440\u0430\u0432\u0438\u0442\u0438 \u0433\u0440\u0435\u0448\u043a\u0435. \u041f\u0440\u043e\u0432\u0435\u0440\u0438\u0442\u0435 \u0432\u0430\u0436\u043d\u0435 \u0438\u043d\u0444\u043e\u0440\u043c\u0430\u0446\u0438\u0458\u0435.',
+            accept: '\u041f\u0440\u0438\u0445\u0432\u0430\u0442\u0430\u043c',
+            connecting: '\u041f\u043e\u0432\u0435\u0437\u0438\u0432\u0430\u045a\u0435\u2026',
+            connected: '\u041f\u043e\u0432\u0435\u0437\u0430\u043d\u043e',
+            live: '\u0423\u0436\u0438\u0432\u043e',
+            waiting:
+                '\u0427\u0435\u043a\u0430\u045a\u0435 \u043f\u043e\u0447\u0435\u0442\u043a\u0430 \u0441\u0435\u0441\u0438\u0458\u0435\u2026',
+            sessionEnded:
+                '\u0421\u0435\u0441\u0438\u0458\u0430 \u0437\u0430\u0432\u0440\u0448\u0435\u043d\u0430',
+            invalidLink:
+                '\u041d\u0435\u0432\u0430\u0436\u0435\u045b\u0430 \u0438\u043b\u0438 \u0438\u0441\u0442\u0435\u043a\u043b\u0430 \u0432\u0435\u0437\u0430',
+            disconnected: '\u041f\u0440\u0435\u043a\u0438\u043d\u0443\u0442\u043e',
+            connError:
+                '\u0413\u0440\u0435\u0448\u043a\u0430 \u043f\u043e\u0432\u0435\u0437\u0438\u0432\u0430\u045a\u0430',
+            selectLang: '-- \u0412\u0430\u0448 \u0458\u0435\u0437\u0438\u043a --',
+            selectLangFirst:
+                '\u041f\u0440\u0432\u043e \u0438\u0437\u0430\u0431\u0435\u0440\u0438\u0442\u0435 \u0458\u0435\u0437\u0438\u043a',
+            waitingForSession:
+                '\u0427\u0435\u043a\u0430\u045a\u0435 \u0441\u0435\u0441\u0438\u0458\u0435\u2026',
+            tapToSpeak:
+                '\u0414\u043e\u0434\u0438\u0440\u043d\u0438\u0442\u0435 \u0437\u0430 \u0433\u043e\u0432\u043e\u0440',
+            listening: '\u0421\u043b\u0443\u0448\u0430\u2026',
+            muted: '\u0423\u0442\u0438\u0448\u0430\u043d\u043e',
+            micDenied:
+                '\u041f\u0440\u0438\u0441\u0442\u0443\u043f \u043c\u0438\u043a\u0440\u043e\u0444\u043e\u043d\u0443 \u043e\u0434\u0431\u0438\u0458\u0435\u043d',
+            micNotSupported:
+                '\u041c\u0438\u043a\u0440\u043e\u0444\u043e\u043d \u043d\u0438\u0458\u0435 \u043f\u043e\u0434\u0440\u0436\u0430\u043d',
+            requiresHttps: '\u041f\u043e\u0442\u0440\u0435\u0431\u0430\u043d HTTPS',
+            endedTitle:
+                '\u0421\u0435\u0441\u0438\u0458\u0430 \u0437\u0430\u0432\u0440\u0448\u0435\u043d\u0430',
+            endedBody:
+                '\u0421\u043d\u0438\u043c\u0430\u045a\u0435 \u0458\u0435 \u0437\u0430\u0443\u0441\u0442\u0430\u0432\u0459\u0435\u043d\u043e. \u0422\u0440\u0430\u043d\u0441\u043a\u0440\u0438\u043f\u0442 \u0458\u0435 \u0441\u0430\u0447\u0443\u0432\u0430\u043d \u0437\u0430 \u043f\u0440\u0435\u0433\u043b\u0435\u0434.',
+        },
+        sq: {
+            title: 'Njoftim p\u00ebr privat\u00ebsin\u00eb',
+            body: 'P\u00ebrdorim softuer p\u00ebr p\u00ebrkthim. Mbrojtja e t\u00eb dh\u00ebnave \u00ebsht\u00eb e garantuar \u2013 nuk ruhen t\u00eb dh\u00ebna. Ju lutemi flisni qart\u00eb, ngadal\u00eb dhe me fjali t\u00eb shkurtra e t\u00eb thjeshta, pa dialekt. B\u00ebni nj\u00eb pauz\u00eb pas nj\u00eb ose dy fjalive p\u00ebr p\u00ebrkthimin. N\u00eb rast keqkuptimesh, ju lutemi p\u00ebrs\u00ebritni ose riformuloni. Klikoni k\u00ebtu p\u00ebr t\u00eb pranuar kushtet e mbrojtjes s\u00eb t\u00eb dh\u00ebnave. Sh\u00ebnim: SGA mund t\u00eb b\u00ebj\u00eb gabime. Verifikoni informacionet e r\u00ebndesishme.',
+            accept: 'Pranoj',
+            connecting: 'Po lidhet\u2026',
+            connected: 'I lidhur',
+            live: 'Live',
+            waiting: 'Duke pritur fillimin e sesionit\u2026',
+            sessionEnded: 'Sesioni p\u00ebrfundoi',
+            invalidLink: 'Link i pavlefsh\u00ebm ose i skaduar',
+            disconnected: 'I shk\u00ebputur',
+            connError: 'Gabim n\u00eb lidhje',
+            selectLang: '-- Gjuha juaj --',
+            selectLangFirst: 'Zgjidhni gjuh\u00ebn tuat\u00eb fillimisht',
+            waitingForSession: 'Duke pritur sesionin\u2026',
+            tapToSpeak: 'Prekni p\u00ebr t\u00eb folur',
+            listening: 'Duke d\u00ebgjuar\u2026',
+            muted: 'Pa z\u00eb',
+            micDenied: 'Qasja n\u00eb mikrofon u refuzua',
+            micNotSupported: 'Mikrofoni nuk mb\u00ebshtet\u0117t',
+            requiresHttps: 'K\u00ebrkon HTTPS',
+            endedTitle: 'Sesioni p\u00ebrfundoi',
+            endedBody:
+                'Regjistrimi \u00ebsht\u00eb ndalur. Transkripti \u00ebsht\u00eb ruajtur p\u00ebr shqyrtimin tuaj.',
+        },
+        ar: {
+            title: '\u0625\u0634\u0639\u0627\u0631 \u0627\u0644\u062e\u0635\u0648\u0635\u064a\u0629 \u0648\u0627\u0644\u0627\u0633\u062a\u062e\u062f\u0627\u0645',
+            body: '\u0646\u0633\u062a\u062e\u062f\u0645 \u0628\u0631\u0646\u0627\u0645\u062c \u062a\u0631\u062c\u0645\u0629 \u0641\u0648\u0631\u064a\u0629. \u062d\u0645\u0627\u064a\u0629 \u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a \u0645\u0636\u0645\u0648\u0646\u0629 \u2013 \u0644\u0627 \u064a\u062a\u0645 \u062a\u062e\u0632\u064a\u0646 \u0623\u064a \u0628\u064a\u0627\u0646\u0627\u062a. \u064a\u0631\u062c\u0649 \u0627\u0644\u062a\u062d\u062f\u062b \u0628\u0648\u0636\u0648\u062d \u0648\u0628\u0628\u0637\u0621 \u0648\u0628\u062c\u0645\u0644 \u0642\u0635\u064a\u0631\u0629 \u0648\u0628\u0633\u064a\u0637\u0629 \u0628\u062f\u0648\u0646 \u0644\u0647\u062c\u0629. \u062a\u0648\u0642\u0641 \u0628\u0639\u062f \u062c\u0645\u0644\u0629 \u0623\u0648 \u062c\u0645\u0644\u062a\u064a\u0646 \u0644\u0644\u062a\u0631\u062c\u0645\u0629. \u0641\u064a \u062d\u0627\u0644\u0629 \u0633\u0648\u0621 \u0627\u0644\u0641\u0647\u0645\u060c \u064a\u0631\u062c\u0649 \u0627\u0644\u062a\u0643\u0631\u0627\u0631 \u0623\u0648 \u0625\u0639\u0627\u062f\u0629 \u0627\u0644\u0635\u064a\u0627\u063a\u0629. \u0627\u0646\u0642\u0631 \u0647\u0646\u0627 \u0644\u0642\u0628\u0648\u0644 \u0634\u0631\u0648\u0637 \u062d\u0645\u0627\u064a\u0629 \u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a. \u0645\u0644\u0627\u062d\u0638\u0629: \u0642\u062f \u064a\u0631\u062a\u0643\u0628 \u0627\u0644\u0645\u0633\u0627\u0639\u062f \u0623\u062e\u0637\u0627\u0621. \u062a\u062d\u0642\u0642 \u0645\u0646 \u0627\u0644\u0645\u0639\u0644\u0648\u0645\u0627\u062a \u0627\u0644\u0645\u0647\u0645\u0629.',
+            accept: '\u0623\u0648\u0627\u0641\u0642',
+            connecting: '\u062c\u0627\u0631\u064d \u0627\u0644\u0627\u062a\u0635\u0627\u0644\u2026',
+            connected: '\u0645\u062a\u0635\u0644',
+            live: '\u0645\u0628\u0627\u0634\u0631',
+            waiting:
+                '\u0628\u0627\u0646\u062a\u0638\u0627\u0631 \u0628\u062f\u0621 \u0627\u0644\u062c\u0644\u0633\u0629\u2026',
+            sessionEnded: '\u0627\u0646\u062a\u0647\u062a \u0627\u0644\u062c\u0644\u0633\u0629',
+            invalidLink:
+                '\u0631\u0627\u0628\u0637 \u063a\u064a\u0631 \u0635\u0627\u0644\u062d \u0623\u0648 \u0645\u0646\u062a\u0647\u064a \u0627\u0644\u0635\u0644\u0627\u062d\u064a\u0629',
+            disconnected: '\u063a\u064a\u0631 \u0645\u062a\u0635\u0644',
+            connError: '\u062e\u0637\u0623 \u0641\u064a \u0627\u0644\u0627\u062a\u0635\u0627\u0644',
+            selectLang: '-- \u0644\u063a\u062a\u0643 --',
+            selectLangFirst:
+                '\u0627\u062e\u062a\u0631 \u0644\u063a\u062a\u0643 \u0623\u0648\u0644\u0627\u064b',
+            waitingForSession:
+                '\u0628\u0627\u0646\u062a\u0638\u0627\u0631 \u0627\u0644\u062c\u0644\u0633\u0629\u2026',
+            tapToSpeak: '\u0627\u0646\u0642\u0631 \u0644\u0644\u062a\u062d\u062f\u062b',
+            listening:
+                '\u062c\u0627\u0631\u064d \u0627\u0644\u0627\u0633\u062a\u0645\u0627\u0639\u2026',
+            muted: '\u0635\u0627\u0645\u062a',
+            micDenied:
+                '\u062a\u0645 \u0631\u0641\u0636 \u0627\u0644\u0648\u0635\u0648\u0644 \u0644\u0644\u0645\u064a\u0643\u0631\u0648\u0641\u0648\u0646',
+            micNotSupported:
+                '\u0627\u0644\u0645\u064a\u0643\u0631\u0648\u0641\u0648\u0646 \u063a\u064a\u0631 \u0645\u062f\u0639\u0648\u0645',
+            requiresHttps: '\u064a\u062a\u0637\u0644\u0628 HTTPS',
+            endedTitle: '\u0627\u0646\u062a\u0647\u062a \u0627\u0644\u062c\u0644\u0633\u0629',
+            endedBody:
+                '\u062a\u0645 \u0625\u064a\u0642\u0627\u0641 \u0627\u0644\u062a\u0633\u062c\u064a\u0644. \u0627\u0644\u0646\u0635 \u0645\u062d\u0641\u0648\u0638 \u0644\u0644\u0645\u0631\u0627\u062c\u0639\u0629.',
+            translationFailed:
+                '\u0641\u0634\u0644\u062a \u0627\u0644\u062a\u0631\u062c\u0645\u0629',
+        },
+        fa: {
+            title: '\u0627\u0637\u0644\u0627\u0639\u06cc\u0647 \u062d\u0631\u06cc\u0645 \u062e\u0635\u0648\u0635\u06cc \u0648 \u0627\u0633\u062a\u0641\u0627\u062f\u0647',
+            body: '\u0645\u0627 \u0627\u0632 \u0646\u0631\u0645\u200c\u0627\u0641\u0632\u0627\u0631 \u062a\u0631\u062c\u0645\u0647 \u0647\u0645\u0632\u0645\u0627\u0646 \u0627\u0633\u062a\u0641\u0627\u062f\u0647 \u0645\u06cc\u200c\u06a9\u0646\u06cc\u0645. \u062d\u0641\u0627\u0638\u062a \u0627\u0632 \u062f\u0627\u062f\u0647\u200c\u0647\u0627 \u062a\u0636\u0645\u06cc\u0646 \u0634\u062f\u0647 \u0627\u0633\u062a \u2013 \u0647\u06cc\u0686 \u062f\u0627\u062f\u0647\u200c\u0627\u06cc \u0630\u062e\u06cc\u0631\u0647 \u0646\u0645\u06cc\u200c\u0634\u0648\u062f. \u0644\u0637\u0641\u0627\u064b \u0648\u0627\u0636\u062d\u060c \u0622\u0647\u0633\u062a\u0647 \u0648 \u0628\u0627 \u062c\u0645\u0644\u0627\u062a \u06a9\u0648\u062a\u0627\u0647 \u0648 \u0633\u0627\u062f\u0647 \u0628\u062f\u0648\u0646 \u0644\u0647\u062c\u0647 \u0635\u062d\u0628\u062a \u06a9\u0646\u06cc\u062f. \u067e\u0633 \u0627\u0632 \u06cc\u06a9 \u06cc\u0627 \u062f\u0648 \u062c\u0645\u0644\u0647 \u0628\u0631\u0627\u06cc \u062a\u0631\u062c\u0645\u0647 \u0645\u06a9\u062b \u06a9\u0646\u06cc\u062f. \u062f\u0631 \u0635\u0648\u0631\u062a \u0633\u0648\u0621 \u062a\u0641\u0627\u0647\u0645\u060c \u0644\u0637\u0641\u0627\u064b \u062a\u06a9\u0631\u0627\u0631 \u06a9\u0646\u06cc\u062f \u06cc\u0627 \u062f\u0648\u0628\u0627\u0631\u0647 \u0628\u06cc\u0627\u0646 \u06a9\u0646\u06cc\u062f. \u0628\u0631\u0627\u06cc \u067e\u0630\u06cc\u0631\u0634 \u0634\u0631\u0627\u06cc\u0637 \u062d\u0641\u0627\u0638\u062a \u0627\u0632 \u062f\u0627\u062f\u0647\u200c\u0647\u0627 \u0627\u06cc\u0646\u062c\u0627 \u06a9\u0644\u06cc\u06a9 \u06a9\u0646\u06cc\u062f. \u062a\u0648\u062c\u0647: \u062f\u0633\u062a\u06cc\u0627\u0631 \u0645\u0645\u06a9\u0646 \u0627\u0633\u062a \u062e\u0637\u0627 \u06a9\u0646\u062f. \u0627\u0637\u0644\u0627\u0639\u0627\u062a \u0645\u0647\u0645 \u0631\u0627 \u0628\u0631\u0631\u0633\u06cc \u06a9\u0646\u06cc\u062f.',
+            accept: '\u0645\u06cc\u200c\u067e\u0630\u06cc\u0631\u0645',
+            connecting: '\u062f\u0631 \u062d\u0627\u0644 \u0627\u062a\u0635\u0627\u0644\u2026',
+            connected: '\u0645\u062a\u0635\u0644',
+            live: '\u0632\u0646\u062f\u0647',
+            waiting:
+                '\u062f\u0631 \u0627\u0646\u062a\u0638\u0627\u0631 \u0634\u0631\u0648\u0639 \u062c\u0644\u0633\u0647\u2026',
+            sessionEnded:
+                '\u062c\u0644\u0633\u0647 \u067e\u0627\u06cc\u0627\u0646 \u06cc\u0627\u0641\u062a',
+            invalidLink:
+                '\u0644\u06cc\u0646\u06a9 \u0646\u0627\u0645\u0639\u062a\u0628\u0631 \u06cc\u0627 \u0645\u0646\u0642\u0636\u06cc',
+            disconnected: '\u0642\u0637\u0639 \u0634\u062f\u0647',
+            connError: '\u062e\u0637\u0627\u06cc \u0627\u062a\u0635\u0627\u0644',
+            selectLang: '-- \u0632\u0628\u0627\u0646 \u0634\u0645\u0627 --',
+            selectLangFirst:
+                '\u0627\u0628\u062a\u062f\u0627 \u0632\u0628\u0627\u0646 \u062e\u0648\u062f \u0631\u0627 \u0627\u0646\u062a\u062e\u0627\u0628 \u06a9\u0646\u06cc\u062f',
+            waitingForSession:
+                '\u062f\u0631 \u0627\u0646\u062a\u0638\u0627\u0631 \u062c\u0644\u0633\u0647\u2026',
+            tapToSpeak:
+                '\u0628\u0631\u0627\u06cc \u0635\u062d\u0628\u062a \u0644\u0645\u0633 \u06a9\u0646\u06cc\u062f',
+            listening:
+                '\u062f\u0631 \u062d\u0627\u0644 \u06af\u0648\u0634 \u062f\u0627\u062f\u0646\u2026',
+            muted: '\u0628\u06cc\u200c\u0635\u062f\u0627',
+            micDenied:
+                '\u062f\u0633\u062a\u0631\u0633\u06cc \u0628\u0647 \u0645\u06cc\u06a9\u0631\u0648\u0641\u0648\u0646 \u0631\u062f \u0634\u062f',
+            micNotSupported:
+                '\u0645\u06cc\u06a9\u0631\u0648\u0641\u0648\u0646 \u067e\u0634\u062a\u06cc\u0628\u0627\u0646\u06cc \u0646\u0645\u06cc\u200c\u0634\u0648\u062f',
+            requiresHttps: '\u0646\u06cc\u0627\u0632 \u0628\u0647 HTTPS',
+            endedTitle:
+                '\u062c\u0644\u0633\u0647 \u067e\u0627\u06cc\u0627\u0646 \u06cc\u0627\u0641\u062a',
+            endedBody:
+                '\u0636\u0628\u0637 \u0645\u062a\u0648\u0642\u0641 \u0634\u062f. \u0631\u0648\u0646\u0648\u0634\u062a \u0628\u0631\u0627\u06cc \u0628\u0631\u0631\u0633\u06cc \u0630\u062e\u06cc\u0631\u0647 \u0634\u062f\u0647 \u0627\u0633\u062a.',
+            translationFailed:
+                '\u062a\u0631\u062c\u0645\u0647 \u0646\u0627\u0645\u0648\u0641\u0642 \u0628\u0648\u062f',
+        },
+    };
+
+    // PTT-specific i18n (separate to avoid editing all 17 language entries)
+    const PTT_I18N = {
+        de: {
+            holdToSpeak: 'Gedr\u00fcckt halten',
+            hostSpeaking: 'Gastgeber spricht\u2026',
+            pttActive: 'Sprechtaste aktiv',
+            translating: '\u00dcbersetzung l\u00e4uft\u2026',
+            consentTranscript:
+                'Ich bin mit der Erstellung eines zweisprachigen Gespr\u00e4chsprotokolls zum Download einverstanden.',
+            downloadTranscript: 'Protokoll herunterladen',
+            downloadFailed: 'Download fehlgeschlagen',
+            transcriptPrompt:
+                'Der Gastgeber m\u00f6chte ein schriftliches Gespr\u00e4chsprotokoll erstellen.',
+            transcriptYes: 'Einverstanden',
+            transcriptNo: 'Ablehnen',
+        },
+        en: {
+            holdToSpeak: 'Hold to speak',
+            hostSpeaking: 'Host is speaking\u2026',
+            pttActive: 'Push-to-Talk active',
+            translating: 'Translation in progress\u2026',
+            consentTranscript:
+                'I agree to the creation of a bilingual conversation transcript for download.',
+            downloadTranscript: 'Download transcript',
+            downloadFailed: 'Download failed',
+            transcriptPrompt:
+                'The host would like to create a written transcript of this conversation.',
+            transcriptYes: 'I agree',
+            transcriptNo: 'Decline',
+        },
+        fr: {
+            holdToSpeak: 'Maintenir pour parler',
+            hostSpeaking: 'L\u2019h\u00f4te parle\u2026',
+            pttActive: 'Appui-parole actif',
+            translating: 'Traduction en cours\u2026',
+            consentTranscript:
+                'J\u2019accepte la cr\u00e9ation d\u2019un proc\u00e8s-verbal bilingue de la conversation \u00e0 t\u00e9l\u00e9charger.',
+            downloadTranscript: 'T\u00e9l\u00e9charger le proc\u00e8s-verbal',
+            downloadFailed: '\u00c9chec du t\u00e9l\u00e9chargement',
+            transcriptPrompt:
+                'L\u2019h\u00f4te souhaite \u00e9tablir un proc\u00e8s-verbal \u00e9crit de la conversation.',
+            transcriptYes: 'J\u2019accepte',
+            transcriptNo: 'Refuser',
+        },
+        es: {
+            holdToSpeak: 'Mantener para hablar',
+            hostSpeaking: 'El anfitri\u00f3n habla\u2026',
+            pttActive: 'Pulsar para hablar activo',
+            translating: 'Traducci\u00f3n en curso\u2026',
+            consentTranscript:
+                'Acepto la creaci\u00f3n de un acta biling\u00fce de la conversaci\u00f3n para su descarga.',
+            downloadTranscript: 'Descargar acta',
+            downloadFailed: 'Descarga fallida',
+            transcriptPrompt:
+                'El anfitri\u00f3n desea elaborar un acta escrita de la conversaci\u00f3n.',
+            transcriptYes: 'De acuerdo',
+            transcriptNo: 'Rechazar',
+        },
+        it: {
+            holdToSpeak: 'Tieni premuto',
+            hostSpeaking: 'L\u2019ospite sta parlando\u2026',
+            pttActive: 'Premi per parlare attivo',
+            translating: 'Traduzione in corso\u2026',
+            consentTranscript:
+                'Accetto la creazione di un verbale bilingue della conversazione da scaricare.',
+            downloadTranscript: 'Scarica il verbale',
+            downloadFailed: 'Download non riuscito',
+            transcriptPrompt:
+                'L\u2019ospite desidera redigere un verbale scritto della conversazione.',
+            transcriptYes: 'Acconsento',
+            transcriptNo: 'Rifiuto',
+        },
+        pl: {
+            holdToSpeak: 'Przytrzymaj',
+            hostSpeaking: 'Gospodarz m\u00f3wi\u2026',
+            pttActive: 'Naci\u015bnij i m\u00f3w aktywne',
+            translating: 'T\u0142umaczenie w toku\u2026',
+            consentTranscript:
+                'Zgadzam si\u0119 na utworzenie dwuj\u0119zycznego protoko\u0142u rozmowy do pobrania.',
+            downloadTranscript: 'Pobierz protok\u00f3\u0142',
+            downloadFailed: 'Pobieranie nie powiod\u0142o si\u0119',
+            transcriptPrompt:
+                'Gospodarz chcia\u0142by sporz\u0105dzi\u0107 pisemny protok\u00f3\u0142 rozmowy.',
+            transcriptYes: 'Zgadzam si\u0119',
+            transcriptNo: 'Odrzucam',
+        },
+        ro: {
+            holdToSpeak: '\u021aine\u021bi ap\u0103sat',
+            hostSpeaking: 'Gazda vorbe\u0219te\u2026',
+            pttActive: 'Apas\u0103 pentru a vorbi activ',
+            translating: 'Se traduce\u2026',
+            consentTranscript:
+                'Sunt de acord cu crearea unui proces-verbal bilingv al conversa\u021biei pentru desc\u0103rcare.',
+            downloadTranscript: 'Descarc\u0103 procesul-verbal',
+            downloadFailed: 'Desc\u0103rcare e\u0219uat\u0103',
+            transcriptPrompt:
+                'Gazda dore\u0219te s\u0103 \u00eentocmeasc\u0103 un proces-verbal scris al conversa\u021biei.',
+            transcriptYes: 'Sunt de acord',
+            transcriptNo: 'Refuz',
+        },
+        hr: {
+            holdToSpeak: 'Dr\u017eite pritisnutim',
+            hostSpeaking: 'Doma\u0107in govori\u2026',
+            pttActive: 'Pritisni za govor aktivno',
+            translating: 'Prevo\u0111enje u tijeku\u2026',
+            consentTranscript:
+                'Sla\u017eem se s izradom dvojezi\u010dnog zapisnika razgovora za preuzimanje.',
+            downloadTranscript: 'Preuzmi zapisnik',
+            downloadFailed: 'Preuzimanje nije uspjelo',
+            transcriptPrompt: 'Doma\u0107in \u017eeli izraditi pisani zapisnik razgovora.',
+            transcriptYes: 'Sla\u017eem se',
+            transcriptNo: 'Odbijam',
+        },
+        bg: {
+            holdToSpeak: '\u0417\u0430\u0434\u0440\u044a\u0436\u0442\u0435',
+            hostSpeaking:
+                '\u0414\u043e\u043c\u0430\u043a\u0438\u043d\u044a\u0442 \u0433\u043e\u0432\u043e\u0440\u0438\u2026',
+            pttActive:
+                '\u041d\u0430\u0442\u0438\u0441\u043d\u0438 \u0437\u0430 \u0433\u043e\u0432\u043e\u0440',
+            translating: '\u041f\u0440\u0435\u0432\u0435\u0436\u0434\u0430\u043d\u0435\u2026',
+            consentTranscript:
+                '\u0421\u044a\u0433\u043b\u0430\u0441\u0435\u043d \u0441\u044a\u043c \u0441 \u0438\u0437\u0433\u043e\u0442\u0432\u044f\u043d\u0435\u0442\u043e \u043d\u0430 \u0434\u0432\u0443\u0435\u0437\u0438\u0447\u0435\u043d \u043f\u0440\u043e\u0442\u043e\u043a\u043e\u043b \u043e\u0442 \u0440\u0430\u0437\u0433\u043e\u0432\u043e\u0440\u0430 \u0437\u0430 \u0438\u0437\u0442\u0435\u0433\u043b\u044f\u043d\u0435.',
+            downloadTranscript:
+                '\u0418\u0437\u0442\u0435\u0433\u043b\u0438 \u043f\u0440\u043e\u0442\u043e\u043a\u043e\u043b\u0430',
+            downloadFailed:
+                '\u0418\u0437\u0442\u0435\u0433\u043b\u044f\u043d\u0435\u0442\u043e \u043d\u0435\u0443\u0441\u043f\u0435\u0448\u043d\u043e',
+            transcriptPrompt:
+                '\u0414\u043e\u043c\u0430\u043a\u0438\u043d\u044a\u0442 \u0436\u0435\u043b\u0430\u0435 \u0434\u0430 \u0438\u0437\u0433\u043e\u0442\u0432\u0438 \u043f\u0438\u0441\u043c\u0435\u043d \u043f\u0440\u043e\u0442\u043e\u043a\u043e\u043b \u043e\u0442 \u0440\u0430\u0437\u0433\u043e\u0432\u043e\u0440\u0430.',
+            transcriptYes: '\u0421\u044a\u0433\u043b\u0430\u0441\u0435\u043d \u0441\u044a\u043c',
+            transcriptNo: '\u041e\u0442\u043a\u0430\u0437\u0432\u0430\u043c',
+        },
+        tr: {
+            holdToSpeak: 'Bas\u0131l\u0131 tutun',
+            hostSpeaking: 'Ev sahibi konu\u015fuyor\u2026',
+            pttActive: 'Bas-konu\u015f aktif',
+            translating: '\u00c7eviriliyor\u2026',
+            consentTranscript:
+                'Konu\u015fman\u0131n indirilebilir iki dilli tutana\u011f\u0131n\u0131n haz\u0131rlanmas\u0131n\u0131 kabul ediyorum.',
+            downloadTranscript: 'Tutana\u011f\u0131 indir',
+            downloadFailed: '\u0130ndirme ba\u015far\u0131s\u0131z',
+            transcriptPrompt:
+                'Ev sahibi, g\u00f6r\u00fc\u015fmenin yaz\u0131l\u0131 bir tutana\u011f\u0131n\u0131 haz\u0131rlamak istiyor.',
+            transcriptYes: 'Kabul ediyorum',
+            transcriptNo: 'Reddediyorum',
+        },
+        ru: {
+            holdToSpeak: '\u0423\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0439\u0442\u0435',
+            hostSpeaking:
+                '\u0412\u0435\u0434\u0443\u0449\u0438\u0439 \u0433\u043e\u0432\u043e\u0440\u0438\u0442\u2026',
+            pttActive: '\u041d\u0430\u0436\u043c\u0438 \u0438 \u0433\u043e\u0432\u043e\u0440\u0438',
+            translating:
+                '\u0418\u0434\u0451\u0442 \u043f\u0435\u0440\u0435\u0432\u043e\u0434\u2026',
+            consentTranscript:
+                '\u042f \u0441\u043e\u0433\u043b\u0430\u0441\u0435\u043d \u043d\u0430 \u0441\u043e\u0437\u0434\u0430\u043d\u0438\u0435 \u0434\u0432\u0443\u044f\u0437\u044b\u0447\u043d\u043e\u0433\u043e \u043f\u0440\u043e\u0442\u043e\u043a\u043e\u043b\u0430 \u0431\u0435\u0441\u0435\u0434\u044b \u0434\u043b\u044f \u0441\u043a\u0430\u0447\u0438\u0432\u0430\u043d\u0438\u044f.',
+            downloadTranscript:
+                '\u0421\u043a\u0430\u0447\u0430\u0442\u044c \u043f\u0440\u043e\u0442\u043e\u043a\u043e\u043b',
+            downloadFailed:
+                '\u0421\u0431\u043e\u0439 \u0437\u0430\u0433\u0440\u0443\u0437\u043a\u0438',
+            transcriptPrompt:
+                '\u0412\u0435\u0434\u0443\u0449\u0438\u0439 \u0445\u043e\u0447\u0435\u0442 \u0441\u043e\u0441\u0442\u0430\u0432\u0438\u0442\u044c \u043f\u0438\u0441\u044c\u043c\u0435\u043d\u043d\u044b\u0439 \u043f\u0440\u043e\u0442\u043e\u043a\u043e\u043b \u0431\u0435\u0441\u0435\u0434\u044b.',
+            transcriptYes: '\u042f \u0441\u043e\u0433\u043b\u0430\u0441\u0435\u043d',
+            transcriptNo: '\u041e\u0442\u043a\u043b\u043e\u043d\u0438\u0442\u044c',
+        },
+        uk: {
+            holdToSpeak: '\u0423\u0442\u0440\u0438\u043c\u0443\u0439\u0442\u0435',
+            hostSpeaking:
+                '\u0412\u0435\u0434\u0443\u0447\u0438\u0439 \u0433\u043e\u0432\u043e\u0440\u0438\u0442\u044c\u2026',
+            pttActive:
+                '\u041d\u0430\u0442\u0438\u0441\u043d\u0438 \u0456 \u0433\u043e\u0432\u043e\u0440\u0438',
+            translating:
+                '\u0422\u0440\u0438\u0432\u0430\u0454 \u043f\u0435\u0440\u0435\u043a\u043b\u0430\u0434\u2026',
+            consentTranscript:
+                '\u042f \u0437\u0433\u043e\u0434\u0435\u043d \u043d\u0430 \u0441\u0442\u0432\u043e\u0440\u0435\u043d\u043d\u044f \u0434\u0432\u043e\u043c\u043e\u0432\u043d\u043e\u0433\u043e \u043f\u0440\u043e\u0442\u043e\u043a\u043e\u043b\u0443 \u0440\u043e\u0437\u043c\u043e\u0432\u0438 \u0434\u043b\u044f \u0437\u0430\u0432\u0430\u043d\u0442\u0430\u0436\u0435\u043d\u043d\u044f.',
+            downloadTranscript:
+                '\u0417\u0430\u0432\u0430\u043d\u0442\u0430\u0436\u0438\u0442\u0438 \u043f\u0440\u043e\u0442\u043e\u043a\u043e\u043b',
+            downloadFailed:
+                '\u041f\u043e\u043c\u0438\u043b\u043a\u0430 \u0437\u0430\u0432\u0430\u043d\u0442\u0430\u0436\u0435\u043d\u043d\u044f',
+            transcriptPrompt:
+                '\u0412\u0435\u0434\u0443\u0447\u0438\u0439 \u0431\u0430\u0436\u0430\u0454 \u0441\u043a\u043b\u0430\u0441\u0442\u0438 \u043f\u0438\u0441\u044c\u043c\u043e\u0432\u0438\u0439 \u043f\u0440\u043e\u0442\u043e\u043a\u043e\u043b \u0440\u043e\u0437\u043c\u043e\u0432\u0438.',
+            transcriptYes: '\u042f \u0437\u0433\u043e\u0434\u0435\u043d',
+            transcriptNo: '\u0412\u0456\u0434\u0445\u0438\u043b\u0438\u0442\u0438',
+        },
+        hu: {
+            holdToSpeak: 'Tartsa lenyomva',
+            hostSpeaking: 'A h\u00e1zigazda besz\u00e9l\u2026',
+            pttActive: 'Nyomd \u00e9s besz\u00e9lj akt\u00edv',
+            translating: 'Ford\u00edt\u00e1s folyamatban\u2026',
+            consentTranscript:
+                'Hozz\u00e1j\u00e1rulok a besz\u00e9lget\u00e9s k\u00e9tnyelv\u0171 jegyz\u0151k\u00f6nyv\u00e9nek let\u00f6lthet\u0151 form\u00e1ban t\u00f6rt\u00e9n\u0151 elk\u00e9sz\u00edt\u00e9s\u00e9hez.',
+            downloadTranscript: 'Jegyz\u0151k\u00f6nyv let\u00f6lt\u00e9se',
+            downloadFailed: 'A let\u00f6lt\u00e9s sikertelen',
+            transcriptPrompt:
+                'A h\u00e1zigazda \u00edr\u00e1sos jegyz\u0151k\u00f6nyvet szeretne k\u00e9sz\u00edteni a besz\u00e9lget\u00e9sr\u0151l.',
+            transcriptYes: 'Hozz\u00e1j\u00e1rulok',
+            transcriptNo: 'Elutas\u00edtom',
+        },
+        sr: {
+            holdToSpeak: 'Dr\u017eite pritisnuto',
+            hostSpeaking: 'Doma\u0107in govori\u2026',
+            pttActive: 'Pritisni za govor aktivno',
+            translating:
+                '\u041f\u0440\u0435\u0432\u043e\u0452\u0435\u045a\u0435 \u0443 \u0442\u043e\u043a\u0443\u2026',
+            consentTranscript:
+                '\u0421\u0430\u0433\u043b\u0430\u0441\u0430\u043d \u0441\u0430\u043c \u0441\u0430 \u0438\u0437\u0440\u0430\u0434\u043e\u043c \u0434\u0432\u043e\u0458\u0435\u0437\u0438\u0447\u043d\u043e\u0433 \u0437\u0430\u043f\u0438\u0441\u043d\u0438\u043a\u0430 \u0440\u0430\u0437\u0433\u043e\u0432\u043e\u0440\u0430 \u0437\u0430 \u043f\u0440\u0435\u0443\u0437\u0438\u043c\u0430\u045a\u0435.',
+            downloadTranscript:
+                '\u041f\u0440\u0435\u0443\u0437\u043c\u0438 \u0437\u0430\u043f\u0438\u0441\u043d\u0438\u043a',
+            downloadFailed:
+                '\u041f\u0440\u0435\u0443\u0437\u0438\u043c\u0430\u045a\u0435 \u043d\u0438\u0458\u0435 \u0443\u0441\u043f\u0435\u043b\u043e',
+            transcriptPrompt:
+                '\u0414\u043e\u043c\u0430\u045b\u0438\u043d \u0436\u0435\u043b\u0438 \u0434\u0430 \u0438\u0437\u0440\u0430\u0434\u0438 \u043f\u0438\u0441\u0430\u043d\u0438 \u0437\u0430\u043f\u0438\u0441\u043d\u0438\u043a \u0440\u0430\u0437\u0433\u043e\u0432\u043e\u0440\u0430.',
+            transcriptYes: '\u0421\u0430\u0433\u043b\u0430\u0441\u0430\u043d \u0441\u0430\u043c',
+            transcriptNo: '\u041e\u0434\u0431\u0438\u0458\u0430\u043c',
+        },
+        sq: {
+            holdToSpeak: 'Mbani shtypur',
+            hostSpeaking: 'Nikoq\u00edri po flet\u2026',
+            pttActive: 'Shtyp p\u00ebr t\u00eb folur aktiv',
+            translating: 'Po p\u00ebrkthehet\u2026',
+            consentTranscript:
+                'Pajtohem me krijimin e nj\u00eb procesverbali dygjuh\u00ebsh t\u00eb bised\u00ebs p\u00ebr shkarkim.',
+            downloadTranscript: 'Shkarko procesverbalin',
+            downloadFailed: 'Shkarkimi d\u00ebshtoi',
+            transcriptPrompt:
+                'Nikoq\u00edri d\u00ebshiron t\u00eb hartoj\u00eb nj\u00eb procesverbal t\u00eb shkruar t\u00eb bised\u00ebs.',
+            transcriptYes: 'Pajtohem',
+            transcriptNo: 'Refuzoj',
+        },
+        ar: {
+            holdToSpeak:
+                '\u0627\u0636\u063a\u0637 \u0645\u0639 \u0627\u0644\u0627\u0633\u062a\u0645\u0631\u0627\u0631',
+            hostSpeaking:
+                '\u0627\u0644\u0645\u0636\u064a\u0641 \u064a\u062a\u062d\u062f\u062b\u2026',
+            pttActive: '\u0627\u0636\u063a\u0637 \u0644\u0644\u062a\u062d\u062f\u062b',
+            translating:
+                '\u062c\u0627\u0631\u064d \u0627\u0644\u062a\u0631\u062c\u0645\u0629\u2026',
+            consentTranscript:
+                '\u0623\u0648\u0627\u0641\u0642 \u0639\u0644\u0649 \u0625\u0646\u0634\u0627\u0621 \u0645\u062d\u0636\u0631 \u0645\u062d\u0627\u062f\u062b\u0629 \u062b\u0646\u0627\u0626\u064a \u0627\u0644\u0644\u063a\u0629 \u0642\u0627\u0628\u0644 \u0644\u0644\u062a\u0646\u0632\u064a\u0644.',
+            downloadTranscript:
+                '\u062a\u0646\u0632\u064a\u0644 \u0627\u0644\u0645\u062d\u0636\u0631',
+            downloadFailed: '\u0641\u0634\u0644 \u0627\u0644\u062a\u0646\u0632\u064a\u0644',
+            transcriptPrompt:
+                '\u064a\u0631\u063a\u0628 \u0627\u0644\u0645\u0636\u064a\u0641 \u0641\u064a \u062a\u062d\u0631\u064a\u0631 \u0645\u062d\u0636\u0631 \u0645\u0643\u062a\u0648\u0628 \u0644\u0644\u0645\u062d\u0627\u062f\u062b\u0629.',
+            transcriptYes: '\u0623\u0648\u0627\u0641\u0642',
+            transcriptNo: '\u0623\u0631\u0641\u0636',
+        },
+        fa: {
+            holdToSpeak: '\u0646\u06af\u0647 \u062f\u0627\u0631\u06cc\u062f',
+            hostSpeaking:
+                '\u0645\u06cc\u0632\u0628\u0627\u0646 \u062f\u0631 \u062d\u0627\u0644 \u0635\u062d\u0628\u062a\u2026',
+            pttActive:
+                '\u0628\u0631\u0627\u06cc \u0635\u062d\u0628\u062a \u0641\u0634\u0627\u0631 \u062f\u0647\u06cc\u062f',
+            translating: '\u062f\u0631 \u062d\u0627\u0644 \u062a\u0631\u062c\u0645\u0647\u2026',
+            consentTranscript:
+                '\u0628\u0627 \u0627\u06cc\u062c\u0627\u062f \u0635\u0648\u0631\u062a\u200c\u062c\u0644\u0633\u0647 \u06af\u0641\u062a\u06af\u0648\u06cc \u062f\u0648\u0632\u0628\u0627\u0646\u0647 \u0628\u0631\u0627\u06cc \u062f\u0627\u0646\u0644\u0648\u062f \u0645\u0648\u0627\u0641\u0642\u0645.',
+            downloadTranscript:
+                '\u062f\u0627\u0646\u0644\u0648\u062f \u0635\u0648\u0631\u062a\u200c\u062c\u0644\u0633\u0647',
+            downloadFailed:
+                '\u062f\u0627\u0646\u0644\u0648\u062f \u0646\u0627\u0645\u0648\u0641\u0642 \u0628\u0648\u062f',
+            transcriptPrompt:
+                '\u0645\u06cc\u0632\u0628\u0627\u0646 \u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u062f \u0635\u0648\u0631\u062a\u200c\u062c\u0644\u0633\u0647 \u0645\u06a9\u062a\u0648\u0628 \u06af\u0641\u062a\u06af\u0648 \u062a\u0647\u06cc\u0647 \u06a9\u0646\u062f.',
+            transcriptYes: '\u0645\u0648\u0627\u0641\u0642\u0645',
+            transcriptNo: '\u0631\u062f \u0645\u06cc\u200c\u06a9\u0646\u0645',
+        },
+    };
+
+    // Translation helper — uses foreignLang if set, falls back to English then German
+    function t(key) {
+        return (
+            (foreignLang && I18N[foreignLang] && I18N[foreignLang][key]) ||
+            (foreignLang && PTT_I18N[foreignLang] && PTT_I18N[foreignLang][key]) ||
+            I18N.en?.[key] ||
+            PTT_I18N.en?.[key] ||
+            I18N.de?.[key] ||
+            key
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // Consent overlay logic
+    // ---------------------------------------------------------------
+    const consentOverlay = document.getElementById('consentOverlay');
+    const consentLangSelect = /** @type {HTMLSelectElement} */ (
+        document.getElementById('consentLangSelect')
+    );
+    const consentTitle = document.getElementById('consentTitle');
+    const consentBody = document.getElementById('consentBody');
+    const consentAcceptBtn = /** @type {HTMLButtonElement} */ (
+        document.getElementById('consentAcceptBtn')
+    );
+    const mainContainer = document.querySelector('.container');
+
+    // Get token from URL path (needed early for sessionStorage key)
+    const pathParts = window.location.pathname.split('/');
+    const token = pathParts[pathParts.length - 1];
+
+    // List of languages supported by the viewer consent popup.
+    // Declared here so functions below can reference it safely.
+    const SUPPORTED_VIEWER_LANGS = [
+        'de',
+        'en',
+        'fr',
+        'es',
+        'it',
+        'pl',
+        'ro',
+        'hr',
+        'bg',
+        'tr',
+        'ru',
+        'uk',
+        'hu',
+        'sr',
+        'sq',
+    ];
+
+    function updateConsentLanguage(lang) {
+        const strings = I18N[lang] || I18N.de;
+        consentTitle.textContent = strings.title;
+        consentBody.textContent = strings.body;
+        consentAcceptBtn.textContent = strings.accept;
+    }
+
+    // Called when the server tells us the session's configured foreign
+    // language. Only overrides the popup while consent is still pending
+    // so the visitor sees the text in the language the host set up for
+    // them. The visitor can still switch it via the dropdown.
+    function applyConsentSessionLanguage(lang) {
+        if (!lang || !SUPPORTED_VIEWER_LANGS.includes(lang)) return;
+        if (consentOverlay.style.display === 'none') return;
+        if (consentAcceptBtn.classList.contains('accepted')) return;
+        consentLangSelect.value = lang;
+        updateConsentLanguage(lang);
+    }
+
+    consentLangSelect.addEventListener('change', () => {
+        updateConsentLanguage(consentLangSelect.value);
+    });
+
+    function acceptConsent() {
+        if (consentAcceptBtn.classList.contains('accepted')) return;
+        const selectedLang = consentLangSelect.value;
+        sessionStorage.setItem(`consent_${token}`, selectedLang);
+
+        // Visual feedback: button turns gray and disables, then overlay closes
+        consentAcceptBtn.classList.add('accepted');
+        consentAcceptBtn.disabled = true;
+
+        setTimeout(() => {
+            consentOverlay.style.display = 'none';
+            mainContainer.classList.remove('hidden');
+
+            // Sync language to the viewer's mic-bar selector (skip 'de' — desktop channel)
+            if (selectedLang !== 'de') {
+                foreignLang = selectedLang;
+                viewerLangSelect.value = selectedLang;
+                viewerLangSelect.dispatchEvent(new Event('change'));
+            }
+            renderSegments();
+            updateMicState();
+        }, 450);
+    }
+
+    consentAcceptBtn.addEventListener('click', acceptConsent);
+
+    // Detect browser language so the consent popup opens in the visitor's
+    // own language by default (falls back to German for unsupported locales).
+    // This is a best-effort first paint; once the WebSocket init/
+    // session_active arrives with the session's configured foreign_lang
+    // we overwrite the popup via applyConsentSessionLanguage().
+    const browserLang = (navigator.language || 'de').toLowerCase().split('-')[0];
+    const initialConsentLang = SUPPORTED_VIEWER_LANGS.includes(browserLang) ? browserLang : 'de';
+
+    // Check for prior consent in this browser session.
+    // foreignLang must be declared here (not later in the file) because
+    // top-level code further down reads it before its first assignment.
+    const storedConsent = sessionStorage.getItem(`consent_${token}`);
+    let foreignLang = storedConsent && storedConsent !== 'de' ? storedConsent : null;
+    // Transcript consent flow — the host controls when the viewer is asked.
+    //   hostTranscriptRequested: server-relayed flag from the host's toggle
+    //   transcriptDecision: 'pending' until the viewer answers the banner
+    let hostTranscriptRequested = false;
+    let transcriptDecision = 'pending'; // 'pending' | 'yes' | 'no'
+
+    function sendTranscriptConsent(enabled) {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'transcript_consent', enabled: enabled }));
+        }
+    }
+
+    function refreshTranscriptConsentBanner() {
+        const banner = document.getElementById('transcriptConsentBanner');
+        const title = document.getElementById('transcriptConsentTitle');
+        const yesBtn = document.getElementById('transcriptConsentYesBtn');
+        const noBtn = document.getElementById('transcriptConsentNoBtn');
+        if (!banner || !title || !yesBtn || !noBtn) return;
+        if (hostTranscriptRequested && transcriptDecision === 'pending') {
+            title.textContent = t('transcriptPrompt');
+            yesBtn.textContent = t('transcriptYes');
+            noBtn.textContent = t('transcriptNo');
+            banner.classList.add('visible');
+        } else {
+            banner.classList.remove('visible');
+        }
+    }
+
+    if (storedConsent) {
+        consentOverlay.style.display = 'none';
+        mainContainer.classList.remove('hidden');
+    } else {
+        consentLangSelect.value = initialConsentLang;
+        updateConsentLanguage(initialConsentLang);
+    }
+
+    // ---------------------------------------------------------------
+    // Main viewer
+    // ---------------------------------------------------------------
+    const statusDot = document.getElementById('statusDot');
+    const statusText = document.getElementById('statusText');
+    const transcript = document.getElementById('transcript');
+    const micBar = document.getElementById('micBar');
+    const micBtn = /** @type {HTMLButtonElement} */ (document.getElementById('micBtn'));
+    const viewerMuteBtn = /** @type {HTMLButtonElement} */ (document.getElementById('muteBtn'));
+    const micStatus = document.getElementById('micStatus');
+    const viewerLangSelect = /** @type {HTMLSelectElement} */ (
+        document.getElementById('viewerLangSelect')
+    );
+    const ttsToggle = /** @type {HTMLButtonElement} */ (document.getElementById('ttsToggle'));
+
+    // Populate the mic-bar language dropdown from /api/languages.
+    // Declared here (before any consumer) because `const` is not hoisted
+    // — referencing it earlier in the script trips the temporal dead
+    // zone, which halts the rest of init.
+    const langsReady = (async () => {
+        const resp = await fetch('/api/languages');
+        if (!resp.ok) return;
+        const langs = await resp.json();
+        for (const { code, label } of langs) {
+            const opt = document.createElement('option');
+            opt.value = code;
+            opt.textContent = label;
+            viewerLangSelect.appendChild(opt);
+        }
+    })();
+
+    // Sync mic-bar selector if language was restored from consent
+    // sessionStorage. Wait for the dropdown to be populated first.
+    langsReady.then(() => {
+        if (foreignLang && viewerLangSelect.querySelector(`option[value="${foreignLang}"]`)) {
+            viewerLangSelect.value = foreignLang;
+        }
+    });
+
+    // TTS state
+    const TTS_SUPPORTED_LANGS = new Set([
+        'en',
+        'de',
+        'fr',
+        'es',
+        'it',
+        'pl',
+        'ro',
+        'bg',
+        'tr',
+        'ru',
+        'uk',
+        'hu',
+        'sr',
+        'pt',
+        'nl',
+    ]);
+    const ttsQueue = [];
+    let ttsPlaying = false;
+    const spokenSegments = new Set();
+    let ttsEnabled = localStorage.getItem('ttsEnabled') === 'true';
+    let ttsAudio = null;
+    // 44-byte silent PCM WAV data-URI used to unlock autoplay during the
+    // toggle gesture. Without this, the first programmatic play() that
+    // follows MT can be blocked on mobile because the gesture context is
+    // already gone by the time the audio is fetched.
+    const TTS_SILENT_WAV =
+        'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=';
+
+    function updateTTSToggle() {
+        const supported = foreignLang && TTS_SUPPORTED_LANGS.has(foreignLang);
+        ttsToggle.style.display = supported ? 'block' : 'none';
+        ttsToggle.classList.toggle('active', ttsEnabled);
+        ttsToggle.textContent = ttsEnabled ? '\u{1F5E3}\u{FE0F}' : '\u{1F910}';
+        ttsToggle.title = t('ttsTooltip');
+    }
+
+    ttsToggle.addEventListener('click', () => {
+        ttsEnabled = !ttsEnabled;
+        localStorage.setItem('ttsEnabled', String(ttsEnabled));
+        updateTTSToggle();
+        if (ttsEnabled) {
+            if (!ttsAudio) {
+                ttsAudio = new Audio();
+                ttsAudio.preload = 'auto';
+            }
+            ttsAudio.src = TTS_SILENT_WAV;
+            ttsAudio.play().catch((e) => console.warn('TTS unlock failed:', e));
+        } else {
+            ttsQueue.length = 0;
+            if (ttsAudio) {
+                try {
+                    ttsAudio.pause();
+                } catch (_) {
+                    /* ignore */
+                }
+            }
+        }
+    });
+
+    function enqueueTTS(segmentId, text, lang) {
+        if (!ttsEnabled || !TTS_SUPPORTED_LANGS.has(lang)) return;
+        if (spokenSegments.has(segmentId)) return;
+        spokenSegments.add(segmentId);
+        ttsQueue.push({ text, lang });
+        if (!ttsPlaying) processTTSQueue();
+    }
+
+    async function processTTSQueue() {
+        if (ttsQueue.length === 0) {
+            ttsPlaying = false;
+            return;
+        }
+        ttsPlaying = true;
+        const { text, lang } = ttsQueue.shift();
+        let blobUrl = null;
+        try {
+            const resp = await fetch(`/api/viewer/${token}/tts`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text, lang }),
+            });
+            if (!resp.ok) {
+                processTTSQueue();
+                return;
+            }
+            const blob = await resp.blob();
+            blobUrl = URL.createObjectURL(blob);
+            if (!ttsAudio) {
+                ttsAudio = new Audio();
+                ttsAudio.preload = 'auto';
+            }
+
+            let advanced = false;
+            let watchdog = null;
+            const advance = () => {
+                if (advanced) return;
+                advanced = true;
+                if (watchdog) clearTimeout(watchdog);
+                if (blobUrl) URL.revokeObjectURL(blobUrl);
+                ttsAudio.onended = null;
+                ttsAudio.onerror = null;
+                processTTSQueue();
+            };
+            ttsAudio.onended = advance;
+            ttsAudio.onerror = advance;
+            // Watchdog: ~12 chars/sec is a slow speaking rate; +6s slack
+            // covers tab-background pauses without deadlocking the queue.
+            const estDurMs = Math.max(3000, Math.ceil(text.length / 12) * 1000) + 6000;
+            watchdog = setTimeout(advance, estDurMs);
+
+            ttsAudio.src = blobUrl;
+            ttsAudio.play().catch((e) => {
+                console.error('TTS play failed:', e);
+                advance();
+            });
+        } catch (e) {
+            console.error('TTS error:', e);
+            if (blobUrl) URL.revokeObjectURL(blobUrl);
+            processTTSQueue();
+        }
+    }
+
+    // (foreignLang is declared earlier in the consent block)
+    let segments = [];
+    let ws = null;
+    let sessionEnded = false;
+    let sessionActive = false;
+
+    // Mic capture state
+    const SAMPLE_RATE = 16000;
+    let micRecording = false;
+    let micMuted = false;
+    let pttModeActive = false;
+    let micInitialized = false;
+    let audioContext = null;
+    let mediaStream = null;
+    let processor = null;
+
+    function setStatus(text, type) {
+        statusText.textContent = text;
+        statusDot.className = `status-dot ${type || ''}`;
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    function renderSegments() {
+        transcript.innerHTML = '';
+
+        segments.forEach((seg) => {
+            const segLang = seg.src_lang;
+            const translations = seg.translations || {};
+            const speakerRole = seg.speaker_role || (segLang === 'de' ? 'german' : 'foreign');
+            const isGermanSpeaker = speakerRole === 'german';
+            const liveClass = seg.final ? '' : ' live';
+
+            // Keep speaker direction consistent with desktop view:
+            // German on right, foreign on left.
+            const bubbleClass = isGermanSpeaker ? 'mine' : 'theirs';
+
+            const div = document.createElement('div');
+            div.className = `bubble ${bubbleClass}${liveClass}`;
+            div.dataset.id = seg.id;
+
+            let html = '';
+
+            const errors = seg.translation_errors || {};
+            const failedForeign = foreignLang && errors[foreignLang];
+
+            if (isGermanSpeaker) {
+                // Show German speech translated to foreign language.
+                const translation = translations[foreignLang] || '';
+                if (translation) {
+                    html = `<div class="bubble-source">${escapeHtml(translation)}</div>`;
+                } else if (failedForeign) {
+                    html = `<div class="bubble-source" style="color:#d9534f;font-style:italic">✗ ${escapeHtml(t('translationFailed'))}</div>`;
+                } else {
+                    html = `<div class="bubble-source" style="opacity:0.5">...</div>`;
+                }
+            } else {
+                // Enforce foreign-only display for foreign speaker too.
+                const translation = translations[foreignLang] || '';
+                if (translation) {
+                    html = `<div class="bubble-source">${escapeHtml(translation)}</div>`;
+                } else if (foreignLang && segLang === foreignLang) {
+                    html = `<div class="bubble-source">${escapeHtml(seg.src)}</div>`;
+                } else if (failedForeign) {
+                    html = `<div class="bubble-source" style="color:#d9534f;font-style:italic">✗ ${escapeHtml(t('translationFailed'))}</div>`;
+                } else {
+                    html = `<div class="bubble-source" style="opacity:0.5">...</div>`;
+                }
+            }
+
+            div.innerHTML = html;
+            transcript.appendChild(div);
+        });
+
+        // Auto-scroll to bottom - defer to ensure DOM is updated
+        requestAnimationFrame(() => {
+            transcript.scrollTop = transcript.scrollHeight;
+        });
+    }
+
+    function updateSegments(newSegments) {
+        // Check for newly finalized segments that already have translations
+        for (const seg of newSegments) {
+            if (seg.final && foreignLang && seg.translations && seg.translations[foreignLang]) {
+                enqueueTTS(seg.id, seg.translations[foreignLang], foreignLang);
+            }
+        }
+        segments = newSegments;
+        renderSegments();
+    }
+
+    function updateTranslation(segmentId, tgtLang, text) {
+        const seg = segments.find((s) => s.id === segmentId);
+        if (seg) {
+            if (!seg.translations) seg.translations = {};
+            seg.translations[tgtLang] = text;
+            renderSegments();
+
+            // TTS: play when segment is final and translation matches foreignLang
+            if (seg.final && tgtLang === foreignLang) {
+                enqueueTTS(seg.id, text, tgtLang);
+            }
+        }
+    }
+
+    function markTranslationFailed(segmentId, tgtLang) {
+        const seg = segments.find((s) => s.id === segmentId);
+        if (!seg) return;
+        if (!seg.translation_errors) seg.translation_errors = {};
+        // Mark with the resolved tgt_lang if known, else flag the foreign
+        // language so the user always sees something instead of '...'.
+        seg.translation_errors[tgtLang || foreignLang || 'unknown'] = true;
+        renderSegments();
+    }
+
+    function showSessionEnded() {
+        sessionEnded = true;
+        setStatus(t('sessionEnded'), 'error');
+
+        const notice = document.createElement('div');
+        notice.className = 'ended-notice';
+        const strong = document.createElement('strong');
+        strong.textContent = t('endedTitle');
+        notice.appendChild(strong);
+        notice.appendChild(document.createTextNode(t('endedBody')));
+        transcript.appendChild(notice);
+        requestAnimationFrame(() => {
+            transcript.scrollTop = transcript.scrollHeight;
+        });
+        // Banner only makes sense during a live session — clear on end.
+        hostTranscriptRequested = false;
+        refreshTranscriptConsentBanner();
+    }
+
+    document.getElementById('transcriptConsentYesBtn').addEventListener('click', () => {
+        transcriptDecision = 'yes';
+        sendTranscriptConsent(true);
+        refreshTranscriptConsentBanner();
+    });
+    document.getElementById('transcriptConsentNoBtn').addEventListener('click', () => {
+        transcriptDecision = 'no';
+        sendTranscriptConsent(false);
+        refreshTranscriptConsentBanner();
+    });
+
+    // Audio processing helpers (same as index.html)
+    function downsampleBuffer(buffer, inputSampleRate, outputSampleRate) {
+        if (inputSampleRate === outputSampleRate) return buffer;
+        const ratio = inputSampleRate / outputSampleRate;
+        const newLength = Math.round(buffer.length / ratio);
+        const result = new Float32Array(newLength);
+        for (let i = 0; i < newLength; i++) {
+            const srcIndex = i * ratio;
+            const srcIndexFloor = Math.floor(srcIndex);
+            const srcIndexCeil = Math.min(srcIndexFloor + 1, buffer.length - 1);
+            const t = srcIndex - srcIndexFloor;
+            result[i] = buffer[srcIndexFloor] * (1 - t) + buffer[srcIndexCeil] * t;
+        }
+        return result;
+    }
+
+    function floatTo16BitPCM(float32Array) {
+        const int16Array = new Int16Array(float32Array.length);
+        for (let i = 0; i < float32Array.length; i++) {
+            const s = Math.max(-1, Math.min(1, float32Array[i]));
+            int16Array[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+        }
+        return int16Array.buffer;
+    }
+
+    async function startMicrophone() {
+        if (!window.isSecureContext) {
+            micStatus.textContent = t('requiresHttps');
+            return;
+        }
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            micStatus.textContent = t('micNotSupported');
+            return;
+        }
+
+        try {
+            mediaStream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    channelCount: 1,
+                    sampleRate: { ideal: 48000 },
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true,
+                    // Legacy Chrome constraints that often help with aggressive room echo
+                    googEchoCancellation: true,
+                    googNoiseSuppression: true,
+                    googHighpassFilter: true,
+                },
+            });
+
+            audioContext = new AudioContext({ sampleRate: 48000 });
+            const source = audioContext.createMediaStreamSource(mediaStream);
+            processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+            // Send viewer audio config with foreign language hint
+            if (ws && ws.readyState === WebSocket.OPEN && foreignLang) {
+                ws.send(
+                    JSON.stringify({
+                        type: 'viewer_audio_config',
+                        foreign_lang: foreignLang,
+                    })
+                );
+            }
+
+            processor.onaudioprocess = (e) => {
+                if (micMuted) return;
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    const inputData = e.inputBuffer.getChannelData(0);
+                    const downsampled = downsampleBuffer(
+                        inputData,
+                        audioContext.sampleRate,
+                        SAMPLE_RATE
+                    );
+                    const pcm16 = floatTo16BitPCM(downsampled);
+                    ws.send(pcm16);
+                }
+            };
+
+            source.connect(processor);
+            processor.connect(audioContext.destination);
+
+            micRecording = true;
+            micMuted = false;
+            micBtn.classList.add('recording');
+            viewerMuteBtn.style.display = 'block';
+            viewerMuteBtn.classList.remove('active');
+            viewerMuteBtn.textContent = '\u{1F507}';
+            viewerLangSelect.disabled = true;
+            micStatus.textContent = t('listening');
+        } catch (err) {
+            console.error('Mic error:', err);
+            micStatus.textContent = t('micDenied');
+        }
+    }
+
+    function stopMicrophone() {
+        if (processor) {
+            processor.disconnect();
+            processor = null;
+        }
+        if (audioContext) {
+            audioContext.close();
+            audioContext = null;
+        }
+        if (mediaStream) {
+            mediaStream.getTracks().forEach((t) => t.stop());
+            mediaStream = null;
+        }
+        micRecording = false;
+        micMuted = false;
+        micBtn.classList.remove('recording');
+        micBtn.classList.remove('muted');
+        viewerMuteBtn.style.display = 'none';
+        viewerMuteBtn.classList.remove('active');
+        viewerLangSelect.disabled = false;
+        micStatus.textContent = t('tapToSpeak');
+    }
+
+    function updateMicState() {
+        // Mic requires both language selected and active session
+        const canMic = sessionActive && viewerLangSelect.value;
+        micBtn.disabled = !canMic;
+        if (!viewerLangSelect.value) {
+            micStatus.textContent = t('selectLangFirst');
+        } else if (!sessionActive) {
+            micStatus.textContent = t('waitingForSession');
+        } else if (pttModeActive) {
+            // Preserve the PTT hint — a language-change event would
+            // otherwise silently rewrite it to 'tapToSpeak' even though
+            // we're still in PTT mode.
+            micStatus.textContent = t('holdToSpeak');
+        } else {
+            micStatus.textContent = t('tapToSpeak');
+        }
+    }
+
+    // Update the language selector placeholder text
+    function applyViewerTranslations() {
+        const placeholder = document.getElementById('langPlaceholder');
+        if (placeholder) placeholder.textContent = t('selectLang');
+        // Re-apply mic status in case it was showing a stale language
+        updateMicState();
+        // Refresh the translating indicator label in the current language
+        if (typeof updateTranslatingIndicator === 'function') {
+            updateTranslatingIndicator();
+        }
+        // Banner text follows the selected language too
+        refreshTranscriptConsentBanner();
+    }
+
+    function onSessionActive() {
+        sessionActive = true;
+        // Pre-select language if server already knows it
+        if (foreignLang && viewerLangSelect.querySelector(`option[value="${foreignLang}"]`)) {
+            viewerLangSelect.value = foreignLang;
+            viewerLangSelect.dispatchEvent(new Event('change'));
+        }
+        updateTTSToggle();
+        updateMicState();
+    }
+
+    function onSessionEnded() {
+        sessionActive = false;
+        stopMicrophone();
+        updateMicState();
+        pendingTranslations.clear();
+        updateTranslatingIndicator();
+    }
+
+    viewerLangSelect.addEventListener('change', () => {
+        const selectedLang = viewerLangSelect.value;
+        if (selectedLang) {
+            foreignLang = selectedLang;
+            // Re-render with correct language for translations
+            renderSegments();
+            updateTTSToggle();
+            applyViewerTranslations();
+            // Send language hint to server immediately if connected
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(
+                    JSON.stringify({
+                        type: 'viewer_audio_config',
+                        foreign_lang: selectedLang,
+                    })
+                );
+            }
+        }
+        updateMicState();
+    });
+
+    // Normal mode: click to toggle mic
+    micBtn.addEventListener('click', (e) => {
+        if (pttModeActive) return; // PTT mode handles its own events
+        if (micRecording) {
+            stopMicrophone();
+        } else {
+            if (!viewerLangSelect.value) {
+                micStatus.textContent = t('selectLangFirst');
+                return;
+            }
+            startMicrophone();
+        }
+    });
+
+    // PTT mode: press-and-hold to talk
+    async function pttPress(e) {
+        if (!pttModeActive) return;
+        e.preventDefault();
+        if (!viewerLangSelect.value) {
+            micStatus.textContent = t('selectLangFirst');
+            return;
+        }
+        if (!micInitialized) {
+            // First press: set up mic, then immediately unmute
+            await startMicrophone();
+            micInitialized = true;
+        } else {
+            micMuted = false;
+            micBtn.classList.remove('muted');
+            micBtn.classList.add('recording');
+            micStatus.textContent = t('listening');
+        }
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'speaking_state', party: 'viewer', speaking: true }));
+        }
+    }
+
+    function pttRelease(e) {
+        if (!pttModeActive || !micInitialized) return;
+        e.preventDefault();
+        micMuted = true;
+        micBtn.classList.remove('recording');
+        micBtn.classList.add('muted');
+        micStatus.textContent = t('holdToSpeak');
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(
+                JSON.stringify({
+                    type: 'speaking_state',
+                    party: 'viewer',
+                    speaking: false,
+                })
+            );
+        }
+    }
+
+    micBtn.addEventListener('touchstart', pttPress, { passive: false });
+    micBtn.addEventListener('touchend', pttRelease, { passive: false });
+    micBtn.addEventListener('touchcancel', pttRelease, { passive: false });
+    micBtn.addEventListener('mousedown', pttPress);
+    document.addEventListener('mouseup', pttRelease);
+
+    const hostSpeakingIndicator = document.getElementById('hostSpeakingIndicator');
+    const hostSpeakingText = document.getElementById('hostSpeakingText');
+    const translatingIndicator = document.getElementById('translatingIndicator');
+    const translatingText = document.getElementById('translatingText');
+    // Map<segmentId, enqueuedAtMs> — pending translations expire after
+    // PENDING_TRANSLATION_TIMEOUT_MS so the indicator can't stick forever
+    // when a server-side MT call hangs without reporting an error.
+    const pendingTranslations = new Map();
+    const PENDING_TRANSLATION_TIMEOUT_MS = 60 * 1000;
+
+    function prunePendingTranslations() {
+        const cutoff = Date.now() - PENDING_TRANSLATION_TIMEOUT_MS;
+        for (const [id, ts] of pendingTranslations) {
+            if (ts < cutoff) pendingTranslations.delete(id);
+        }
+    }
+
+    function updateTranslatingIndicator() {
+        if (translatingText) translatingText.textContent = t('translating');
+        prunePendingTranslations();
+        translatingIndicator.style.display = pendingTranslations.size > 0 ? '' : 'none';
+    }
+
+    setInterval(() => {
+        if (pendingTranslations.size > 0) updateTranslatingIndicator();
+    }, 5000);
+
+    function refreshPendingFromSegments(segments) {
+        // Viewer target is foreignLang. A segment is pending iff it is
+        // finalized, its source is German (needs translation to foreign),
+        // and no foreign-lang translation has arrived yet.
+        if (!foreignLang) return;
+        const now = Date.now();
+        for (const seg of segments || []) {
+            const needsForeign = seg.final && seg.src_lang === 'de';
+            const hasForeign = seg.translations?.[foreignLang];
+            if (needsForeign && !hasForeign) {
+                if (!pendingTranslations.has(seg.id)) pendingTranslations.set(seg.id, now);
+            } else {
+                pendingTranslations.delete(seg.id);
+            }
+        }
+        updateTranslatingIndicator();
+    }
+
+    function updatePTTMode(enabled) {
+        pttModeActive = enabled;
+        micBtn.classList.toggle('ptt-active', enabled);
+        if (enabled) {
+            viewerMuteBtn.style.display = 'none';
+            micStatus.textContent = t('holdToSpeak');
+            if (hostSpeakingText) hostSpeakingText.textContent = t('hostSpeaking');
+        } else {
+            micInitialized = false;
+            if (micRecording) {
+                stopMicrophone();
+            }
+            micStatus.textContent = t('tapToSpeak');
+            hostSpeakingIndicator.style.display = 'none';
+        }
+    }
+
+    viewerMuteBtn.addEventListener('click', () => {
+        if (!micRecording || pttModeActive) return;
+        micMuted = !micMuted;
+        viewerMuteBtn.classList.toggle('active', micMuted);
+        viewerMuteBtn.textContent = micMuted ? '\u{1F50A}' : '\u{1F507}';
+        micBtn.classList.toggle('muted', micMuted);
+        micBtn.classList.toggle('recording', !micMuted);
+        micStatus.textContent = micMuted ? t('muted') : t('listening');
+    });
+
+    function connect() {
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${wsProtocol}//${window.location.host}/ws/viewer/${token}`;
+
+        setStatus(t('connecting'), '');
+        ws = new WebSocket(wsUrl);
+
+        ws.onopen = () => {
+            setStatus(t('connected'), 'connected');
+        };
+
+        ws.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+
+                if (data.type === 'init') {
+                    if (data.status === 'waiting') {
+                        setStatus(t('waiting'), 'connected');
+                    } else {
+                        if (data.foreign_lang) foreignLang = data.foreign_lang;
+                        applyConsentSessionLanguage(data.foreign_lang);
+                        updateSegments(data.segments || []);
+                        refreshPendingFromSegments(data.segments || []);
+                        setStatus(t('live'), 'connected');
+                        onSessionActive();
+                        // Start in the same mode as the host. A follow-up
+                        // `ptt_mode` message is still accepted for later
+                        // toggles, but the initial frame is set here.
+                        updatePTTMode(!!data.ptt_mode);
+                    }
+                } else if (data.type === 'session_active') {
+                    if (data.foreign_lang) foreignLang = data.foreign_lang;
+                    applyConsentSessionLanguage(data.foreign_lang);
+                    updateSegments(data.segments || []);
+                    refreshPendingFromSegments(data.segments || []);
+                    setStatus(t('live'), 'connected');
+                    onSessionActive();
+                    updatePTTMode(!!data.ptt_mode);
+                } else if (data.type === 'host_transcript_requested') {
+                    const prev = hostTranscriptRequested;
+                    hostTranscriptRequested = !!data.enabled;
+                    // If the host turns the request off or re-activates it,
+                    // the prior viewer decision for this run becomes stale —
+                    // re-prompt cleanly on the next activation.
+                    if (prev !== hostTranscriptRequested) {
+                        transcriptDecision = 'pending';
+                    }
+                    refreshTranscriptConsentBanner();
+                } else if (data.type === 'segments') {
+                    if (data.foreign_lang && !foreignLang) {
+                        foreignLang = data.foreign_lang;
+                    }
+                    applyConsentSessionLanguage(data.foreign_lang);
+                    updateSegments(data.segments || []);
+                    refreshPendingFromSegments(data.segments || []);
+                } else if (data.type === 'translation') {
+                    updateTranslation(data.segment_id, data.tgt_lang, data.text);
+                    if (foreignLang && data.tgt_lang === foreignLang) {
+                        pendingTranslations.delete(data.segment_id);
+                        updateTranslatingIndicator();
+                    }
+                } else if (data.type === 'translation_error') {
+                    console.error('Translation failed for segment', data.segment_id, data.error);
+                    markTranslationFailed(data.segment_id, data.tgt_lang);
+                    if (foreignLang && data.tgt_lang === foreignLang) {
+                        pendingTranslations.delete(data.segment_id);
+                        updateTranslatingIndicator();
+                    }
+                } else if (data.type === 'session_ended') {
+                    onSessionEnded();
+                    showSessionEnded();
+                } else if (data.type === 'ptt_mode') {
+                    updatePTTMode(!!data.enabled);
+                } else if (data.type === 'speaking_state' && data.party === 'host') {
+                    hostSpeakingIndicator.style.display = data.speaking ? '' : 'none';
+                } else if (data.type === 'ping') {
+                    // Respond to ping with pong
+                    ws.send(JSON.stringify({ type: 'pong' }));
+                }
+            } catch (e) {
+                console.error('Parse error:', e);
+            }
+        };
+
+        ws.onerror = (error) => {
+            console.error('WebSocket error:', error);
+            setStatus(t('connError'), 'error');
+        };
+
+        ws.onclose = (event) => {
+            stopMicrophone();
+            updatePTTMode(false);
+            hostSpeakingIndicator.style.display = 'none';
+            pendingTranslations.clear();
+            updateTranslatingIndicator();
+            if (!sessionEnded) {
+                if (event.code === 4004) {
+                    setStatus(t('invalidLink'), 'error');
+                } else {
+                    setStatus(t('disconnected'), 'error');
+                    // Try to reconnect after 3 seconds
+                    setTimeout(connect, 3000);
+                }
+            }
+        };
+    }
+
+    // Apply initial translations and start connection
+    applyViewerTranslations();
+    connect();
+})();

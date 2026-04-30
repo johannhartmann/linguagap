@@ -1,0 +1,11 @@
+node_modules
+.venv
+dist
+build
+*.min.js
+*.min.css
+src/
+tests/
+docs/
+chart/
+static/js/vendor/

@@ -1,271 +1,297 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LinguaGap - Admin</title>
-    <link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <style>
-        :root { --teal: #0099a8; --teal-dark: #007a87; --dark: #1f1f1f; --text: rgba(18,18,18,0.75); --danger: #d9534f; }
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: 'Assistant', sans-serif; background: #f5f5f5; color: var(--text); min-height: 100vh; }
-        .header {
-            background: #fff; border-bottom: 1px solid #e0e0e0; padding: 16px 32px;
-            display: flex; align-items: center; justify-content: space-between;
-        }
-        .header h1 { font-size: 1.3rem; font-weight: 600; color: var(--dark); }
-        .header button {
-            padding: 8px 16px; font-size: 0.85rem; font-family: 'Assistant', sans-serif;
-            background: transparent; color: var(--text); border: 1px solid #ccc;
-            border-radius: 6px; cursor: pointer; font-weight: 500;
-        }
-        .header button:hover { background: #f0f0f0; }
-        .container { max-width: 1000px; margin: 32px auto; padding: 0 24px; }
-        .add-form {
-            background: #fff; border-radius: 10px; box-shadow: 0 2px 12px rgba(0,0,0,0.06);
-            padding: 24px; margin-bottom: 24px;
-        }
-        .add-form h2 { font-size: 1.1rem; font-weight: 600; color: var(--dark); margin-bottom: 16px; }
-        .form-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
-        .form-field { flex: 1; min-width: 160px; }
-        .form-field label { display: block; font-size: 0.8rem; font-weight: 600; color: var(--dark); margin-bottom: 4px; }
-        .form-field input { width: 100%; padding: 10px 12px; font-size: 0.9rem; font-family: 'Assistant', sans-serif;
-            border: 1px solid #ccc; border-radius: 6px; color: var(--dark); }
-        .form-field input:focus { outline: none; border-color: var(--teal); box-shadow: 0 0 0 2px rgba(0,153,168,0.2); }
-        .logo-upload { display: flex; align-items: center; gap: 8px; }
-        .logo-upload input[type="file"] { font-size: 0.8rem; max-width: 180px; }
-        .logo-preview { width: 36px; height: 36px; object-fit: contain; border-radius: 4px; border: 1px solid #eee; }
-        .btn {
-            padding: 10px 20px; font-size: 0.9rem; font-family: 'Assistant', sans-serif; font-weight: 600;
-            border: none; border-radius: 6px; cursor: pointer; transition: background 0.2s; white-space: nowrap;
-        }
-        .btn-primary { background: var(--teal); color: #fff; }
-        .btn-primary:hover { background: var(--teal-dark); }
-        .btn-danger { background: var(--danger); color: #fff; }
-        .btn-danger:hover { background: #c9302c; }
-        .btn-secondary { background: #e0e0e0; color: var(--dark); }
-        .btn-secondary:hover { background: #d0d0d0; }
-        .btn-sm { padding: 6px 12px; font-size: 0.8rem; }
-        .table-card {
-            background: #fff; border-radius: 10px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); overflow: hidden;
-        }
-        .table-card h2 { font-size: 1.1rem; font-weight: 600; color: var(--dark); padding: 20px 24px 0; }
-        table { width: 100%; border-collapse: collapse; }
-        th { text-align: left; padding: 12px 16px; font-size: 0.8rem; font-weight: 600; color: var(--text);
-            border-bottom: 2px solid #eee; text-transform: uppercase; letter-spacing: 0.5px; }
-        td { padding: 12px 16px; border-bottom: 1px solid #f0f0f0; font-size: 0.9rem; vertical-align: middle; }
-        tr:last-child td { border-bottom: none; }
-        tr:hover { background: #fafafa; }
-        .account-logo { width: 32px; height: 32px; object-fit: contain; border-radius: 4px; border: 1px solid #eee; }
-        .actions { display: flex; gap: 6px; }
-        .edit-input {
-            padding: 6px 8px; font-size: 0.85rem; font-family: 'Assistant', sans-serif;
-            border: 1px solid var(--teal); border-radius: 4px; width: 100%;
-        }
-        .toast {
-            position: fixed; bottom: 24px; right: 24px; padding: 12px 20px;
-            background: var(--dark); color: #fff; border-radius: 8px; font-size: 0.9rem;
-            opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 100;
-        }
-        .toast.show { opacity: 1; }
-    </style>
-</head>
-<body>
-    <div class="header">
-        <h1>LinguaGap Admin</h1>
-        <button id="logoutBtn">Logout</button>
-    </div>
-    <div class="container">
-        <div class="add-form">
-            <h2>Add Account</h2>
-            <form id="addForm">
-                <div class="form-row">
-                    <div class="form-field">
-                        <label>Email</label>
-                        <input type="email" id="newEmail" required>
-                    </div>
-                    <div class="form-field">
-                        <label>Password</label>
-                        <input type="text" id="newPassword" required>
-                    </div>
-                    <div class="form-field">
-                        <label>Display Name</label>
-                        <input type="text" id="newDisplayName" required>
-                    </div>
-                    <div class="form-field">
-                        <label>Logo</label>
-                        <div class="logo-upload">
-                            <input type="file" id="newLogo" accept="image/png,image/jpeg,image/svg+xml,image/webp">
-                            <img id="newLogoPreview" class="logo-preview" src="/static/logos/synia.png" alt="">
-                        </div>
-                    </div>
-                    <button type="submit" class="btn btn-primary">Add</button>
-                </div>
-            </form>
-        </div>
-
-        <div class="table-card">
-            <h2>Demo Accounts</h2>
-            <table>
-                <thead>
-                    <tr><th>Logo</th><th>Email</th><th>Display Name</th><th>Password</th><th>Actions</th></tr>
-                </thead>
-                <tbody id="accountsBody"></tbody>
-            </table>
-        </div>
-    </div>
-    <div class="toast" id="toast"></div>
-
-    <script>
-    let accounts = [];
-    let editingEmail = null;
-
-    function showToast(msg) {
-        const t = document.getElementById('toast');
-        t.textContent = msg;
-        t.classList.add('show');
-        setTimeout(() => t.classList.remove('show'), 2500);
-    }
-
-    async function api(method, url, body) {
-        const opts = { method, headers: {} };
-        if (body instanceof FormData) {
-            opts.body = body;
-        } else if (body) {
-            opts.headers['Content-Type'] = 'application/json';
-            opts.body = JSON.stringify(body);
-        }
-        const resp = await fetch(url, opts);
-        if (resp.status === 403) { window.location.href = '/admin/login'; return null; }
-        return resp;
-    }
-
-    async function loadAccounts() {
-        const resp = await api('GET', '/api/admin/accounts');
-        if (!resp) return;
-        accounts = await resp.json();
-        renderTable();
-    }
-
-    function el(tag, attrs, children) {
-        const e = document.createElement(tag);
-        if (attrs) Object.entries(attrs).forEach(([k, v]) => {
-            if (k === 'className') e.className = v;
-            else if (k.startsWith('on')) e.addEventListener(k.slice(2).toLowerCase(), v);
-            else e.setAttribute(k, v);
-        });
-        if (children) {
-            if (typeof children === 'string') e.textContent = children;
-            else if (Array.isArray(children)) children.forEach(c => { if (c) e.appendChild(c); });
-            else e.appendChild(children);
-        }
-        return e;
-    }
-
-    function renderTable() {
-        const tbody = document.getElementById('accountsBody');
-        tbody.replaceChildren();
-        for (const a of accounts) {
-            const tr = el('tr');
-            const logoImg = el('img', { className: 'account-logo', src: a.logo_url, alt: '' });
-            tr.appendChild(el('td', null, [logoImg]));
-
-            if (editingEmail === a.email) {
-                const emailInput = el('input', { className: 'edit-input', value: a.email });
-                const nameInput = el('input', { className: 'edit-input', value: a.display_name });
-                const pwInput = el('input', { className: 'edit-input', value: a.password });
-                tr.appendChild(el('td', null, [emailInput]));
-                tr.appendChild(el('td', null, [nameInput]));
-                tr.appendChild(el('td', null, [pwInput]));
-                const saveBtn = el('button', { className: 'btn btn-primary btn-sm', onClick: () => {
-                    saveEdit(a.email, { email: emailInput.value, display_name: nameInput.value, password: pwInput.value, logo_url: a.logo_url });
-                }}, 'Save');
-                const cancelBtn = el('button', { className: 'btn btn-secondary btn-sm', onClick: cancelEdit }, 'Cancel');
-                tr.appendChild(el('td', { className: 'actions' }, [saveBtn, cancelBtn]));
-            } else {
-                tr.appendChild(el('td', null, a.email));
-                tr.appendChild(el('td', null, a.display_name));
-                tr.appendChild(el('td', null, '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022'));
-                const editBtn = el('button', { className: 'btn btn-secondary btn-sm', onClick: () => startEdit(a.email) }, 'Edit');
-                const delBtn = el('button', { className: 'btn btn-danger btn-sm', onClick: () => deleteAccount(a.email) }, 'Delete');
-                tr.appendChild(el('td', { className: 'actions' }, [editBtn, delBtn]));
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>LinguaGap - Admin</title>
+        <link
+            href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;500;600;700&display=swap"
+            rel="stylesheet"
+        />
+        <style>
+            :root {
+                --teal: #0099a8;
+                --teal-dark: #007a87;
+                --dark: #1f1f1f;
+                --text: rgba(18, 18, 18, 0.75);
+                --danger: #d9534f;
             }
-            tbody.appendChild(tr);
-        }
-    }
+            * {
+                box-sizing: border-box;
+                margin: 0;
+                padding: 0;
+            }
+            body {
+                font-family: "Assistant", sans-serif;
+                background: #f5f5f5;
+                color: var(--text);
+                min-height: 100vh;
+            }
+            .header {
+                background: #fff;
+                border-bottom: 1px solid #e0e0e0;
+                padding: 16px 32px;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+            }
+            .header h1 {
+                font-size: 1.3rem;
+                font-weight: 600;
+                color: var(--dark);
+            }
+            .header button {
+                padding: 8px 16px;
+                font-size: 0.85rem;
+                font-family: "Assistant", sans-serif;
+                background: transparent;
+                color: var(--text);
+                border: 1px solid #ccc;
+                border-radius: 6px;
+                cursor: pointer;
+                font-weight: 500;
+            }
+            .header button:hover {
+                background: #f0f0f0;
+            }
+            .container {
+                max-width: 1000px;
+                margin: 32px auto;
+                padding: 0 24px;
+            }
+            .add-form {
+                background: #fff;
+                border-radius: 10px;
+                box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+                padding: 24px;
+                margin-bottom: 24px;
+            }
+            .add-form h2 {
+                font-size: 1.1rem;
+                font-weight: 600;
+                color: var(--dark);
+                margin-bottom: 16px;
+            }
+            .form-row {
+                display: flex;
+                gap: 12px;
+                flex-wrap: wrap;
+                align-items: flex-end;
+            }
+            .form-field {
+                flex: 1;
+                min-width: 160px;
+            }
+            .form-field label {
+                display: block;
+                font-size: 0.8rem;
+                font-weight: 600;
+                color: var(--dark);
+                margin-bottom: 4px;
+            }
+            .form-field input {
+                width: 100%;
+                padding: 10px 12px;
+                font-size: 0.9rem;
+                font-family: "Assistant", sans-serif;
+                border: 1px solid #ccc;
+                border-radius: 6px;
+                color: var(--dark);
+            }
+            .form-field input:focus {
+                outline: none;
+                border-color: var(--teal);
+                box-shadow: 0 0 0 2px rgba(0, 153, 168, 0.2);
+            }
+            .logo-upload {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+            .logo-upload input[type="file"] {
+                font-size: 0.8rem;
+                max-width: 180px;
+            }
+            .logo-preview {
+                width: 36px;
+                height: 36px;
+                object-fit: contain;
+                border-radius: 4px;
+                border: 1px solid #eee;
+            }
+            .btn {
+                padding: 10px 20px;
+                font-size: 0.9rem;
+                font-family: "Assistant", sans-serif;
+                font-weight: 600;
+                border: none;
+                border-radius: 6px;
+                cursor: pointer;
+                transition: background 0.2s;
+                white-space: nowrap;
+            }
+            .btn-primary {
+                background: var(--teal);
+                color: #fff;
+            }
+            .btn-primary:hover {
+                background: var(--teal-dark);
+            }
+            .btn-danger {
+                background: var(--danger);
+                color: #fff;
+            }
+            .btn-danger:hover {
+                background: #c9302c;
+            }
+            .btn-secondary {
+                background: #e0e0e0;
+                color: var(--dark);
+            }
+            .btn-secondary:hover {
+                background: #d0d0d0;
+            }
+            .btn-sm {
+                padding: 6px 12px;
+                font-size: 0.8rem;
+            }
+            .table-card {
+                background: #fff;
+                border-radius: 10px;
+                box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+                overflow: hidden;
+            }
+            .table-card h2 {
+                font-size: 1.1rem;
+                font-weight: 600;
+                color: var(--dark);
+                padding: 20px 24px 0;
+            }
+            table {
+                width: 100%;
+                border-collapse: collapse;
+            }
+            th {
+                text-align: left;
+                padding: 12px 16px;
+                font-size: 0.8rem;
+                font-weight: 600;
+                color: var(--text);
+                border-bottom: 2px solid #eee;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+            }
+            td {
+                padding: 12px 16px;
+                border-bottom: 1px solid #f0f0f0;
+                font-size: 0.9rem;
+                vertical-align: middle;
+            }
+            tr:last-child td {
+                border-bottom: none;
+            }
+            tr:hover {
+                background: #fafafa;
+            }
+            .account-logo {
+                width: 32px;
+                height: 32px;
+                object-fit: contain;
+                border-radius: 4px;
+                border: 1px solid #eee;
+            }
+            .actions {
+                display: flex;
+                gap: 6px;
+            }
+            .edit-input {
+                padding: 6px 8px;
+                font-size: 0.85rem;
+                font-family: "Assistant", sans-serif;
+                border: 1px solid var(--teal);
+                border-radius: 4px;
+                width: 100%;
+            }
+            .toast {
+                position: fixed;
+                bottom: 24px;
+                right: 24px;
+                padding: 12px 20px;
+                background: var(--dark);
+                color: #fff;
+                border-radius: 8px;
+                font-size: 0.9rem;
+                opacity: 0;
+                transition: opacity 0.3s;
+                pointer-events: none;
+                z-index: 100;
+            }
+            .toast.show {
+                opacity: 1;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <h1>LinguaGap Admin</h1>
+            <button id="logoutBtn">Logout</button>
+        </div>
+        <div class="container">
+            <div class="add-form">
+                <h2>Add Account</h2>
+                <form id="addForm">
+                    <div class="form-row">
+                        <div class="form-field">
+                            <label>Email</label>
+                            <input type="email" id="newEmail" required />
+                        </div>
+                        <div class="form-field">
+                            <label>Password</label>
+                            <input type="text" id="newPassword" required />
+                        </div>
+                        <div class="form-field">
+                            <label>Display Name</label>
+                            <input type="text" id="newDisplayName" required />
+                        </div>
+                        <div class="form-field">
+                            <label>Logo</label>
+                            <div class="logo-upload">
+                                <input
+                                    type="file"
+                                    id="newLogo"
+                                    accept="image/png,image/jpeg,image/svg+xml,image/webp"
+                                />
+                                <img
+                                    id="newLogoPreview"
+                                    class="logo-preview"
+                                    src="/static/logos/synia.png"
+                                    alt=""
+                                />
+                            </div>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Add</button>
+                    </div>
+                </form>
+            </div>
 
-    function startEdit(email) { editingEmail = email; renderTable(); }
-    function cancelEdit() { editingEmail = null; renderTable(); }
+            <div class="table-card">
+                <h2>Demo Accounts</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Logo</th>
+                            <th>Email</th>
+                            <th>Display Name</th>
+                            <th>Password</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="accountsBody"></tbody>
+                </table>
+            </div>
+        </div>
+        <div class="toast" id="toast"></div>
 
-    async function saveEdit(originalEmail, data) {
-        const resp = await api('PUT', '/api/admin/accounts/' + encodeURIComponent(originalEmail), data);
-        if (resp && resp.ok) {
-            editingEmail = null;
-            showToast('Account updated');
-            await loadAccounts();
-        } else if (resp) {
-            const err = await resp.json();
-            showToast(err.detail || 'Error updating account');
-        }
-    }
-
-    async function deleteAccount(email) {
-        if (!confirm('Delete ' + email + '?')) return;
-        const resp = await api('DELETE', '/api/admin/accounts/' + encodeURIComponent(email));
-        if (resp && resp.ok) { showToast('Account deleted'); await loadAccounts(); }
-    }
-
-    async function uploadLogo(fileInput) {
-        if (!fileInput.files.length) return null;
-        const fd = new FormData();
-        fd.append('file', fileInput.files[0]);
-        const resp = await api('POST', '/api/admin/upload-logo', fd);
-        if (resp && resp.ok) { return (await resp.json()).logo_url; }
-        showToast('Logo upload failed');
-        return null;
-    }
-
-    document.getElementById('addForm').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        let logoUrl = '/static/logos/synia.png';
-        const logoInput = document.getElementById('newLogo');
-        if (logoInput.files.length) {
-            const uploaded = await uploadLogo(logoInput);
-            if (uploaded) logoUrl = uploaded;
-        }
-        const body = {
-            email: document.getElementById('newEmail').value,
-            password: document.getElementById('newPassword').value,
-            display_name: document.getElementById('newDisplayName').value,
-            logo_url: logoUrl,
-        };
-        const resp = await api('POST', '/api/admin/accounts', body);
-        if (resp && resp.ok) {
-            showToast('Account created');
-            document.getElementById('addForm').reset();
-            document.getElementById('newLogoPreview').src = '/static/logos/synia.png';
-            await loadAccounts();
-        } else if (resp) {
-            const err = await resp.json();
-            showToast(err.detail || 'Error creating account');
-        }
-    });
-
-    document.getElementById('newLogo').addEventListener('change', (e) => {
-        const file = e.target.files[0];
-        if (file) {
-            const reader = new FileReader();
-            reader.onload = (ev) => { document.getElementById('newLogoPreview').src = ev.target.result; };
-            reader.readAsDataURL(file);
-        }
-    });
-
-    document.getElementById('logoutBtn').addEventListener('click', async () => {
-        await api('POST', '/api/admin/logout');
-        window.location.href = '/admin/login';
-    });
-
-    loadAccounts();
-    </script>
-</body>
+        <script src="/static/js/admin.js" defer></script>
+    </body>
 </html>

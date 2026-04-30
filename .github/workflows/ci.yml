@@ -59,6 +59,24 @@ jobs:
       - name: Run ty type checker
         run: uv run ty check src/
 
+  frontend:
+    name: Frontend QA
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run frontend lint + format check + typecheck
+        run: npm run check
+
   security:
     name: Security Scan
     runs-on: ubuntu-latest

@@ -53,6 +53,12 @@ dmypy.json
 # Linting
 .ruff_cache/
 
+# Frontend tooling
+node_modules/
+.npm/
+.pnpm-store/
+*.tsbuildinfo
+
 # IDE
 .idea/
 .vscode/
