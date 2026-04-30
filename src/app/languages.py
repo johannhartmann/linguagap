@@ -22,7 +22,7 @@ LANG_INFO: dict[str, tuple[str, str]] = {
     "uk": ("Ukrainian", "uk"),
     "hu": ("Hungarian", "hu"),
     "ar": ("Arabic", "ar"),
-    "fa": ("Persian", "fa"),
+    "fa": ("Farsi", "fa"),
     "ku": ("Kurdish", "ku"),
     "sr": ("Serbian", "sr"),
     "zh": ("Chinese", "zh-Hans"),

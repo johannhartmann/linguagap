@@ -1,5 +1,5 @@
 name: fa_code_switching
-description: Conversation with code-switching between German and Persian
+description: Conversation with code-switching between German and Farsi
 german_lang: de
 foreign_lang: fa
 speakers:
