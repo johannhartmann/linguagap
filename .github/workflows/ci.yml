@@ -7,6 +7,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -56,8 +59,30 @@ jobs:
       - name: Install dependencies
         run: uv sync --only-group dev
 
-      - name: Run ty type checker
+      - name: Run ty type checker (console)
         run: uv run ty check src/
+
+      - name: Run ty (GitLab JSON for Sonar)
+        if: always()
+        continue-on-error: true
+        run: uv run ty check src/ --output-format=gitlab > ty-gitlab-report.json
+
+      - name: Convert ty report to Sonar external issues
+        if: always()
+        run: |
+          python3 scripts/ci/ty_gitlab_to_sonar_external_issues.py \
+            --input ty-gitlab-report.json \
+            --output ty-external-issues.json \
+            --repo-root "$GITHUB_WORKSPACE"
+
+      - name: Upload ty external issues
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ty-external-issues
+          path: ty-external-issues.json
+          retention-days: 7
+          if-no-files-found: warn
 
   frontend:
     name: Frontend QA
@@ -91,11 +116,28 @@ jobs:
       - name: Set up Python
         run: uv python install ${{ env.PYTHON_VERSION }}
 
-      - name: Install dependencies
-        run: uv sync --only-group dev
+      - name: Run bandit (console gate)
+        run: uv tool run --from "bandit[sarif]" bandit -c pyproject.toml -r src/
 
-      - name: Run bandit security scanner
-        run: uv run bandit -c pyproject.toml -r src/
+      - name: Run bandit (SARIF for Sonar)
+        if: always()
+        continue-on-error: true
+        run: |
+          uv tool run --from "bandit[sarif]" bandit -c pyproject.toml -r src/ \
+            -f sarif -o bandit-results.sarif
+          if [ ! -f bandit-results.sarif ]; then
+            echo "Bandit SARIF output missing; writing empty fallback."
+            printf '{"version":"2.1.0","runs":[]}' > bandit-results.sarif
+          fi
+
+      - name: Upload bandit SARIF
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-sarif
+          path: bandit-results.sarif
+          retention-days: 7
+          if-no-files-found: warn
 
   test:
     name: Test
@@ -115,7 +157,12 @@ jobs:
         run: uv sync --only-group dev
 
       - name: Run tests with coverage
-        run: uv run pytest tests/ -v --cov=src/app --cov-report=xml --cov-report=term-missing
+        run: |
+          uv run pytest tests/ -v \
+            --cov=src/app \
+            --cov-report=xml:coverage.xml \
+            --cov-report=term-missing \
+            --junitxml=test-results.xml
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
@@ -125,6 +172,115 @@ jobs:
           verbose: true
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Upload test artifacts for Sonar
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-test-results
+          path: |
+            coverage.xml
+            test-results.xml
+          retention-days: 7
+          if-no-files-found: warn
+
+  sonarqube:
+    name: SonarQube
+    runs-on: mayflower-k8s-runners
+    needs:
+      - typecheck
+      - security
+      - test
+    if: |
+      always() &&
+      (needs.typecheck.result == 'success' || needs.typecheck.result == 'failure' || needs.typecheck.result == 'skipped') &&
+      (needs.security.result == 'success' || needs.security.result == 'failure' || needs.security.result == 'skipped') &&
+      (needs.test.result == 'success' || needs.test.result == 'failure' || needs.test.result == 'skipped')
+    steps:
+      - name: Check SonarQube secrets availability
+        id: sonar_secrets
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        run: |
+          if [ -z "$SONAR_TOKEN" ] || [ -z "$SONAR_HOST_URL" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "SonarQube secrets are not configured; skipping SonarQube scan."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: ${{ steps.sonar_secrets.outputs.skip != 'true' }}
+        with:
+          fetch-depth: 0
+
+      - name: Download Python test artifacts
+        if: ${{ steps.sonar_secrets.outputs.skip != 'true' }}
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: python-test-results
+          path: .
+
+      - name: Download ty external issues
+        if: ${{ steps.sonar_secrets.outputs.skip != 'true' }}
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: ty-external-issues
+          path: .
+
+      - name: Download bandit SARIF
+        if: ${{ steps.sonar_secrets.outputs.skip != 'true' }}
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: bandit-sarif
+          path: .
+
+      - name: Collect available report paths
+        if: ${{ steps.sonar_secrets.outputs.skip != 'true' }}
+        id: reports
+        run: |
+          set -euo pipefail
+
+          sarif_files=()
+          [ -f bandit-results.sarif ] && sarif_files+=("bandit-results.sarif")
+          sarif_paths="$(IFS=,; echo "${sarif_files[*]}")"
+
+          external_issue_files=()
+          [ -f ty-external-issues.json ] && external_issue_files+=("ty-external-issues.json")
+          external_issue_paths="$(IFS=,; echo "${external_issue_files[*]}")"
+
+          test_execution_files=()
+          [ -f test-results.xml ] && test_execution_files+=("test-results.xml")
+          test_execution_paths="$(IFS=,; echo "${test_execution_files[*]}")"
+
+          echo "sarif_paths=$sarif_paths" >> "$GITHUB_OUTPUT"
+          echo "external_issue_paths=$external_issue_paths" >> "$GITHUB_OUTPUT"
+          echo "test_execution_paths=$test_execution_paths" >> "$GITHUB_OUTPUT"
+
+      - name: Cache SonarQube scanner
+        if: ${{ steps.sonar_secrets.outputs.skip != 'true' }}
+        uses: actions/cache@v4
+        with:
+          path: ~/.sonar/cache
+          key: sonar-${{ runner.os }}-${{ hashFiles('sonar-project.properties') }}
+          restore-keys: sonar-${{ runner.os }}-
+
+      - name: SonarQube Scan
+        if: ${{ steps.sonar_secrets.outputs.skip != 'true' }}
+        uses: SonarSource/sonarqube-scan-action@v6
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        with:
+          args: >-
+            ${{ steps.reports.outputs.sarif_paths != '' && format('-Dsonar.sarifReportPaths={0}', steps.reports.outputs.sarif_paths) || '' }}
+            ${{ steps.reports.outputs.external_issue_paths != '' && format('-Dsonar.externalIssuesReportPaths={0}', steps.reports.outputs.external_issue_paths) || '' }}
+            ${{ steps.reports.outputs.test_execution_paths != '' && format('-Dsonar.junit.reportPaths={0}', steps.reports.outputs.test_execution_paths) || '' }}
+            -Dsonar.qualitygate.wait=false
 
   docker:
     name: Docker Build & Push
