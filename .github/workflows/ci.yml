@@ -263,7 +263,7 @@ jobs:
         uses: SonarSource/sonarqube-scan-action@v6
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+          SONAR_HOST_URL: https://sonar.data.mayflower.zone
         with:
           args: >-
             ${{ steps.reports.outputs.sarif_paths != '' && format('-Dsonar.sarifReportPaths={0}', steps.reports.outputs.sarif_paths) || '' }}
