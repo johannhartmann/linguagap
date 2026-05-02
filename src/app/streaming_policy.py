@@ -176,6 +176,23 @@ class SegmentTracker:
             return True
         return (existing_lang == "de") == (src_lang == "de")
 
+    def _text_match(
+        self, src_text: str, cs: CumulativeSegment, abs_start: float
+    ) -> bool:
+        """Return True if the candidate text matches the cumulative segment by text."""
+        if not src_text or not cs.segment.src:
+            return False
+        text_a = self._normalize_text(src_text)
+        text_b = self._normalize_text(cs.segment.src)
+        if len(text_a) < 6 or len(text_b) < 6:
+            return False
+        if text_a == text_b and abs(abs_start - cs.segment.abs_start) <= 3.0:
+            return True
+        return (
+            self._is_substring_match(text_a, text_b, min_ratio=0.8)
+            and abs(abs_start - cs.segment.abs_start) <= 2.0
+        )
+
     def _find_matching_cumulative(
         self,
         abs_start: float,
@@ -191,47 +208,37 @@ class SegmentTracker:
         Uses bidirectional overlap checking - a match is found if either:
             - >50% of the new range overlaps with existing segment, OR
             - >50% of existing segment overlaps with new range
-
-        This handles both cases:
-            - New hypothesis slightly shorter than existing (refinement)
-            - New hypothesis slightly longer than existing (extension)
-
-        Args:
-            abs_start: Absolute start time of new hypothesis
-            abs_end: Absolute end time of new hypothesis
-
-        Returns:
-            Matching CumulativeSegment or None if no match found
         """
         for cs in self.cumulative_segments:
             if cs.segment.final:
                 continue
             if not self._is_compatible_segment(cs.segment, speaker_id, src_lang, speaker_role):
                 continue
-
-            # 1. Text-based match (Higher priority for deduplication)
-            # If text is nearly identical and within 3s, it's definitely the same segment.
-            if src_text and cs.segment.src:
-                text_a = self._normalize_text(src_text)
-                text_b = self._normalize_text(cs.segment.src)
-                if len(text_a) >= 6 and len(text_b) >= 6:
-                    if text_a == text_b:
-                        # Exact text match - very likely the same segment even with drift
-                        if abs(abs_start - cs.segment.abs_start) <= 3.0:
-                            return cs
-                    elif (
-                        self._is_substring_match(text_a, text_b, min_ratio=0.8)
-                        and abs(abs_start - cs.segment.abs_start) <= 2.0
-                    ):
-                        # Partial text match (fuzzy)
-                        return cs
-
-            # 2. Time-based overlap (Secondary fallback)
+            if self._text_match(src_text, cs, abs_start):
+                return cs
             if self._overlaps_majority(
                 abs_start, abs_end, cs.segment.abs_start, cs.segment.abs_end
             ):
                 return cs
         return None
+
+    def _text_duplicate(self, normalized_text: str, abs_start: float, seg: Segment) -> bool:
+        """Detect drifted re-detection by text equality / substring match."""
+        if not normalized_text or not seg.src:
+            return False
+        seg_text_norm = self._normalize_text(seg.src)
+
+        if normalized_text == seg_text_norm:
+            max_drift = 2.0 if len(normalized_text) < 6 else 5.0
+            if abs(abs_start - seg.abs_start) < max_drift:
+                return True
+
+        return (
+            len(normalized_text) > 4
+            and len(seg_text_norm) > 4
+            and self._is_substring_match(normalized_text, seg_text_norm, min_ratio=0.7)
+            and abs(abs_start - seg.abs_start) < 6.0
+        )
 
     def _is_duplicate_segment(
         self,
@@ -245,43 +252,15 @@ class SegmentTracker:
         Uses two strategies:
             1. Time-based: bidirectional >50% overlap
             2. Text-based: identical or near-identical text content
-
-        The text check is critical because the sliding ASR window causes the
-        same speech to be re-detected at shifted absolute positions. E.g.
-        "Hallo Johann" might appear at [10.2-14.5] then [8.8-10.6] then
-        [7.6-9.4] as the window slides — these don't overlap in time but
-        are clearly the same speech.
         """
         normalized_text = self._normalize_text(text) if text else ""
+        candidates = segments_to_check if segments_to_check is not None else self.finalized_segments
 
-        if segments_to_check is None:
-            segments_to_check = self.finalized_segments
-
-        for seg in segments_to_check:
-            # Check 1: Time-based overlap (bidirectional)
+        for seg in candidates:
             if self._overlaps_majority(abs_start, abs_end, seg.abs_start, seg.abs_end):
                 return True
-
-            # Check 2: Text-based deduplication for sliding window drift
-            if normalized_text and seg.src:
-                seg_text_norm = self._normalize_text(seg.src)
-
-                if normalized_text == seg_text_norm:
-                    # Very short tokens (Ja, Okay) need a tighter window to avoid
-                    # collapsing repeated affirmations; longer phrases tolerate
-                    # the full sliding-window drift.
-                    max_drift = 2.0 if len(normalized_text) < 6 else 5.0
-                    if abs(abs_start - seg.abs_start) < max_drift:
-                        return True
-
-                # Substring check for partial redetections
-                if (
-                    len(normalized_text) > 4
-                    and len(seg_text_norm) > 4
-                    and self._is_substring_match(normalized_text, seg_text_norm, min_ratio=0.7)
-                    and abs(abs_start - seg.abs_start) < 6.0
-                ):
-                    return True
+            if self._text_duplicate(normalized_text, abs_start, seg):
+                return True
         return False
 
     def _find_mergeable_segment(
@@ -329,149 +308,164 @@ class SegmentTracker:
 
         return None
 
-    def update_from_hypothesis(
+    def _merge_into_existing(
         self,
-        hyp_segments: list[dict],
-        window_start: float,
+        match: CumulativeSegment,
+        abs_end: float,
+        src_text: str,
         now_sec: float,
-        src_lang: str = "unknown",
-    ) -> tuple[list[Segment], list[Segment]]:
-        """
-        Process hypothesis segments and return (all_segments, newly_finalized).
+    ) -> None:
+        old_text = match.segment.src
+        match.segment.src = old_text + " " + src_text
+        match.segment.abs_end = abs_end
+        match.last_updated = now_sec
+        match.stable_since = None
+        logger.debug(
+            "  MERGED: [%.1f-%.1f] '%s...' + '%s...'",
+            match.segment.abs_start,
+            abs_end,
+            old_text[:20],
+            src_text[:20],
+        )
 
-        This maintains a cumulative transcript - segments are never lost.
-        """
-        newly_finalized = []
+    def _update_existing(
+        self,
+        match: CumulativeSegment,
+        abs_start: float,
+        abs_end: float,
+        src_text: str,
+        seg_lang: str,
+        speaker_id: str | None,
+        speaker_role: str | None,
+        now_sec: float,
+    ) -> None:
+        old_len = len(match.segment.src)
+        new_len = len(src_text)
+        match.segment.abs_start = min(match.segment.abs_start, abs_start)
+        match.segment.abs_end = max(match.segment.abs_end, abs_end)
+        match.last_updated = now_sec
+        if new_len < old_len * 0.7:
+            # New text is significantly shorter — keep existing text, just stretch the times.
+            return
+        text_changed = match.segment.src != src_text
+        match.segment.src = src_text
+        match.segment.src_lang = seg_lang
+        if speaker_id:
+            match.segment.speaker_id = speaker_id
+        if speaker_role:
+            match.segment.speaker_role = speaker_role
+        if text_changed:
+            match.stable_since = None
+        elif match.stable_since is None:
+            match.stable_since = now_sec
 
-        # Process each hypothesis segment
-        for seg in hyp_segments:
-            abs_start = window_start + seg["start"]
-            abs_end = window_start + seg["end"]
-            src_text = seg["text"].strip()
+    def _create_new(
+        self,
+        abs_start: float,
+        abs_end: float,
+        src_text: str,
+        seg_lang: str,
+        speaker_id: str | None,
+        speaker_role: str | None,
+        now_sec: float,
+    ) -> bool:
+        """Append a new live segment if it isn't a duplicate of an existing one."""
+        live_segments = [cs.segment for cs in self.cumulative_segments]
+        if self._is_duplicate_segment(
+            abs_start, abs_end, src_text, segments_to_check=live_segments
+        ):
+            return False
 
-            if not src_text or len(src_text) < 2:
-                continue
-
-            # Strip prefixes that belong to already-finalized segments
-            # (Whisper sliding window re-transcribes old audio)
-            src_text = self._strip_finalized_prefix(src_text)
-            if not src_text or len(src_text) < 2:
-                continue
-
-            # Skip if overlaps with already finalized or live segment (time or text match)
-            if self._is_duplicate_segment(abs_start, abs_end, src_text):
-                continue
-
-            seg_lang = seg.get("lang", src_lang)
-            speaker_id = seg.get("speaker_id")
-            speaker_role = seg.get("speaker_role")
-
-            # Try to find matching cumulative segment (by time overlap)
-            match = self._find_matching_cumulative(
-                abs_start=abs_start,
-                abs_end=abs_end,
-                src_text=src_text,
-                speaker_id=speaker_id,
-                src_lang=seg_lang,
-                speaker_role=speaker_role,
+        logger.debug(
+            "  NEW SEG: [%.1f-%.1f] '%s' (total: %d)",
+            abs_start,
+            abs_end,
+            src_text[:30],
+            len(self.cumulative_segments) + 1,
+        )
+        new_segment = Segment(
+            id=self.next_id,
+            abs_start=abs_start,
+            abs_end=abs_end,
+            src=src_text,
+            src_lang=seg_lang,
+            final=False,
+            speaker_id=speaker_id,
+            speaker_role=speaker_role,
+        )
+        self.cumulative_segments.append(
+            CumulativeSegment(
+                segment=new_segment,
+                last_updated=now_sec,
+                stable_since=None,
             )
-            is_merge = False
+        )
+        self.next_id += 1
+        return True
 
-            # If no overlap match, check for mergeable segment (same speaker, small gap)
-            if not match:
-                match = self._find_mergeable_segment(abs_start, speaker_id, seg_lang)
-                if match:
-                    is_merge = True
+    def _ingest_hypothesis_segment(
+        self, seg: dict, window_start: float, now_sec: float, default_lang: str
+    ) -> None:
+        """Fold one ASR hypothesis segment into the cumulative segment list."""
+        abs_start = window_start + seg["start"]
+        abs_end = window_start + seg["end"]
+        src_text = seg["text"].strip()
 
+        if not src_text or len(src_text) < 2:
+            return
+
+        src_text = self._strip_finalized_prefix(src_text)
+        if not src_text or len(src_text) < 2:
+            return
+
+        if self._is_duplicate_segment(abs_start, abs_end, src_text):
+            return
+
+        seg_lang = seg.get("lang", default_lang)
+        speaker_id = seg.get("speaker_id")
+        speaker_role = seg.get("speaker_role")
+
+        match = self._find_matching_cumulative(
+            abs_start=abs_start,
+            abs_end=abs_end,
+            src_text=src_text,
+            speaker_id=speaker_id,
+            src_lang=seg_lang,
+            speaker_role=speaker_role,
+        )
+        is_merge = False
+        if not match:
+            match = self._find_mergeable_segment(abs_start, speaker_id, seg_lang)
             if match:
-                if is_merge:
-                    # Merge: append text and extend end time (same speaker continuation)
-                    old_text = match.segment.src
-                    match.segment.src = old_text + " " + src_text
-                    match.segment.abs_end = abs_end
-                    match.last_updated = now_sec
-                    match.stable_since = None  # Reset stability since text changed
-                    logger.debug(
-                        "  MERGED: [%.1f-%.1f] '%s...' + '%s...'",
-                        match.segment.abs_start,
-                        abs_end,
-                        old_text[:20],
-                        src_text[:20],
-                    )
-                else:
-                    # Update existing cumulative segment (overlap case)
-                    # Don't replace if new text is much shorter (would lose merged content)
-                    old_len = len(match.segment.src)
-                    new_len = len(src_text)
-                    if new_len < old_len * 0.7:
-                        # New text is significantly shorter - keep existing, just update times
-                        match.segment.abs_start = min(match.segment.abs_start, abs_start)
-                        match.segment.abs_end = max(match.segment.abs_end, abs_end)
-                        match.last_updated = now_sec
-                    else:
-                        # Normal update - replace text and timestamps from latest hypothesis
-                        text_changed = match.segment.src != src_text
-                        match.segment.abs_start = min(match.segment.abs_start, abs_start)
-                        match.segment.abs_end = max(match.segment.abs_end, abs_end)
-                        match.segment.src = src_text
-                        match.segment.src_lang = seg_lang
-                        if speaker_id:
-                            match.segment.speaker_id = speaker_id
-                        if speaker_role:
-                            match.segment.speaker_role = speaker_role
+                is_merge = True
 
-                        match.last_updated = now_sec
-                        if text_changed:
-                            match.stable_since = None  # Reset stability tracking
-                        elif match.stable_since is None:
-                            # Text is same as before - mark when it became stable
-                            match.stable_since = now_sec
-            else:
-                # Before creating a new segment, check if it's a duplicate of another LIVE segment.
-                # This prevents drift from creating dual live segments.
-                live_segments = [cs.segment for cs in self.cumulative_segments]
-                if self._is_duplicate_segment(
-                    abs_start, abs_end, src_text, segments_to_check=live_segments
-                ):
-                    continue
+        if match is None:
+            self._create_new(
+                abs_start, abs_end, src_text, seg_lang, speaker_id, speaker_role, now_sec
+            )
+        elif is_merge:
+            self._merge_into_existing(match, abs_end, src_text, now_sec)
+        else:
+            self._update_existing(
+                match,
+                abs_start,
+                abs_end,
+                src_text,
+                seg_lang,
+                speaker_id,
+                speaker_role,
+                now_sec,
+            )
 
-                # Create new cumulative segment
-                logger.debug(
-                    "  NEW SEG: [%.1f-%.1f] '%s' (total: %d)",
-                    abs_start,
-                    abs_end,
-                    src_text[:30],
-                    len(self.cumulative_segments) + 1,
-                )
-                new_segment = Segment(
-                    id=self.next_id,
-                    abs_start=abs_start,
-                    abs_end=abs_end,
-                    src=src_text,
-                    src_lang=seg_lang,
-                    final=False,
-                    speaker_id=speaker_id,
-                    speaker_role=speaker_role,
-                )
-                self.cumulative_segments.append(
-                    CumulativeSegment(
-                        segment=new_segment,
-                        last_updated=now_sec,
-                        stable_since=None,
-                    )
-                )
-                self.next_id += 1
-
-        # Check for segments that should be finalized
-        # Use time-based finalization: segment is final if its end time is STABILITY_SEC ago
+    def _finalize_stale(self, now_sec: float) -> list[Segment]:
+        """Move segments whose end time is older than STABILITY_SEC into finalized."""
         stability_threshold = now_sec - STABILITY_SEC
-        still_live = []
+        newly_finalized: list[Segment] = []
+        still_live: list[CumulativeSegment] = []
 
         for cs in self.cumulative_segments:
             if cs.segment.final:
                 continue
-
-            # Finalize if segment ended STABILITY_SEC ago (time-based, not text-based)
             if cs.segment.abs_end <= stability_threshold:
                 cs.segment.final = True
                 self.finalized_segments.append(cs.segment)
@@ -486,14 +480,32 @@ class SegmentTracker:
                 still_live.append(cs)
 
         self.cumulative_segments = still_live
+        return newly_finalized
 
-        # Sort finalized segments by their creation ID to guarantee strict chronological order
+    def _assemble_chronological(self) -> list[Segment]:
         self.finalized_segments.sort(key=lambda s: s.id)
-
-        # Build result: finalized + live segments (sorted strictly by ID)
         live_segments = [cs.segment for cs in self.cumulative_segments]
         all_segments = self.finalized_segments + live_segments
         all_segments.sort(key=lambda s: s.id)
+        return all_segments
+
+    def update_from_hypothesis(
+        self,
+        hyp_segments: list[dict],
+        window_start: float,
+        now_sec: float,
+        src_lang: str = "unknown",
+    ) -> tuple[list[Segment], list[Segment]]:
+        """
+        Process hypothesis segments and return (all_segments, newly_finalized).
+
+        This maintains a cumulative transcript - segments are never lost.
+        """
+        for seg in hyp_segments:
+            self._ingest_hypothesis_segment(seg, window_start, now_sec, src_lang)
+
+        newly_finalized = self._finalize_stale(now_sec)
+        all_segments = self._assemble_chronological()
         return all_segments, newly_finalized
 
     def force_finalize_all(self) -> list[Segment]:
