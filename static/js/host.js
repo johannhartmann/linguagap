@@ -335,24 +335,22 @@
     // Initialize QR code on page load
     initQRCode();
 
-    // Apply translations to all UI elements
-    function applyTranslations() {
-        // Header
-        if (subtitleEl) subtitleEl.textContent = t('subtitle');
+    function applyControlButtonTranslations() {
+        if (startBtn) startBtn.textContent = isRecording ? t('stopRecording') : t('startRecording');
+        if (muteBtn) muteBtn.textContent = isMuted ? t('unmute') : t('mute');
+        if (clearBtn) clearBtn.textContent = t('clear');
+    }
 
-        // Controls - use optional chaining for safety
+    function applyDropdownPlaceholderTranslations() {
         const defaultMicOption = audioInputSelect?.querySelector('option[value=""]');
         if (defaultMicOption) defaultMicOption.textContent = t('defaultMic');
 
         const selectLanguageOption = languageSelect?.querySelector('option[value=""]');
         if (selectLanguageOption) selectLanguageOption.textContent = t('selectLanguage');
+    }
 
-        if (startBtn) startBtn.textContent = isRecording ? t('stopRecording') : t('startRecording');
-        if (muteBtn) muteBtn.textContent = isMuted ? t('unmute') : t('mute');
-        if (clearBtn) clearBtn.textContent = t('clear');
-
+    function applyStatusTranslation() {
         // Only swap the ready text; leave other status messages alone.
-        // (See setStatus for why we touch the span, not the parent.)
         if (
             statusTextEl &&
             (statusTextEl.textContent.includes('Start') ||
@@ -360,25 +358,37 @@
         ) {
             statusTextEl.textContent = t('statusReady');
         }
+    }
 
-        // Pane labels (only if not showing detected language)
-        if (!foreignLang && leftLangLabel) {
-            leftLangLabel.textContent = t('foreignLang');
-        }
+    function applyPaneLabelTranslations() {
+        if (!foreignLang && leftLangLabel) leftLangLabel.textContent = t('foreignLang');
         if (rightLangLabel) rightLangLabel.textContent = t('german');
+    }
 
-        // QR sidebar
+    function applyQrSidebarTranslations() {
         const qrTitle = document.querySelector('.qr-sidebar h3');
         const qrSubtitle = document.querySelector('.qr-sidebar p');
         if (qrTitle) qrTitle.textContent = t('shareTitle');
         if (qrSubtitle) qrSubtitle.textContent = t('shareSubtitle');
+    }
 
-        // PTT labels
+    function applyToggleTranslations() {
         if (pttLabelText) pttLabelText.textContent = t('pttLabel');
         if (hostTranscriptLabelText) hostTranscriptLabelText.textContent = t('hostTranscriptLabel');
         if (hostTranscriptLabel) hostTranscriptLabel.title = t('hostTranscriptTitle');
         if (viewerSpeakingText) viewerSpeakingText.textContent = t('guestSpeaking');
         if (translatingText) translatingText.textContent = t('translating');
+    }
+
+    // Apply translations to all UI elements
+    function applyTranslations() {
+        if (subtitleEl) subtitleEl.textContent = t('subtitle');
+        applyDropdownPlaceholderTranslations();
+        applyControlButtonTranslations();
+        applyStatusTranslation();
+        applyPaneLabelTranslations();
+        applyQrSidebarTranslations();
+        applyToggleTranslations();
     }
 
     // Initialize UI language
@@ -547,6 +557,46 @@
         return div.innerHTML;
     }
 
+    function computeSegmentTexts(seg, isGermanSpeaker) {
+        const segLang = seg.src_lang;
+        const translations = seg.translations || {};
+        if (isGermanSpeaker) {
+            return {
+                leftText: translations[foreignLang] || '...',
+                rightText: segLang === 'de' ? seg.src : translations.de || '...',
+            };
+        }
+        const foreignSourceReliable = !!foreignLang && segLang === foreignLang;
+        return {
+            leftText: translations[foreignLang] || (foreignSourceReliable ? seg.src : '...'),
+            rightText: translations.de || (segLang === 'de' ? seg.src : '...'),
+        };
+    }
+
+    function speakerLabelFor(speakerId) {
+        if (!speakerId || typeof speakerId !== 'string') return '';
+        const speakerNum = Number.parseInt(speakerId.replace('SPEAKER_', ''), 10);
+        if (Number.isNaN(speakerNum)) return '';
+        return t('speaker', { n: speakerNum + 1 });
+    }
+
+    function makeBubble(text, speakerLabel, classes, seg, speakerRole) {
+        const div = document.createElement('div');
+        div.className = `bubble ${classes}`;
+        if (speakerLabel) {
+            // text is HTML-escaped via escapeHtml; speakerLabel is from i18n strings
+            // (no user input), so the constructed markup is safe.
+            div.innerHTML = `<div class="speaker-label">${speakerLabel}</div><span class="bubble-content">${escapeHtml(text)}</span>`;
+        } else {
+            div.textContent = text;
+        }
+        div.dataset.id = seg.id;
+        div.dataset.srcLang = seg.src_lang;
+        div.dataset.speakerRole = speakerRole;
+        if (seg.speaker_id) div.dataset.speakerId = seg.speaker_id;
+        return div;
+    }
+
     function renderSegments(segments, serverForeignLang) {
         console.log(
             'renderSegments START:',
@@ -554,7 +604,6 @@
             'segs, foreignLang:',
             serverForeignLang
         );
-        // Update foreign language from server if detected
         if (serverForeignLang && !foreignLang) {
             foreignLang = serverForeignLang;
             leftLangLabel.textContent = LANG_NAMES[foreignLang] || foreignLang;
@@ -565,66 +614,20 @@
         console.log('Cleared transcripts, rendering...');
 
         segments.forEach((seg) => {
-            const segLang = seg.src_lang;
-            const translations = seg.translations || {};
-            const speakerRole = seg.speaker_role || (segLang === 'de' ? 'german' : 'foreign');
+            const speakerRole = seg.speaker_role || (seg.src_lang === 'de' ? 'german' : 'foreign');
             const isGermanSpeaker = speakerRole === 'german';
             const liveClass = seg.final ? '' : ' live';
-            const speakerId = seg.speaker_id; // From diarization
-
-            // German speaker is always right; foreign speaker is always left.
             const bubbleClass = isGermanSpeaker ? 'speaker-right' : 'speaker-left';
+            const classes = `${bubbleClass}${liveClass}`;
+            const speakerLabel = speakerLabelFor(seg.speaker_id);
+            const { leftText, rightText } = computeSegmentTexts(seg, isGermanSpeaker);
 
-            // Determine what goes on left (foreign) and right (German)
-            let leftText;
-            let rightText;
-            if (isGermanSpeaker) {
-                // German speaker: right pane must remain German.
-                rightText = segLang === 'de' ? seg.src : translations.de || '...';
-                leftText = translations[foreignLang] || '...';
-            } else {
-                // Foreign speaker: prefer explicit foreign translation first.
-                const foreignSourceReliable = !!foreignLang && segLang === foreignLang;
-                leftText = translations[foreignLang] || (foreignSourceReliable ? seg.src : '...');
-                rightText = translations.de || (segLang === 'de' ? seg.src : '...');
-            }
-
-            // Format speaker label (e.g., "SPEAKER_00" -> "Speaker 1" or "Sprecher 1")
-            let speakerLabel = '';
-            if (speakerId && typeof speakerId === 'string') {
-                const speakerNum = Number.parseInt(speakerId.replace('SPEAKER_', ''), 10);
-                if (!Number.isNaN(speakerNum)) {
-                    speakerLabel = t('speaker', { n: speakerNum + 1 });
-                }
-            }
-
-            // Left pane (foreign language view)
-            const leftDiv = document.createElement('div');
-            leftDiv.className = `bubble ${bubbleClass}${liveClass}`;
-            if (speakerLabel) {
-                leftDiv.innerHTML = `<div class="speaker-label">${speakerLabel}</div><span class="bubble-content">${escapeHtml(leftText)}</span>`;
-            } else {
-                leftDiv.textContent = leftText;
-            }
-            leftDiv.dataset.id = seg.id;
-            leftDiv.dataset.srcLang = segLang;
-            leftDiv.dataset.speakerRole = speakerRole;
-            if (speakerId) leftDiv.dataset.speakerId = speakerId;
-            leftTranscript.appendChild(leftDiv);
-
-            // Right pane (German view)
-            const rightDiv = document.createElement('div');
-            rightDiv.className = `bubble ${bubbleClass}${liveClass}`;
-            if (speakerLabel) {
-                rightDiv.innerHTML = `<div class="speaker-label">${speakerLabel}</div><span class="bubble-content">${escapeHtml(rightText)}</span>`;
-            } else {
-                rightDiv.textContent = rightText;
-            }
-            rightDiv.dataset.id = seg.id;
-            rightDiv.dataset.srcLang = segLang;
-            rightDiv.dataset.speakerRole = speakerRole;
-            if (speakerId) rightDiv.dataset.speakerId = speakerId;
-            rightTranscript.appendChild(rightDiv);
+            leftTranscript.appendChild(
+                makeBubble(leftText, speakerLabel, classes, seg, speakerRole)
+            );
+            rightTranscript.appendChild(
+                makeBubble(rightText, speakerLabel, classes, seg, speakerRole)
+            );
         });
 
         console.log(
@@ -838,8 +841,96 @@
                 processor.connect(audioContext.destination);
             };
 
+            const handleConfigAck = (data) => {
+                console.log('Config acknowledged:', data.status);
+                if (pttMode) {
+                    ws.send(JSON.stringify({ type: 'ptt_mode', enabled: true }));
+                    setStatus(t('pttHint'), 'connected');
+                } else {
+                    setStatus(t('statusRecording'), 'connected');
+                }
+                if (hostTranscriptConsent) {
+                    ws.send(
+                        JSON.stringify({
+                            type: 'host_transcript_requested',
+                            enabled: true,
+                        })
+                    );
+                }
+            };
+
+            const handleSegments = (data) => {
+                console.log('Calling renderSegments with', data.segments.length, 'segments');
+                updateAllSegmentsFromMessage(data.segments);
+                renderSegments(data.segments, data.foreign_lang);
+                refreshPendingFromSegments(data.segments);
+                console.log('renderSegments completed');
+                const badge = document.getElementById('dualChannelBadge');
+                if (badge) badge.classList.toggle('active', !!data.dual_channel);
+                if (data.src_lang && data.src_lang !== 'unknown') {
+                    const langName = LANG_NAMES[data.src_lang] || data.src_lang;
+                    setStatus(t('statusSpeaking', { lang: langName }), 'connected');
+                }
+            };
+
+            const handleTranslation = (data) => {
+                applyTranslationToAllSegments(data.segment_id, data.tgt_lang, data.text);
+                updateTranslation(data.segment_id, data.tgt_lang, data.text);
+                if (data.tgt_lang === 'de') {
+                    pendingTranslations.delete(data.segment_id);
+                    updateTranslatingIndicator();
+                }
+            };
+
+            const handleTranslationError = (data) => {
+                console.error('Translation failed for segment', data.segment_id, data.error);
+                markTranslationFailed(data.segment_id, data.tgt_lang);
+                if (data.tgt_lang === 'de') {
+                    pendingTranslations.delete(data.segment_id);
+                    updateTranslatingIndicator();
+                }
+            };
+
+            const handleSpeakingState = (data) => {
+                if (data.party !== 'viewer') return;
+                viewerSpeakingIndicator.style.display = data.speaking ? '' : 'none';
+                // In PTT mode the status text latches onto the last
+                // "spricht: XX" from a segments message. Reset it when the
+                // guest stops so the host doesn't see a stale attribution.
+                if (!data.speaking && isRecording) {
+                    setStatus(t(pttMode ? 'pttHint' : 'statusRecording'), 'connected');
+                }
+            };
+
+            const dispatchMessage = (data) => {
+                switch (data.type) {
+                    case 'config_ack':
+                        handleConfigAck(data);
+                        return;
+                    case 'error':
+                        console.error('Server error:', data.message);
+                        setStatus(data.message || t('statusConnError'), 'error');
+                        return;
+                    case 'segments':
+                        if (data.segments) handleSegments(data);
+                        return;
+                    case 'translation':
+                        handleTranslation(data);
+                        return;
+                    case 'translation_error':
+                        handleTranslationError(data);
+                        return;
+                    case 'transcript_consent':
+                        viewerConsentedTranscript = !!data.enabled;
+                        return;
+                    case 'speaking_state':
+                        handleSpeakingState(data);
+                        return;
+                    default:
+                }
+            };
+
             ws.onmessage = (event) => {
-                // Guard: ignore messages if session was cleared
                 if (sessionCleared) {
                     console.log('WS message ignored (session cleared)');
                     return;
@@ -847,80 +938,7 @@
                 try {
                     const data = JSON.parse(event.data);
                     console.log('WS message:', data.type, data.segments?.length || 0);
-                    if (data.type === 'config_ack') {
-                        console.log('Config acknowledged:', data.status);
-                        // Sync PTT state if it was enabled before recording started
-                        if (pttMode) {
-                            ws.send(JSON.stringify({ type: 'ptt_mode', enabled: true }));
-                            setStatus(t('pttHint'), 'connected');
-                        } else {
-                            setStatus(t('statusRecording'), 'connected');
-                        }
-                        // Sync transcript-request state if it was toggled
-                        // on before recording started, so the viewer gets
-                        // prompted as soon as the session is active.
-                        if (hostTranscriptConsent) {
-                            ws.send(
-                                JSON.stringify({
-                                    type: 'host_transcript_requested',
-                                    enabled: true,
-                                })
-                            );
-                        }
-                    } else if (data.type === 'error') {
-                        console.error('Server error:', data.message);
-                        setStatus(data.message || t('statusConnError'), 'error');
-                    } else if (data.type === 'segments' && data.segments) {
-                        console.log(
-                            'Calling renderSegments with',
-                            data.segments.length,
-                            'segments'
-                        );
-                        updateAllSegmentsFromMessage(data.segments);
-                        renderSegments(data.segments, data.foreign_lang);
-                        refreshPendingFromSegments(data.segments);
-                        console.log('renderSegments completed');
-                        // Defensive null check — the badge is currently
-                        // always present in markup.
-                        const badge = document.getElementById('dualChannelBadge');
-                        if (badge) {
-                            badge.classList.toggle('active', !!data.dual_channel);
-                        }
-                        if (data.src_lang && data.src_lang !== 'unknown') {
-                            const langName = LANG_NAMES[data.src_lang] || data.src_lang;
-                            setStatus(t('statusSpeaking', { lang: langName }), 'connected');
-                        }
-                    } else if (data.type === 'translation') {
-                        // Update translation for specific segment
-                        applyTranslationToAllSegments(data.segment_id, data.tgt_lang, data.text);
-                        updateTranslation(data.segment_id, data.tgt_lang, data.text);
-                        if (data.tgt_lang === 'de') {
-                            pendingTranslations.delete(data.segment_id);
-                            updateTranslatingIndicator();
-                        }
-                    } else if (data.type === 'translation_error') {
-                        console.error(
-                            'Translation failed for segment',
-                            data.segment_id,
-                            data.error
-                        );
-                        markTranslationFailed(data.segment_id, data.tgt_lang);
-                        if (data.tgt_lang === 'de') {
-                            pendingTranslations.delete(data.segment_id);
-                            updateTranslatingIndicator();
-                        }
-                    } else if (data.type === 'transcript_consent') {
-                        viewerConsentedTranscript = !!data.enabled;
-                    } else if (data.type === 'speaking_state' && data.party === 'viewer') {
-                        viewerSpeakingIndicator.style.display = data.speaking ? '' : 'none';
-                        // In PTT mode the status text latches onto the last
-                        // "spricht: XX" from a segments message. Reset it when
-                        // the guest stops so the host doesn't see a stale
-                        // speaker attribution.
-                        if (!data.speaking && isRecording) {
-                            setStatus(t(pttMode ? 'pttHint' : 'statusRecording'), 'connected');
-                        }
-                    }
+                    dispatchMessage(data);
                 } catch (e) {
                     console.error('WebSocket message error:', e, e.stack);
                 }

@@ -1094,16 +1094,34 @@
         return div.innerHTML;
     }
 
+    // bubbleHtml output is always one of three templates whose user-facing
+    // content is escapeHtml-sanitized; the rest is static markup or i18n
+    // strings. innerHTML use below is therefore safe.
+    function buildBubbleHtml(seg, isGermanSpeaker) {
+        const translations = seg.translations || {};
+        const errors = seg.translation_errors || {};
+        const failedForeign = foreignLang && errors[foreignLang];
+        const translation = translations[foreignLang] || '';
+
+        if (translation) {
+            return `<div class="bubble-source">${escapeHtml(translation)}</div>`;
+        }
+        if (!isGermanSpeaker && foreignLang && seg.src_lang === foreignLang) {
+            return `<div class="bubble-source">${escapeHtml(seg.src)}</div>`;
+        }
+        if (failedForeign) {
+            return `<div class="bubble-source" style="color:#d9534f;font-style:italic">✗ ${escapeHtml(t('translationFailed'))}</div>`;
+        }
+        return `<div class="bubble-source" style="opacity:0.5">...</div>`;
+    }
+
     function renderSegments() {
         transcript.innerHTML = '';
 
         segments.forEach((seg) => {
-            const segLang = seg.src_lang;
-            const translations = seg.translations || {};
-            const speakerRole = seg.speaker_role || (segLang === 'de' ? 'german' : 'foreign');
+            const speakerRole = seg.speaker_role || (seg.src_lang === 'de' ? 'german' : 'foreign');
             const isGermanSpeaker = speakerRole === 'german';
             const liveClass = seg.final ? '' : ' live';
-
             // Keep speaker direction consistent with desktop view:
             // German on right, foreign on left.
             const bubbleClass = isGermanSpeaker ? 'mine' : 'theirs';
@@ -1111,41 +1129,10 @@
             const div = document.createElement('div');
             div.className = `bubble ${bubbleClass}${liveClass}`;
             div.dataset.id = seg.id;
-
-            let html = '';
-
-            const errors = seg.translation_errors || {};
-            const failedForeign = foreignLang && errors[foreignLang];
-
-            if (isGermanSpeaker) {
-                // Show German speech translated to foreign language.
-                const translation = translations[foreignLang] || '';
-                if (translation) {
-                    html = `<div class="bubble-source">${escapeHtml(translation)}</div>`;
-                } else if (failedForeign) {
-                    html = `<div class="bubble-source" style="color:#d9534f;font-style:italic">✗ ${escapeHtml(t('translationFailed'))}</div>`;
-                } else {
-                    html = `<div class="bubble-source" style="opacity:0.5">...</div>`;
-                }
-            } else {
-                // Enforce foreign-only display for foreign speaker too.
-                const translation = translations[foreignLang] || '';
-                if (translation) {
-                    html = `<div class="bubble-source">${escapeHtml(translation)}</div>`;
-                } else if (foreignLang && segLang === foreignLang) {
-                    html = `<div class="bubble-source">${escapeHtml(seg.src)}</div>`;
-                } else if (failedForeign) {
-                    html = `<div class="bubble-source" style="color:#d9534f;font-style:italic">✗ ${escapeHtml(t('translationFailed'))}</div>`;
-                } else {
-                    html = `<div class="bubble-source" style="opacity:0.5">...</div>`;
-                }
-            }
-
-            div.innerHTML = html;
+            div.innerHTML = buildBubbleHtml(seg, isGermanSpeaker);
             transcript.appendChild(div);
         });
 
-        // Auto-scroll to bottom - defer to ensure DOM is updated
         requestAnimationFrame(() => {
             transcript.scrollTop = transcript.scrollHeight;
         });
@@ -1549,74 +1536,102 @@
             setStatus(t('connected'), 'connected');
         };
 
-        ws.onmessage = (event) => {
-            try {
-                const data = JSON.parse(event.data);
+        const startActiveSession = (data) => {
+            if (data.foreign_lang) foreignLang = data.foreign_lang;
+            applyConsentSessionLanguage(data.foreign_lang);
+            updateSegments(data.segments || []);
+            refreshPendingFromSegments(data.segments || []);
+            setStatus(t('live'), 'connected');
+            onSessionActive();
+            updatePTTMode(!!data.ptt_mode);
+        };
 
-                if (data.type === 'init') {
-                    if (data.status === 'waiting') {
-                        setStatus(t('waiting'), 'connected');
-                    } else {
-                        if (data.foreign_lang) foreignLang = data.foreign_lang;
-                        applyConsentSessionLanguage(data.foreign_lang);
-                        updateSegments(data.segments || []);
-                        refreshPendingFromSegments(data.segments || []);
-                        setStatus(t('live'), 'connected');
-                        onSessionActive();
-                        // Start in the same mode as the host. A follow-up
-                        // `ptt_mode` message is still accepted for later
-                        // toggles, but the initial frame is set here.
-                        updatePTTMode(!!data.ptt_mode);
-                    }
-                } else if (data.type === 'session_active') {
-                    if (data.foreign_lang) foreignLang = data.foreign_lang;
-                    applyConsentSessionLanguage(data.foreign_lang);
-                    updateSegments(data.segments || []);
-                    refreshPendingFromSegments(data.segments || []);
-                    setStatus(t('live'), 'connected');
-                    onSessionActive();
-                    updatePTTMode(!!data.ptt_mode);
-                } else if (data.type === 'host_transcript_requested') {
-                    const prev = hostTranscriptRequested;
-                    hostTranscriptRequested = !!data.enabled;
-                    // If the host turns the request off or re-activates it,
-                    // the prior viewer decision for this run becomes stale —
-                    // re-prompt cleanly on the next activation.
-                    if (prev !== hostTranscriptRequested) {
-                        transcriptDecision = 'pending';
-                    }
-                    refreshTranscriptConsentBanner();
-                } else if (data.type === 'segments') {
-                    if (data.foreign_lang && !foreignLang) {
-                        foreignLang = data.foreign_lang;
-                    }
-                    applyConsentSessionLanguage(data.foreign_lang);
-                    updateSegments(data.segments || []);
-                    refreshPendingFromSegments(data.segments || []);
-                } else if (data.type === 'translation') {
-                    updateTranslation(data.segment_id, data.tgt_lang, data.text);
-                    if (foreignLang && data.tgt_lang === foreignLang) {
-                        pendingTranslations.delete(data.segment_id);
-                        updateTranslatingIndicator();
-                    }
-                } else if (data.type === 'translation_error') {
-                    console.error('Translation failed for segment', data.segment_id, data.error);
-                    markTranslationFailed(data.segment_id, data.tgt_lang);
-                    if (foreignLang && data.tgt_lang === foreignLang) {
-                        pendingTranslations.delete(data.segment_id);
-                        updateTranslatingIndicator();
-                    }
-                } else if (data.type === 'session_ended') {
+        const handleInit = (data) => {
+            if (data.status === 'waiting') {
+                setStatus(t('waiting'), 'connected');
+            } else {
+                startActiveSession(data);
+            }
+        };
+
+        const handleHostTranscriptRequested = (data) => {
+            const prev = hostTranscriptRequested;
+            hostTranscriptRequested = !!data.enabled;
+            // If the host toggles the request off or re-activates it, the
+            // prior viewer decision becomes stale — re-prompt next activation.
+            if (prev !== hostTranscriptRequested) {
+                transcriptDecision = 'pending';
+            }
+            refreshTranscriptConsentBanner();
+        };
+
+        const handleViewerSegments = (data) => {
+            if (data.foreign_lang && !foreignLang) foreignLang = data.foreign_lang;
+            applyConsentSessionLanguage(data.foreign_lang);
+            updateSegments(data.segments || []);
+            refreshPendingFromSegments(data.segments || []);
+        };
+
+        const clearPendingForLang = (segmentId, tgtLang) => {
+            if (foreignLang && tgtLang === foreignLang) {
+                pendingTranslations.delete(segmentId);
+                updateTranslatingIndicator();
+            }
+        };
+
+        const handleViewerTranslation = (data) => {
+            updateTranslation(data.segment_id, data.tgt_lang, data.text);
+            clearPendingForLang(data.segment_id, data.tgt_lang);
+        };
+
+        const handleViewerTranslationError = (data) => {
+            console.error('Translation failed for segment', data.segment_id, data.error);
+            markTranslationFailed(data.segment_id, data.tgt_lang);
+            clearPendingForLang(data.segment_id, data.tgt_lang);
+        };
+
+        const dispatchViewerMessage = (data) => {
+            switch (data.type) {
+                case 'init':
+                    handleInit(data);
+                    return;
+                case 'session_active':
+                    startActiveSession(data);
+                    return;
+                case 'host_transcript_requested':
+                    handleHostTranscriptRequested(data);
+                    return;
+                case 'segments':
+                    handleViewerSegments(data);
+                    return;
+                case 'translation':
+                    handleViewerTranslation(data);
+                    return;
+                case 'translation_error':
+                    handleViewerTranslationError(data);
+                    return;
+                case 'session_ended':
                     onSessionEnded();
                     showSessionEnded();
-                } else if (data.type === 'ptt_mode') {
+                    return;
+                case 'ptt_mode':
                     updatePTTMode(!!data.enabled);
-                } else if (data.type === 'speaking_state' && data.party === 'host') {
-                    hostSpeakingIndicator.style.display = data.speaking ? '' : 'none';
-                } else if (data.type === 'ping') {
-                    // Respond to ping with pong
+                    return;
+                case 'speaking_state':
+                    if (data.party === 'host') {
+                        hostSpeakingIndicator.style.display = data.speaking ? '' : 'none';
+                    }
+                    return;
+                case 'ping':
                     ws.send(JSON.stringify({ type: 'pong' }));
-                }
+                    return;
+                default:
+            }
+        };
+
+        ws.onmessage = (event) => {
+            try {
+                dispatchViewerMessage(JSON.parse(event.data));
             } catch (e) {
                 console.error('Parse error:', e);
             }
