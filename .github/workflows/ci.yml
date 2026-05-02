@@ -231,6 +231,27 @@ jobs:
           name: bandit-sarif
           path: .
 
+      - name: Normalize coverage.xml source paths for SonarQube
+        if: hashFiles('coverage.xml') != ''
+        run: |
+          python3 - <<'PYEOF'
+          import re
+          from pathlib import Path
+
+          path = Path("coverage.xml")
+          content = path.read_text()
+          # Coverage measures src/app, so normalize <source> to that path
+          # relative to the repo root so sonar can resolve filenames like
+          # "__init__.py" to "src/app/__init__.py".
+          content = re.sub(
+              r"<sources>.*?</sources>",
+              "<sources>\n\t\t<source>src/app</source>\n\t</sources>",
+              content,
+              flags=re.DOTALL,
+          )
+          path.write_text(content)
+          PYEOF
+
       - name: Collect available report paths
         id: reports
         run: |
