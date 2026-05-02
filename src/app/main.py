@@ -23,7 +23,7 @@ from fastapi import FastAPI, WebSocket
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.auth import LOGOS_DIR
+from app import auth
 from app.backends import get_asr_backend, get_summarization_backend, get_translation_backend
 from app.deps import STATIC_DIR
 from app.routes import admin as admin_routes
@@ -64,7 +64,7 @@ def warmup_models() -> None:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    LOGOS_DIR.mkdir(parents=True, exist_ok=True)
+    auth.LOGOS_DIR.mkdir(parents=True, exist_ok=True)
     warmup_models()
     yield
 

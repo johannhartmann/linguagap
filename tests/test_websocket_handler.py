@@ -44,7 +44,6 @@ def auth_client(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> TestClient:
 
     from app import main as main_mod
 
-    monkeypatch.setattr(main_mod, "LOGOS_DIR", tmp_path / "logos")
     (tmp_path / "logos").mkdir(exist_ok=True)
 
     asr_backend = MagicMock()

@@ -248,7 +248,6 @@ class TestWebSocketHandler:
             patch("app.auth.DATA_DIR", tmp_path),
             patch("app.auth.ACCOUNTS_FILE", tmp_path / "accounts.json"),
             patch("app.auth.LOGOS_DIR", tmp_path / "logos"),
-            patch("app.main.LOGOS_DIR", tmp_path / "logos"),
             patch("app.auth.ADMIN_EMAIL", "admin@test.local"),
             patch("app.auth.ADMIN_PASSWORD", "testpass"),
         ):
